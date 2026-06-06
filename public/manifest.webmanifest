@@ -1,0 +1,18 @@
+{
+  "name": "跨境Image工作台",
+  "short_name": "跨境Image",
+  "description": "跨境电商产品图片生成工作台",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#030712",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "./pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
