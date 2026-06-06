@@ -886,6 +886,8 @@ export default function DetailModal() {
                   >
                     <option value="amazon-listing">Listing 图</option>
                     <option value="amazon-aplus">A+ 图</option>
+                    <option value="tiktok-main">TikTok 商品主图</option>
+                    <option value="tiktok-detail">TikTok 商品详情图</option>
                     <option value="gallery">普通生图</option>
                     <option value="agent">Agent</option>
                     <option value="unknown">未知来源</option>

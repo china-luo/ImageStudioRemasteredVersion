@@ -6,7 +6,7 @@ set "PID_FILE=%PROJECT_DIR%\.amazon-image-studio-dev.pid"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$project = (Resolve-Path -LiteralPath '%PROJECT_DIR%').Path;" ^
-  "$appName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('5Lqa6ams6YCK5Zu+54mH5bel5L2c5Y+w'));" ^
+  "$appName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('6Leo5aKDSW1hZ2Xlt6XkvZzlj7A='));" ^
   "$pidFile = '%PID_FILE%';" ^
   "$stopped = $false;" ^
   "if (Test-Path -LiteralPath $pidFile) {" ^

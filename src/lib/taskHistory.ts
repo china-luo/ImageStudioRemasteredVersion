@@ -126,6 +126,10 @@ export function getWorkflowLabel(workflow: TaskWorkflow) {
       return 'Listing 图'
     case 'amazon-aplus':
       return 'A+ 图'
+    case 'tiktok-main':
+      return 'TikTok 商品主图'
+    case 'tiktok-detail':
+      return 'TikTok 商品详情图'
     case 'agent':
       return 'Agent'
     case 'gallery':

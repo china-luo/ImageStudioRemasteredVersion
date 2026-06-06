@@ -12,6 +12,7 @@ import {
   createDefaultFalProfile,
   findEquivalentApiProfile,
   getAmazonPlannerProfile,
+  getImageGenerationProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
   isOpenRouterImageGenerationProfile,
@@ -742,6 +743,30 @@ describe('amazon planner profile', () => {
       apiKey: 'planner-key',
       model: 'deepseek-v4-flash',
     })
+  })
+
+  it('selects a complete image profile when the active profile is used for planning', () => {
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      name: 'Image Profile',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: DEFAULT_IMAGES_MODEL,
+    })
+    const plannerProfile = createDefaultOpenAIProfile({
+      id: 'planner-profile',
+      name: 'Planner Profile',
+      apiKey: 'planner-key',
+      apiMode: 'chat',
+      model: 'deepseek-v4-flash',
+    })
+    const settings = normalizeSettings({
+      profiles: [plannerProfile, imageProfile],
+      activeProfileId: plannerProfile.id,
+      amazonPlannerProfileId: plannerProfile.id,
+    })
+
+    expect(getImageGenerationProfile(settings)?.id).toBe(imageProfile.id)
   })
 })
 

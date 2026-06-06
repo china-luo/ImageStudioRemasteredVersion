@@ -20,7 +20,7 @@ import type {
   ResponsesOutputItem,
 } from './types'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
-import { canApiProfileGenerateImages, DEFAULT_SETTINGS, getActiveApiProfile, getCustomProviderDefinition, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
+import { canApiProfileGenerateImages, createSettingsForApiProfile, DEFAULT_SETTINGS, getActiveApiProfile, getCustomProviderDefinition, getImageGenerationProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
 import {
@@ -108,6 +108,12 @@ function isAmazonTaskWorkflow(
   return workflow === 'amazon-listing' || workflow === 'amazon-aplus'
 }
 
+function isTiktokTaskWorkflow(
+  workflow: NonNullable<TaskRecord['category']>['workflow'],
+): workflow is 'tiktok-main' | 'tiktok-detail' {
+  return workflow === 'tiktok-main' || workflow === 'tiktok-detail'
+}
+
 function removeMainStyleReference(
   category: NonNullable<TaskRecord['category']>,
 ): NonNullable<TaskRecord['category']> {
@@ -119,15 +125,28 @@ function removeMainStyleReference(
 function createNextSubmitTaskCategory(task: TaskRecord): NonNullable<TaskRecord['category']> {
   const historyCategory = getTaskHistoryCategory(task)
   const workflow = task.category?.workflow ?? historyCategory.workflow
-  if (!isAmazonTaskWorkflow(workflow)) return { workflow: 'gallery' }
 
   const hasExplicitProductTitle = Boolean(
     task.category && Object.prototype.hasOwnProperty.call(task.category, 'productTitle'),
   )
   const productTitle = hasExplicitProductTitle ? task.category?.productTitle?.trim() ?? '' : historyCategory.productTitle
+  const styleReferenceImageId = task.category?.styleReferenceImageId?.trim()
+
+  if (isTiktokTaskWorkflow(workflow)) {
+    const category: NonNullable<TaskRecord['category']> = {
+      workflow,
+      platform: 'tiktok',
+      tiktokDesignType: workflow === 'tiktok-detail' ? 'detail' : 'main',
+    }
+    if (hasExplicitProductTitle || productTitle) category.productTitle = productTitle
+    if (styleReferenceImageId) category.styleReferenceImageId = styleReferenceImageId
+    return category
+  }
+
+  if (!isAmazonTaskWorkflow(workflow)) return { workflow: 'gallery' }
+
   const amazonSlot = task.category?.amazonSlot?.trim() || historyCategory.amazonSlot
   const aPlusType = task.category?.aPlusType ?? historyCategory.aPlusType
-  const styleReferenceImageId = task.category?.styleReferenceImageId?.trim()
   const category: NonNullable<TaskRecord['category']> = { workflow }
 
   if (hasExplicitProductTitle || productTitle) category.productTitle = productTitle
@@ -1532,22 +1551,6 @@ export function getTaskApiProfile(settings: AppSettings, task: TaskRecord): ApiP
   return null
 }
 
-function createSettingsForApiProfile(settings: AppSettings, profile: ApiProfile): AppSettings {
-  const normalized = normalizeSettings(settings)
-  return normalizeSettings({
-    ...normalized,
-    baseUrl: profile.baseUrl,
-    apiKey: profile.apiKey,
-    model: profile.model,
-    timeout: profile.timeout,
-    apiMode: profile.apiMode,
-    codexCli: profile.codexCli,
-    apiProxy: profile.apiProxy,
-    profiles: normalized.profiles.map((item) => item.id === profile.id ? profile : item),
-    activeProfileId: profile.id,
-  })
-}
-
 function getReusedTaskApiProfile(settings: AppSettings, profileId: string | null): ApiProfile | null {
   if (!profileId) return null
   return normalizeSettings(settings).profiles.find((profile) => profile.id === profileId) ?? null
@@ -1930,7 +1933,8 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
     useStore.getState()
 
   const normalizedSettings = normalizeSettings(settings)
-  let activeProfile = getActiveApiProfile(settings)
+  const currentProfile = getActiveApiProfile(settings)
+  let activeProfile = getImageGenerationProfile(settings) ?? currentProfile
   let requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
   if (normalizedSettings.reuseTaskApiProfileTemporarily && (reusedTaskApiProfileId || reusedTaskApiProfileMissing)) {
     const reusedProfile = getReusedTaskApiProfile(normalizedSettings, reusedTaskApiProfileId)
@@ -1950,7 +1954,9 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
         return false
       }
     } else {
-      activeProfile = reusedProfile
+      activeProfile = canApiProfileGenerateImages(reusedProfile)
+        ? reusedProfile
+        : getImageGenerationProfile(settings) ?? reusedProfile
       requestSettings = createSettingsForApiProfile(normalizedSettings, reusedProfile)
     }
   }
@@ -1966,6 +1972,11 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
       },
     })
     return false
+  }
+
+  requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
+  if (activeProfile.id !== currentProfile.id) {
+    showToast(`已自动使用生图 API 配置「${activeProfile.name}」`, 'info')
   }
 
   if (validateApiProfile(activeProfile)) {
@@ -3773,7 +3784,8 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
 /** 重试失败的任务：创建新任务并执行 */
 export async function retryTask(task: TaskRecord) {
   const { settings, setConfirmDialog } = useStore.getState()
-  const activeProfile = getActiveApiProfile(settings)
+  const normalizedSettings = normalizeSettings(settings)
+  const activeProfile = getImageGenerationProfile(settings) ?? getActiveApiProfile(settings)
   if (!canApiProfileGenerateImages(activeProfile)) {
     setConfirmDialog({
       title: '当前配置不能生图',
@@ -3786,7 +3798,8 @@ export async function retryTask(task: TaskRecord) {
     })
     return
   }
-  const normalizedParams = normalizeParamsForSettings(task.params, settings, { hasInputImages: task.inputImageIds.length > 0 })
+  const requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
+  const normalizedParams = normalizeParamsForSettings(task.params, requestSettings, { hasInputImages: task.inputImageIds.length > 0 })
   const taskId = genId()
   const newTask: TaskRecord = {
     id: taskId,

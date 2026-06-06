@@ -5,7 +5,9 @@ import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
-import { HelpCircleIcon, InstallIcon, PowerIcon, SettingsIcon } from './icons'
+import { GithubIcon, HelpCircleIcon, InstallIcon, PowerIcon, SettingsIcon } from './icons'
+
+const REPOSITORY_URL = 'https://github.com/china-luo/ImageStudioRemasteredVersion'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -120,9 +122,25 @@ export default function Header() {
       <header data-no-drag-select className="safe-area-top fixed top-0 left-0 right-0 z-40 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80">
         <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-between">
           <h1 className="min-w-0 pr-3">
-            <span className="text-[17px] font-bold tracking-tight text-gray-800 transition-colors hover:text-gray-600 dark:text-gray-100 dark:hover:text-gray-300 sm:text-lg">
-              {APP_BRAND_NAME}
-            </span>
+            <a
+              href={REPOSITORY_URL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`${APP_BRAND_NAME} GitHub 仓库`}
+              className="group inline-flex min-w-0 items-center gap-2 rounded-lg py-1 pr-1 transition-colors hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:hover:text-gray-200"
+            >
+              <span className="flex min-w-0 flex-col leading-none">
+                <span className="truncate text-[18px] font-black text-gray-900 dark:text-gray-50 sm:text-xl">
+                  <span className="font-semibold">跨境</span>
+                  <span className="mx-0.5 text-blue-600 dark:text-blue-300">Image</span>
+                  <span className="font-semibold">工作台</span>
+                </span>
+                <span className="mt-0.5 w-fit text-[9px] font-semibold uppercase tracking-[0.28em] text-gray-300 transition-colors group-hover:text-gray-500 dark:text-white/20 dark:group-hover:text-white/40">
+                  JackLuo
+                </span>
+              </span>
+              <GithubIcon className="hidden h-4 w-4 shrink-0 text-gray-300 transition-colors group-hover:text-gray-700 dark:text-white/20 dark:group-hover:text-gray-200 sm:block" />
+            </a>
           </h1>
           <div className="flex shrink-0 items-center gap-1">
             {!isPwaInstalled && (

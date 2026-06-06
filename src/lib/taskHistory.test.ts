@@ -4,6 +4,7 @@ import {
   UNCATEGORIZED_PRODUCT_FILTER,
   getTaskHistoryCategory,
   getTaskProductFilterOptions,
+  getWorkflowLabel,
   matchesTaskHistoryFilters,
 } from './taskHistory'
 
@@ -112,6 +113,51 @@ describe('task history categories', () => {
       filterProductTitle: 'LED Desk Lamp',
       filterWorkflow: 'amazon-listing',
       filterAspect: 'landscape',
+    })).toBe(false)
+  })
+
+  it('filters and labels TikTok main and detail image tasks', () => {
+    const mainRecord = task({
+      prompt: 'TikTok main image prompt',
+      category: {
+        productTitle: 'Travel Mug',
+        workflow: 'tiktok-main',
+        platform: 'tiktok',
+        tiktokDesignType: 'main',
+      },
+    })
+    const detailRecord = task({
+      prompt: 'TikTok detail image prompt',
+      params: { ...DEFAULT_PARAMS, size: '1536x2048' },
+      category: {
+        productTitle: 'Travel Mug',
+        workflow: 'tiktok-detail',
+        platform: 'tiktok',
+        tiktokDesignType: 'detail',
+      },
+    })
+
+    expect(getWorkflowLabel('tiktok-main')).toBe('TikTok 商品主图')
+    expect(getWorkflowLabel('tiktok-detail')).toBe('TikTok 商品详情图')
+    expect(getTaskHistoryCategory(detailRecord)).toMatchObject({
+      workflow: 'tiktok-detail',
+      aspect: 'portrait',
+    })
+    expect(matchesTaskHistoryFilters(mainRecord, {
+      searchQuery: '',
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterProductTitle: '',
+      filterWorkflow: 'tiktok-main',
+      filterAspect: 'all',
+    })).toBe(true)
+    expect(matchesTaskHistoryFilters(detailRecord, {
+      searchQuery: '',
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterProductTitle: '',
+      filterWorkflow: 'tiktok-main',
+      filterAspect: 'all',
     })).toBe(false)
   })
 

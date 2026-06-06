@@ -750,6 +750,42 @@ export function validateApiProfile(profile: ApiProfile): string | null {
   return null
 }
 
+export function getImageGenerationProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
+  const normalized = normalizeSettings(settings)
+  const activeProfile = getActiveApiProfile(settings)
+  const isCompleteImageProfile = (profile: ApiProfile) => canApiProfileGenerateImages(profile) && !validateApiProfile(profile)
+
+  if (isCompleteImageProfile(activeProfile)) return activeProfile
+
+  const completeProfile = normalized.profiles.find(isCompleteImageProfile)
+  if (completeProfile) return completeProfile
+
+  if (canApiProfileGenerateImages(activeProfile)) return activeProfile
+  return normalized.profiles.find(canApiProfileGenerateImages) ?? null
+}
+
+export function createSettingsForApiProfile(settings: Partial<AppSettings> | unknown, profile: ApiProfile): AppSettings {
+  const normalized = normalizeSettings(settings)
+  const hasProfile = normalized.profiles.some((item) => item.id === profile.id)
+
+  return normalizeSettings({
+    ...normalized,
+    baseUrl: profile.baseUrl,
+    apiKey: profile.apiKey,
+    model: profile.model,
+    timeout: profile.timeout,
+    apiMode: profile.apiMode,
+    codexCli: profile.codexCli,
+    apiProxy: profile.apiProxy,
+    streamImages: profile.streamImages,
+    streamPartialImages: profile.streamPartialImages,
+    profiles: hasProfile
+      ? normalized.profiles.map((item) => item.id === profile.id ? profile : item)
+      : [profile, ...normalized.profiles],
+    activeProfileId: profile.id,
+  })
+}
+
 function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
   return profile.id === DEFAULT_OPENAI_PROFILE_ID &&
     profile.name === '生图' &&

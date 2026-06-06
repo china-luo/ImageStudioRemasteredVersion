@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { DEFAULT_PARAMS } from './types'
-import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
+import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
 import type { AgentConversation, AmazonPlannerSession, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
 vi.mock('./lib/db', () => {
@@ -304,6 +304,40 @@ describe('mask draft lifecycle in store actions', () => {
     }))
   })
 
+  it('auto-selects an image profile when submitting while the planner profile is active', async () => {
+    const plannerProfile = createDefaultOpenAIProfile({
+      id: 'planner-profile',
+      name: 'AI Planner',
+      apiKey: 'planner-key',
+      apiMode: 'chat',
+      model: 'deepseek-v4-flash',
+    })
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      name: 'Image Generator',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: DEFAULT_IMAGES_MODEL,
+    })
+    useStore.setState({
+      settings: normalizeSettings({
+        profiles: [plannerProfile, imageProfile],
+        activeProfileId: plannerProfile.id,
+        amazonPlannerProfileId: plannerProfile.id,
+      }),
+    })
+
+    const submitted = await submitTask()
+
+    const state = useStore.getState()
+    expect(submitted).toBe(true)
+    expect(state.tasks[0]?.apiProfileId).toBe(imageProfile.id)
+    expect(state.tasks[0]?.apiModel).toBe(DEFAULT_IMAGES_MODEL)
+    expect(state.setConfirmDialog).not.toHaveBeenCalledWith(expect.objectContaining({
+      title: '褰撳墠閰嶇疆涓嶈兘鐢熷浘',
+    }))
+  })
+
   it('allows gallery submit when the active Chat Completions profile is an OpenRouter image model', async () => {
     const openRouterProfile = createDefaultOpenAIProfile({
       id: 'openrouter-image',
@@ -588,6 +622,28 @@ describe('mask draft lifecycle in store actions', () => {
       workflow: 'amazon-aplus',
       amazonSlot: 'A+S01',
       aPlusType: 'standard',
+    })
+  })
+
+  it('preserves reused TikTok category on the next submit', async () => {
+    await reuseConfig(task({
+      prompt: 'original tiktok detail prompt',
+      category: {
+        productTitle: 'Travel Mug',
+        workflow: 'tiktok-detail',
+        platform: 'tiktok',
+        tiktokDesignType: 'detail',
+      },
+    }))
+
+    useStore.getState().setPrompt('revised tiktok detail prompt')
+    await submitTask()
+
+    expect(useStore.getState().tasks[0]?.category).toMatchObject({
+      productTitle: 'Travel Mug',
+      workflow: 'tiktok-detail',
+      platform: 'tiktok',
+      tiktokDesignType: 'detail',
     })
   })
 

@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { addImageFromFile, ensureImageCached, submitTask, useStore } from '../store'
-import { canApiProfileGenerateImages, getActiveApiProfile, getAmazonPlannerProfile, normalizeSettings, validateApiProfile } from '../lib/apiProfiles'
+import { canApiProfileGenerateImages, createSettingsForApiProfile, getAmazonPlannerProfile, getImageGenerationProfile, normalizeSettings, validateApiProfile } from '../lib/apiProfiles'
 import {
   DEFAULT_AMAZON_PROMPT_DRAFT,
   type AmazonPromptDraft,
@@ -35,7 +35,7 @@ import { callImageApi } from '../lib/api'
 import { deleteAmazonPlannerSession, getAllAmazonPlannerSessions, putAmazonPlannerSession, storeImage } from '../lib/db'
 import { normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { prepareReferenceImagePayload, type PlannerReferenceImagePayload } from '../lib/referenceImagePayload'
-import { DEFAULT_PARAMS } from '../types'
+import { DEFAULT_PARAMS, type ApiMode, type ApiProfile } from '../types'
 import type { AmazonPlannerSession } from '../types'
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, EyeIcon, HistoryIcon, PhotoIcon, PlusIcon, TrashIcon } from './icons'
 
@@ -51,6 +51,18 @@ const STYLE_DENSITY_OPTIONS: Array<{ value: AmazonStyleDensityMode; label: strin
   { value: 'rich', label: '信息丰富' },
   { value: 'minimal', label: '简约' },
 ]
+
+function getApiModeLabel(apiMode: ApiMode) {
+  if (apiMode === 'responses') return 'Responses API'
+  if (apiMode === 'chat') return 'Chat Completions'
+  return 'Images API'
+}
+
+function getImageProfileApiLabel(profile: ApiProfile) {
+  if (profile.apiMode === 'chat' && canApiProfileGenerateImages(profile)) return 'Chat Completions（OpenRouter 图片模型）'
+  return getApiModeLabel(profile.apiMode)
+}
+
 type ComplianceStatus = 'ready' | 'warning' | 'missing'
 type WorkflowStepStatus = 'done' | 'current' | 'todo'
 type PlannerGuideTarget = 'planner-api' | 'planner-input' | 'planner-action' | 'style' | 'style-choice' | 'plan-list' | 'action-bar'
@@ -380,7 +392,9 @@ export default function AmazonPlanner() {
     : activePrompt
   const plannerProfile = getAmazonPlannerProfile(settings)
   const plannerProfileValidation = plannerProfile ? validateApiProfile(plannerProfile) : '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置'
-  const plannerApiLabel = plannerProfile?.apiMode === 'chat' ? 'Chat Completions' : 'Responses API'
+  const plannerApiLabel = plannerProfile ? getApiModeLabel(plannerProfile.apiMode) : 'Responses API'
+  const imageGenerationProfile = getImageGenerationProfile(settings)
+  const imageGenerationProfileValidation = imageGenerationProfile ? validateApiProfile(imageGenerationProfile) : '未找到支持 Images API 或 OpenRouter 图片模型的生图配置'
   const listingTargetSize = resolution === '4k' ? '4096x4096' : '2048x2048'
   const targetSize = plannerPlatform === 'tiktok'
     ? tiktokDesignType === 'detail' ? (resolution === '4k' ? '2880x3840' : '1536x2048') : listingTargetSize
@@ -681,7 +695,7 @@ export default function AmazonPlanner() {
     }
   }
 
-  const generateStyleImages = async () => {
+  const runGenerateStyleImages = async () => {
     if (styleAbortControllerRef.current) {
       showToast('风格板正在生成中', 'info')
       return
@@ -692,11 +706,30 @@ export default function AmazonPlanner() {
     }
 
     const normalizedSettings = normalizeSettings(settings)
-    const imageProfile = getActiveApiProfile(normalizedSettings)
+    const imageProfile = getImageGenerationProfile(settings)
+    if (!imageProfile) {
+      setConfirmDialog({
+        title: '缺少生图配置',
+        message: '没有找到支持 Images API 或 OpenRouter 图片模型的生图配置。\n\n请在设置 -> API 中新增或完善一个生图配置，保存后这里会自动使用，不需要手动切换当前配置。',
+        confirmText: '去配置',
+        cancelText: '取消',
+        action: () => {
+          setShowSettings(true, 'api')
+        },
+      })
+      return
+    }
     const imageProfileValidation = validateApiProfile(imageProfile)
     if (imageProfileValidation) {
-      showToast(`请先完善生图 API 配置：${imageProfileValidation}`, 'error')
-      setShowSettings(true, 'api')
+      setConfirmDialog({
+        title: '生图配置不完整',
+        message: `已找到生图配置「${imageProfile.name}」，但还缺少：${imageProfileValidation}。\n\n完善并保存后，风格板会自动使用该配置生成。`,
+        confirmText: '去完善配置',
+        cancelText: '取消',
+        action: () => {
+          setShowSettings(true, 'api')
+        },
+      })
       return
     }
     if (!canApiProfileGenerateImages(imageProfile)) {
@@ -713,6 +746,7 @@ export default function AmazonPlanner() {
       return
     }
 
+    const imageSettings = createSettingsForApiProfile(normalizedSettings, imageProfile)
     const controller = new AbortController()
     styleAbortControllerRef.current = controller
     setIsGeneratingStyleImages(true)
@@ -728,7 +762,7 @@ export default function AmazonPlanner() {
       output_compression: DEFAULT_PARAMS.output_compression,
       moderation: params.moderation,
       n: 1,
-    }, normalizedSettings, { hasInputImages: inputImages.length > 0 })
+    }, imageSettings, { hasInputImages: inputImages.length > 0 })
 
     try {
       const referencePayload = await prepareReferencePayloadForRequest(inputImages.map((image) => image.dataUrl), controller.signal)
@@ -736,7 +770,7 @@ export default function AmazonPlanner() {
 
       const settled = await Promise.allSettled(styleCandidates.map(async (candidate, candidateIndex) => {
         const result = await callImageApi({
-          settings: normalizedSettings,
+          settings: imageSettings,
           prompt: buildAmazonStyleCandidatePrompt(candidate, activeSeriesStyleGuide),
           params: styleParams,
           inputImageDataUrls: referencePayload.dataUrls,
@@ -795,6 +829,65 @@ export default function AmazonPlanner() {
         setIsGeneratingStyleImages(false)
       }
     }
+  }
+
+  const confirmGenerateStyleImages = () => {
+    if (styleAbortControllerRef.current) {
+      showToast('风格板正在生成中', 'info')
+      return
+    }
+    if (!styleCandidates.length) {
+      showToast('请先完成 AI 策划，再生成风格板', 'error')
+      return
+    }
+
+    const normalizedSettings = normalizeSettings(settings)
+    const imageProfile = getImageGenerationProfile(settings)
+    if (!imageProfile) {
+      setConfirmDialog({
+        title: '缺少生图配置',
+        message: '没有找到支持 Images API 或 OpenRouter 图片模型的生图配置。\n\n请在设置 -> API 中新增或完善一个生图配置，保存后这里会自动使用，不需要手动切换当前配置。',
+        confirmText: '去配置',
+        cancelText: '取消',
+        action: () => {
+          setShowSettings(true, 'api')
+        },
+      })
+      return
+    }
+
+    const validation = validateApiProfile(imageProfile)
+    if (validation) {
+      setConfirmDialog({
+        title: '生图配置不完整',
+        message: `已找到生图配置「${imageProfile.name}」，但还缺少：${validation}。\n\n完善并保存后，风格板会自动使用该配置生成。`,
+        confirmText: '去完善配置',
+        cancelText: '取消',
+        action: () => {
+          setShowSettings(true, 'api')
+        },
+      })
+      return
+    }
+
+    setConfirmDialog({
+      title: '确认生成风格板',
+      icon: 'info',
+      message: [
+        '即将生成 3 张低清风格参考板，用于统一后续商品图视觉。',
+        `生图配置：${imageProfile.name}`,
+        `模型：${imageProfile.model}`,
+        `接口：${getImageProfileApiLabel(imageProfile)}`,
+        `参考图：${inputImages.length} 张`,
+        `尺寸：1024x1024；参数：${generationParamLabel}`,
+        '确认后会调用外部 API，可能消耗额度并等待一段时间。',
+      ].join('\n'),
+      confirmText: '开始生成',
+      cancelText: '取消',
+      action: () => {
+        void runGenerateStyleImages()
+      },
+    })
   }
 
   const stopGeneratingStyleImages = () => {
@@ -877,7 +970,7 @@ export default function AmazonPlanner() {
     showToast(`${sourceLabel}已生成 ${result.mode === 'aplus' ? result.aPlusPlans.length : result.plans.length} 张图片策划`, 'success')
   }
 
-  const createAiPlan = async () => {
+  const runCreateAiPlan = async () => {
     if (plannerAbortControllerRef.current) {
       showToast('AI 策划正在进行中', 'info')
       return
@@ -928,6 +1021,68 @@ export default function AmazonPlanner() {
         setIsPlanning(false)
       }
     }
+  }
+
+  const confirmCreateAiPlan = () => {
+    if (plannerAbortControllerRef.current) {
+      showToast('AI 策划正在进行中', 'info')
+      return
+    }
+    if (!listingText.trim()) {
+      showToast('请先粘贴标题和五点描述', 'error')
+      return
+    }
+
+    if (!plannerProfile) {
+      setConfirmDialog({
+        title: '缺少 AI 策划配置',
+        message: '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置。\n\n请在设置 -> API 中选择或新增策划配置；生图配置会保持独立，不需要手动切换。',
+        confirmText: '去配置',
+        cancelText: '取消',
+        action: () => {
+          setShowSettings(true, 'api')
+        },
+      })
+      return
+    }
+
+    if (plannerProfileValidation) {
+      setConfirmDialog({
+        title: 'AI 策划配置不完整',
+        message: `AI 策划配置「${plannerProfile.name}」还缺少：${plannerProfileValidation}。`,
+        confirmText: '去完善配置',
+        cancelText: '取消',
+        action: () => {
+          setShowSettings(true, 'api')
+        },
+      })
+      return
+    }
+
+    const platformLabel = plannerPlatform === 'tiktok'
+      ? tiktokDesignType === 'detail' ? 'TikTok 商品详情图' : 'TikTok 商品主图'
+      : plannerMode === 'aplus' ? '亚马逊 A+ 图片' : '亚马逊商品图片'
+    const productTitle = draft.productTitle.trim() || listingText.trim().split(/\r?\n/).find(Boolean)?.slice(0, 80) || '未填写'
+
+    setConfirmDialog({
+      title: '确认开始 AI 策划',
+      icon: 'info',
+      message: [
+        `策划板块：${platformLabel}`,
+        `商品：${productTitle}`,
+        `策划配置：${plannerProfile.name}`,
+        `模型：${plannerProfile.model}`,
+        `接口：${plannerApiLabel}`,
+        `参考图：${inputImages.length} 张`,
+        `输入内容：约 ${Array.from(listingText.trim()).length} 字符`,
+        '确认后会调用外部 API 生成逐张图片方案，过程可能需要等待一段时间。',
+      ].join('\n'),
+      confirmText: '开始策划',
+      cancelText: '取消',
+      action: () => {
+        void runCreateAiPlan()
+      },
+    })
   }
 
   const stopAiPlan = () => {
@@ -1417,7 +1572,7 @@ export default function AmazonPlanner() {
               <div className={`flex flex-wrap items-center gap-2 rounded-xl transition sm:justify-end ${getGuideFocusClass(guideState.target === 'planner-action')}`}>
                 <button
                   type="button"
-                  onClick={createAiPlan}
+                  onClick={confirmCreateAiPlan}
                   disabled={isPlanning || Boolean(plannerProfileValidation)}
                   className={`inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold text-white transition ${isPlanning ? 'cursor-wait bg-gray-400' : plannerProfileValidation ? 'cursor-not-allowed bg-gray-300 dark:bg-white/[0.12]' : 'bg-blue-600 hover:bg-blue-500'} ${guideState.target === 'planner-action' ? 'ring-2 ring-blue-500/25 ring-offset-2 ring-offset-white dark:ring-offset-gray-950' : ''}`}
                 >
@@ -1780,7 +1935,9 @@ export default function AmazonPlanner() {
                 <div>
                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">视觉风格选择</div>
                   <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    先生成 3 张低清风格参考板，附图和 A+ 正式生图时会作为隐藏参考附加到请求末尾。
+                    {imageGenerationProfile
+                      ? `先生成 3 张低清风格参考板；将自动使用生图配置「${imageGenerationProfile.name}」${imageGenerationProfileValidation ? `（${imageGenerationProfileValidation}）` : ''}。`
+                      : imageGenerationProfileValidation}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1798,7 +1955,7 @@ export default function AmazonPlanner() {
                   </div>
                   <button
                     type="button"
-                    onClick={generateStyleImages}
+                    onClick={confirmGenerateStyleImages}
                     disabled={isGeneratingStyleImages || styleCandidates.length === 0}
                     className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition ${isGeneratingStyleImages || styleCandidates.length === 0 ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200'} ${guideState.target === 'style' ? 'ring-2 ring-blue-500/25 ring-offset-2 ring-offset-blue-50 dark:ring-offset-gray-950' : ''}`}
                   >
