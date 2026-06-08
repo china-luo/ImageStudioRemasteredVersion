@@ -1,5 +1,5 @@
-const CACHE_NAME = 'amazon-image-studio-v0.1.0'
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
+const CACHE_NAME = 'amazon-image-studio-v1.1.1'
+const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
