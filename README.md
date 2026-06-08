@@ -2,7 +2,7 @@
 
 面向 Amazon 与 TikTok Shop 商品图二次创作的本地图片设计工作台，支持商品主图、卖点图、详情图、A+ 模块策划与图片生成。
 
-维护者：[@china-luo](https://github.com/china-luo)
+维护者：[@china-luo](https://github.com/china-luo/ImageStudioRemasteredVersion)
 
 ## 功能
 

@@ -198,7 +198,39 @@ const AMAZON_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
   ].join('\n'),
 }
 
-const TIKTOK_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
+function getTiktokMainImageGenerationRules(slot?: string | null) {
+  const normalizedSlot = slot?.trim().toUpperCase()
+  const isFirstMainImage = normalizedSlot === 'TTM01'
+  return [
+    'TikTok Shop US main image generation rules:',
+    '- Treat this as a TikTok Shop US main-image candidate, not an Amazon image and not a detail infographic.',
+    '- Use square 1:1 commercial product photography with truthful product appearance, accurate color, material, quantity, scale, packaging, and included accessories.',
+    isFirstMainImage
+      ? '- TTM01 must stay on a clean pure white background and show the complete product clearly. It may include one small real brand-name mark or real brand logo only if the brand is provided by the product facts or reference images; do not invent brand artwork.'
+      : '- TTM01 must stay on a clean pure white background and show the complete product clearly.',
+    '- TTM02-TTM06 may use clean hero lighting, realistic US lifestyle usage, visual pain-point solution scenes, material/value close-ups, or device-function multi-scenario compositions only when supported by the product facts.',
+    isFirstMainImage
+      ? '- Do not add any on-image text other than the optional small real brand-name mark on TTM01. No watermark, border, frame, badge, sticker, seller logo, TikTok logo, marketplace logo, QR code, barcode, URL, price, discount, coupon, free shipping, best-seller mark, trending mark, rating stars, review text, icon callouts, arrows, measurement labels, or promotional graphics.'
+      : '- Do not add any on-image text, watermark, border, frame, badge, sticker, seller logo, TikTok logo, marketplace logo, QR code, barcode, URL, price, discount, coupon, free shipping, best-seller mark, trending mark, rating stars, review text, icon callouts, arrows, measurement labels, or promotional graphics.',
+    '- Do not invent extra accessories, functions, colors, materials, package contents, impossible use cases, exaggerated before-after effects, brand names, brand logos, or misleading AI edits.',
+  ].join('\n')
+}
+
+const TIKTOK_MAIN_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
+  rich: [
+    'Layout density:',
+    '- Use a premium scroll-stopping TikTok Shop main-image composition with strong product dominance, crisp lighting, clean depth, and mobile thumbnail clarity.',
+    '- Keep the image visually rich through photography, scene choice, material detail, and product evidence, not through text, callouts, icons, arrows, badges, or promotional overlays, except the optional small real brand-name mark allowed on TTM01.',
+    '- Keep the composition clean, truthful, and easy to understand at a glance on a phone screen.',
+  ].join('\n'),
+  minimal: [
+    'Layout density:',
+    '- Use a refined minimal TikTok Shop main-image composition with clean spacing, strong product silhouette, premium lighting, and no clutter.',
+    '- Keep the product dominant and avoid all on-image text, callouts, icons, arrows, badges, or promotional overlays, except the optional small real brand-name mark allowed on TTM01.',
+  ].join('\n'),
+}
+
+const TIKTOK_DETAIL_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
   rich: [
     'Layout density:',
     '- Use a polished, information-rich TikTok Shop mobile product image layout when the selected image type benefits from explanation.',
@@ -244,6 +276,7 @@ function formatPromptBlock(options: {
   prompt: string
   negativePrompt?: string
   seriesStyleGuide?: string | null
+  additionalGuidance?: string | null
   styleReferenceAttached?: boolean
   styleDensityMode?: AmazonStyleDensityMode
   styleDensityGuides?: Record<AmazonStyleDensityMode, string>
@@ -254,6 +287,7 @@ function formatPromptBlock(options: {
     options.seriesStyleGuide?.trim()
       ? `Series style guide:\n${options.seriesStyleGuide.trim()}`
       : '',
+    options.additionalGuidance?.trim() || '',
     options.styleReferenceAttached ? styleDensityGuides[options.styleDensityMode ?? 'rich'] : '',
     options.negativePrompt?.trim()
       ? `Negative prompt:\n${options.negativePrompt.trim()}`
@@ -273,11 +307,17 @@ export function buildAmazonPlanPrompt(plan: Pick<AmazonImagePlan, 'prompt' | 'ne
 }
 
 export function buildTiktokPlanPrompt(plan: Pick<AmazonImagePlan, 'prompt' | 'negativePrompt'> & {
+  slot?: string | null
   seriesStyleGuide?: string | null
   styleReferenceAttached?: boolean
   styleDensityMode?: AmazonStyleDensityMode
 }): string {
-  return formatPromptBlock({ ...plan, styleDensityGuides: TIKTOK_STYLE_DENSITY_GUIDES })
+  const isMainImageSlot = plan.slot?.trim().toUpperCase().startsWith('TTM')
+  return formatPromptBlock({
+    ...plan,
+    additionalGuidance: isMainImageSlot ? getTiktokMainImageGenerationRules(plan.slot) : null,
+    styleDensityGuides: isMainImageSlot ? TIKTOK_MAIN_STYLE_DENSITY_GUIDES : TIKTOK_DETAIL_STYLE_DENSITY_GUIDES,
+  })
 }
 
 export function buildAmazonStyleCandidatePrompt(candidate: AmazonStyleCandidate, seriesStyleGuide?: string | null) {

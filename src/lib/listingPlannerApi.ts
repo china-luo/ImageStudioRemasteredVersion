@@ -150,6 +150,16 @@ const LISTING_PLANNER_SCHEMA = {
 const TIKTOK_MAIN_SLOTS = ['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06'] as const
 const TIKTOK_DETAIL_SLOTS = ['TTD01', 'TTD02', 'TTD03', 'TTD04', 'TTD05', 'TTD06', 'TTD07', 'TTD08'] as const
 
+const TIKTOK_MAIN_SLOT_GUIDE = [
+  'TikTok Shop US main-image slot strategy:',
+  '- TTM01: pure-white front compliance main image. Use #FFFFFF background, complete centered product, high-quality commercial photography, no extra props, no promotional elements. It may include one small real brand-name mark or real brand logo only when the brand is provided by the product facts or reference images; do not invent brand artwork.',
+  '- TTM02: scroll-stopping hero product visual. Keep the real product as the dominant subject, using stronger lighting, angle, depth, and material polish for mobile thumbnail appeal. Keep the background clean and do not add text.',
+  '- TTM03: realistic US lifestyle usage image. Show the product naturally used in a truthful everyday US scenario such as kitchen, bathroom, bedroom, car, outdoor, desktop, or another scenario supported by the product facts.',
+  '- TTM04: visual pain-point solution image. Communicate why the buyer needs it through the scene, such as organized, portable, space-saving, comfortable, protective, or cleaning use, without text, exaggerated before/after effects, or unsupported results.',
+  '- TTM05: material and value perception image. Emphasize texture, craftsmanship, structure, capacity, durability, transparency, softness, metal finish, or other real value cues supported by the product information.',
+  '- TTM06: device function and multi-scenario combination image. Combine the product core functions with several realistic usage scenarios in one clean multi-zone, split-scene, or cohesive collage-style composition. Do not invent functions, impossible use cases, extra accessories, or misleading results.',
+].join('\n')
+
 function getTikTokSlots(designType: TiktokDesignType) {
   return designType === 'detail' ? TIKTOK_DETAIL_SLOTS : TIKTOK_MAIN_SLOTS
 }
@@ -610,8 +620,18 @@ function buildTiktokPlannerInstructions(baseDraft: AmazonPromptDraft, designType
       ? `Create exactly ${slots.length} TikTok Shop product detail images in this order: ${slots.join(', ')}. These images explain benefits, scenarios, materials, dimensions, usage, package contents, and trust-building details for a mobile shopping detail page.`
       : `Create exactly ${slots.length} TikTok Shop main product images in this order: ${slots.join(', ')}. These images must work as high-impact square gallery images for a mobile-first TikTok Shop listing.`,
     'The platform is TikTok Shop, not Amazon. Do not include Amazon marks, A+ labels, marketplace badges, fake ratings, prices, discounts, QR codes, contact details, external URLs, platform logos, or unsupported claims.',
-    'Use energetic social-commerce composition, strong mobile readability, short US-English on-image copy when useful, product evidence, lifestyle cues, benefit callouts, and clean commercial polish.',
-    'For the first main image, keep the product unmistakably dominant and avoid clutter. For detail images, use information design with clear hierarchy, detail crops, icons, measurement arrows, usage steps, or comparison areas only when supported by product facts.',
+    isDetail
+      ? 'Use energetic social-commerce composition, strong mobile readability, short US-English on-image copy when useful, product evidence, lifestyle cues, benefit callouts, and clean commercial polish.'
+      : 'For TikTok Shop main images, use visual product photography only. Do not add on-image text, callout copy, icons, arrows, badges, frames, decorative overlays, or promotional graphics in any TTM prompt, except that TTM01 may include one small real brand-name mark or real brand logo if the product facts or reference images provide it.',
+    isDetail
+      ? 'For detail images, use information design with clear hierarchy, detail crops, icons, measurement arrows, usage steps, or comparison areas only when supported by product facts.'
+      : TIKTOK_MAIN_SLOT_GUIDE,
+    isDetail
+      ? ''
+      : 'TikTok Shop US main-image compliance baseline: square 1:1 composition, clear color image, truthful product appearance, accurate color/material/quantity/scale/package contents, no misleading AI edits, no placeholder rendering, no low-resolution or damaged-looking image, and only items the customer actually receives unless a contextual scene is needed to show truthful usage.',
+    isDetail
+      ? ''
+      : 'If the product facts or reference images do not support a claimed use, accessory, material, color, quantity, function, brand name, or brand logo, do not invent it. If critical facts are missing, state the uncertainty in planMarkdown and keep the English prompt conservative.',
     'For each slot, write planMarkdown in Simplified Chinese as a detailed agent-style plan, then write a professional English image prompt and English negative prompt.',
     'Return one seriesStyleGuide string in English that can keep separately generated TikTok Shop images visually coherent.',
     'Return exactly 3 styleCandidates for low-resolution visual style reference board generation. Each candidate should represent a distinct coherent TikTok Shop visual style choice for this product, not a finished product image.',

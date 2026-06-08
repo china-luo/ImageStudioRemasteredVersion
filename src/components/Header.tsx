@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { APP_BRAND_NAME } from '../lib/appBrand'
+import { APP_BRAND_NAME, APP_REPOSITORY_URL } from '../lib/appBrand'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import { GithubIcon, HelpCircleIcon, InstallIcon, PowerIcon, SettingsIcon } from './icons'
-
-const REPOSITORY_URL = 'https://github.com/china-luo/ImageStudioRemasteredVersion'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -126,7 +124,7 @@ export default function Header() {
         <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-between">
           <h1 className="min-w-0 pr-3">
             <a
-              href={REPOSITORY_URL}
+              href={APP_REPOSITORY_URL}
               target="_blank"
               rel="noreferrer"
               aria-label={`${APP_BRAND_NAME} GitHub 仓库`}

@@ -92,6 +92,44 @@ describe('Amazon prompt builders', () => {
     expect(prompt).not.toContain('refined minimal Amazon layout')
   })
 
+  it('builds TikTok main image prompts with no-text main-image rules', () => {
+    const prompt = buildTiktokPlanPrompt({
+      slot: 'TTM06',
+      prompt: 'Create a TikTok Shop multi-scenario product image showing real device functions.',
+      negativePrompt: 'extra accessories, fake functions',
+      seriesStyleGuide: 'Bright mobile-first commerce styling.',
+      styleReferenceAttached: true,
+      styleDensityMode: 'rich',
+    })
+
+    expect(prompt).toContain('TikTok Shop US main image generation rules')
+    expect(prompt).toContain('device-function multi-scenario compositions')
+    expect(prompt).toContain('Do not add any on-image text')
+    expect(prompt).toContain('icon callouts, arrows, measurement labels')
+    expect(prompt).toContain('premium scroll-stopping TikTok Shop main-image composition')
+    expect(prompt).toContain('not through text, callouts, icons, arrows')
+    expect(prompt).not.toContain('information-rich TikTok Shop mobile product image layout')
+    expect(prompt).not.toContain('mobile-readable US-English copy')
+  })
+
+  it('allows a real brand-name mark only for the first TikTok main image', () => {
+    const prompt = buildTiktokPlanPrompt({
+      slot: 'TTM01',
+      prompt: 'Create a TikTok Shop pure-white front product image for a real branded product.',
+      negativePrompt: 'fake brand, watermark',
+      seriesStyleGuide: 'Bright mobile-first commerce styling.',
+      styleReferenceAttached: true,
+      styleDensityMode: 'minimal',
+    })
+
+    expect(prompt).toContain('TTM01 must stay on a clean pure white background')
+    expect(prompt).toContain('one small real brand-name mark or real brand logo')
+    expect(prompt).toContain('do not invent brand artwork')
+    expect(prompt).toContain('other than the optional small real brand-name mark on TTM01')
+    expect(prompt).toContain('No watermark, border, frame')
+  })
+
+
   it('builds minimal TikTok density guidance when requested', () => {
     const prompt = buildTiktokPlanPrompt({
       prompt: 'Create a clean TikTok Shop product detail image.',
@@ -219,6 +257,38 @@ function createApiPayload(title = 'AI planned tumbler') {
     seriesStyleGuide: 'Use a cohesive warm commercial style across the set.',
     styleCandidates: createStyleCandidates(),
     imagePlans: createApiPlans(),
+  }
+}
+
+function createTiktokPlans(prefix: 'TTM' | 'TTD') {
+  const slots = prefix === 'TTM'
+    ? ['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06']
+    : ['TTD01', 'TTD02', 'TTD03', 'TTD04', 'TTD05', 'TTD06', 'TTD07', 'TTD08']
+
+  return slots.map((slot) => ({
+    slot,
+    label: `${slot} 方案`,
+    planMarkdown: `## ${slot} TikTok 方案\n\n中文 TikTok 策划说明。`,
+    prompt: `Create TikTok Shop image ${slot} for the product.`,
+    negativePrompt: `negative ${slot}`,
+  }))
+}
+
+function createTiktokPayload(prefix: 'TTM' | 'TTD', title = 'TikTok planned tumbler') {
+  return {
+    product: {
+      title,
+      category: 'Kitchen / Drinkware',
+      brand: '',
+      color: 'matte black',
+      material: 'stainless steel',
+      audience: 'commuters',
+      packageIncludes: '1 tumbler, 1 straw',
+    },
+    sellingPoints: ['Cold for 24 hours'],
+    seriesStyleGuide: 'Use a cohesive TikTok Shop mobile commerce style across the set.',
+    styleCandidates: createStyleCandidates(),
+    imagePlans: createTiktokPlans(prefix),
   }
 }
 
@@ -445,6 +515,50 @@ describe('callAmazonPlannerApi', () => {
       uploadSize: '220x220',
       textTitle: 'Benefit A+S05',
       textBody: 'External A+ copy for A+S05.',
+    })
+  })
+
+  it('uses TikTok main-image slot strategy without Amazon reference material', async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      output_text: JSON.stringify(createTiktokPayload('TTM', 'TikTok main planned tumbler')),
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await callAmazonPlannerApi({
+      listingText: SAMPLE_LISTING,
+      baseDraft: DEFAULT_AMAZON_PROMPT_DRAFT,
+      profile: createDefaultOpenAIProfile({
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'user-api-key',
+        apiMode: 'responses',
+        model: 'gpt-planner-profile',
+      }),
+      platform: 'tiktok',
+      tiktokDesignType: 'main',
+    })
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.text.format.name).toBe('tiktok_main_image_plan')
+    expect(body.text.format.schema.properties.imagePlans.items.properties.slot.enum).toEqual(['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06'])
+    expect(body.instructions).toContain('TikTok Shop US main-image slot strategy')
+    expect(body.instructions).toContain('TTM01: pure-white front compliance main image')
+    expect(body.instructions).toContain('one small real brand-name mark or real brand logo')
+    expect(body.instructions).toContain('TTM02: scroll-stopping hero product visual')
+    expect(body.instructions).toContain('TTM06: device function and multi-scenario combination image')
+    expect(body.instructions).toContain('except that TTM01 may include one small real brand-name mark')
+    expect(body.instructions).toContain('brand name, or brand logo, do not invent it')
+    expect(body.instructions).toContain('no misleading AI edits')
+    expect(body.instructions).not.toContain('Amazon Listing reference material for the planner')
+    expect(body.instructions).not.toContain('Amazon A+ reference material for the planner')
+    expect(body.input[0].content[0].text).toContain('Parse this product copy and produce the TikTok Shop main image plan')
+    expect(result.parsed.title).toBe('TikTok main planned tumbler')
+    expect(result.plans).toHaveLength(6)
+    expect(result.plans[5]).toMatchObject({
+      slot: 'TTM06',
+      planMarkdown: expect.stringContaining('TTM06 TikTok 方案'),
     })
   })
 

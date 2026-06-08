@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { AppMode } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
+import { APP_REPOSITORY_URL } from '../lib/appBrand'
 
 interface HelpModalProps {
   appMode: AppMode
@@ -135,7 +136,7 @@ export default function HelpModal({ appMode, onClose }: HelpModalProps) {
 
         <div className="border-t border-gray-200 pt-4 dark:border-white/[0.08]">
           <a
-            href="https://github.com/china-luo"
+            href={APP_REPOSITORY_URL}
             target="_blank"
             rel="noreferrer"
             className="mx-auto flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-100"

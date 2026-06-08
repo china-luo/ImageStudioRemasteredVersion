@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { getPublicAssetUrl } from '../lib/publicAsset'
+import { APP_REPOSITORY_URL } from '../lib/appBrand'
 import { CloseIcon } from './icons'
 
 export default function SupportPromptModal() {
@@ -64,7 +65,7 @@ export default function SupportPromptModal() {
 
         <div className="mb-6 flex justify-center">
           <a
-            href="https://github.com/china-luo"
+            href={APP_REPOSITORY_URL}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white"
