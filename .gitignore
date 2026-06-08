@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+release/
 
 # Local environment and secrets
 .env

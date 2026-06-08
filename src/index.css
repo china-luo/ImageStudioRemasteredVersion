@@ -36,7 +36,7 @@ body {
   -webkit-user-select: none;
   user-select: none;
   background-color: #0f172a !important;
-  background-image: url('/site-background.png') !important;
+  background-image: var(--site-background-image) !important;
   background-position: center center !important;
   background-size: cover !important;
   background-repeat: no-repeat !important;

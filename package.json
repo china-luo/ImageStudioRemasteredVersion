@@ -2,11 +2,16 @@
   "name": "amazon-image-studio",
   "private": true,
   "version": "1.1.0",
+  "description": "跨境Image工作台 Windows desktop installer",
+  "author": "JackLuo",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "desktop": "npm run build && electron .",
     "mock:api": "node scripts/mock-image-api.mjs",
     "build": "tsc -b && vite build",
+    "build:installer": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows-installer.ps1",
     "deploy:cf": "npm run build && wrangler deploy",
     "preview": "vite preview",
     "test": "vitest run",
@@ -23,6 +28,43 @@
     "streamdown": "^2.5.0",
     "zustand": "^5.0.5"
   },
+  "build": {
+    "appId": "com.chinaluo.imagestudio",
+    "productName": "跨境Image工作台",
+    "copyright": "Copyright © 2026 JackLuo",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ImageStudioRemasteredVersion-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "shortcutName": "跨境Image工作台"
+    }
+  },
   "overrides": {
     "mdast-util-gfm-autolink-literal": "2.0.0"
   },
@@ -31,6 +73,8 @@
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
+    "electron": "^31.7.7",
+    "electron-builder": "^26.15.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",

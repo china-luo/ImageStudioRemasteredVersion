@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
+import { getPublicAssetUrl } from '../lib/publicAsset'
 import { CloseIcon } from './icons'
 
 export default function SupportPromptModal() {
@@ -47,7 +48,7 @@ export default function SupportPromptModal() {
 
         <div className="mb-5 mt-4 flex justify-center">
           <img
-            src="/support-wechat-pay.jpg"
+            src={getPublicAssetUrl('support-wechat-pay.jpg')}
             alt="微信赞助码"
             className="h-36 w-36 rounded-[1.5rem] border border-gray-200 bg-white object-cover p-1 shadow-sm dark:border-white/[0.08]"
           />

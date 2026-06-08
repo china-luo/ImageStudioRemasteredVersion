@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { normalizeBaseUrl } from '../lib/api'
 import { APP_BRAND_NAME } from '../lib/appBrand'
+import { getPublicAssetUrl } from '../lib/publicAsset'
 import { isApiProxyAvailable, isApiProxyLocked, readClientDevProxyConfig } from '../lib/devProxy'
 import { useStore, exportData, importData, clearData, type SettingsTab } from '../store'
 import {
@@ -1908,7 +1909,7 @@ export default function SettingsModal() {
                   </a>
                   <div className="flex flex-col items-center gap-2">
                     <img
-                      src="/support-wechat-pay.jpg"
+                      src={getPublicAssetUrl('support-wechat-pay.jpg')}
                       alt="微信赞助码"
                       className="h-36 w-36 rounded-2xl border border-gray-200 bg-white object-cover p-1 shadow-sm dark:border-white/[0.08]"
                     />

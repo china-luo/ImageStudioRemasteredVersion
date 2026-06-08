@@ -5,6 +5,7 @@ import {
   buildAmazonAPlusPlanPrompt,
   buildAmazonPlanPrompt,
   buildAmazonStyleCandidatePrompt,
+  buildTiktokPlanPrompt,
   formatAPlusModuleText,
   getAPlusContentTypeLabel,
   getAPlusModuleDisplayName,
@@ -68,6 +69,40 @@ describe('Amazon prompt builders', () => {
     expect(prompt).toContain('refined minimal Amazon layout')
     expect(prompt).toContain('fewer callouts')
     expect(prompt).not.toContain('information-rich Amazon gallery layout')
+  })
+
+  it('builds TikTok prompts with TikTok Shop density guidance', () => {
+    const prompt = buildTiktokPlanPrompt({
+      prompt: 'Create a TikTok Shop mobile product image with a strong benefit hook.',
+      negativePrompt: 'Amazon badge, Prime mark, price',
+      seriesStyleGuide: 'Bright mobile-first commerce styling.',
+      styleReferenceAttached: true,
+      styleDensityMode: 'rich',
+    })
+
+    expect(prompt).toContain('Create a TikTok Shop mobile product image')
+    expect(prompt).toContain('Series style guide:')
+    expect(prompt).toContain('Bright mobile-first commerce styling.')
+    expect(prompt).toContain('Negative prompt:')
+    expect(prompt).toContain('Amazon badge, Prime mark, price')
+    expect(prompt).toContain('information-rich TikTok Shop mobile product image layout')
+    expect(prompt).toContain('phone screen')
+    expect(prompt).toContain('The last input image is a hidden style reference')
+    expect(prompt).not.toContain('information-rich Amazon gallery layout')
+    expect(prompt).not.toContain('refined minimal Amazon layout')
+  })
+
+  it('builds minimal TikTok density guidance when requested', () => {
+    const prompt = buildTiktokPlanPrompt({
+      prompt: 'Create a clean TikTok Shop product detail image.',
+      negativePrompt: 'clutter',
+      styleReferenceAttached: true,
+      styleDensityMode: 'minimal',
+    })
+
+    expect(prompt).toContain('refined minimal TikTok Shop layout')
+    expect(prompt).toContain('mobile-first hierarchy')
+    expect(prompt).not.toContain('refined minimal Amazon layout')
   })
 
   it('builds MAIN prompts without series style guide or style reference guard when style is disabled', () => {

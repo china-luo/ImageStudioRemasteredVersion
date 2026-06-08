@@ -184,7 +184,7 @@ const STYLE_REFERENCE_GUARD = [
   '- Follow the image task, layout density, and negative prompt sections for the actual content and arrangement.',
 ].join('\n')
 
-const STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
+const AMAZON_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
   rich: [
     'Layout density:',
     '- Use a polished, information-rich Amazon gallery layout when the selected image type benefits from explanation.',
@@ -195,6 +195,20 @@ const STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
     'Layout density:',
     '- Use a refined minimal Amazon layout with fewer callouts, generous balanced spacing, light icon or line treatment, and restrained US-English copy.',
     '- Keep the product and one or two strongest messages dominant, with clean hierarchy and no clutter.',
+  ].join('\n'),
+}
+
+const TIKTOK_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
+  rich: [
+    'Layout density:',
+    '- Use a polished, information-rich TikTok Shop mobile product image layout when the selected image type benefits from explanation.',
+    '- Build clear hierarchy with mobile-readable US-English copy, multiple well-spaced callouts, detail crops, comparison areas, measurement arrows, or use-case zones as appropriate.',
+    '- Keep the composition energetic, scroll-stopping, organized, and readable on a phone screen without clutter.',
+  ].join('\n'),
+  minimal: [
+    'Layout density:',
+    '- Use a refined minimal TikTok Shop layout with fewer callouts, generous balanced spacing, light icon or line treatment, and restrained US-English copy.',
+    '- Keep the product and one or two strongest messages dominant, with clean mobile-first hierarchy and no clutter.',
   ].join('\n'),
 }
 
@@ -232,13 +246,15 @@ function formatPromptBlock(options: {
   seriesStyleGuide?: string | null
   styleReferenceAttached?: boolean
   styleDensityMode?: AmazonStyleDensityMode
+  styleDensityGuides?: Record<AmazonStyleDensityMode, string>
 }) {
+  const styleDensityGuides = options.styleDensityGuides ?? AMAZON_STYLE_DENSITY_GUIDES
   const sections = [
     options.prompt.trim(),
     options.seriesStyleGuide?.trim()
       ? `Series style guide:\n${options.seriesStyleGuide.trim()}`
       : '',
-    options.styleReferenceAttached ? STYLE_DENSITY_GUIDES[options.styleDensityMode ?? 'rich'] : '',
+    options.styleReferenceAttached ? styleDensityGuides[options.styleDensityMode ?? 'rich'] : '',
     options.negativePrompt?.trim()
       ? `Negative prompt:\n${options.negativePrompt.trim()}`
       : '',
@@ -254,6 +270,14 @@ export function buildAmazonPlanPrompt(plan: Pick<AmazonImagePlan, 'prompt' | 'ne
   styleDensityMode?: AmazonStyleDensityMode
 }): string {
   return formatPromptBlock(plan)
+}
+
+export function buildTiktokPlanPrompt(plan: Pick<AmazonImagePlan, 'prompt' | 'negativePrompt'> & {
+  seriesStyleGuide?: string | null
+  styleReferenceAttached?: boolean
+  styleDensityMode?: AmazonStyleDensityMode
+}): string {
+  return formatPromptBlock({ ...plan, styleDensityGuides: TIKTOK_STYLE_DENSITY_GUIDES })
 }
 
 export function buildAmazonStyleCandidatePrompt(candidate: AmazonStyleCandidate, seriesStyleGuide?: string | null) {

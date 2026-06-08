@@ -22,9 +22,10 @@ function isInstalledPwa() {
 export default function Header() {
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const isDesktopApp = window.imageStudioDesktop?.isDesktop === true
   const [showHelp, setShowHelp] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
-  const [isPwaInstalled, setIsPwaInstalled] = useState(isInstalledPwa)
+  const [isPwaInstalled, setIsPwaInstalled] = useState(() => isDesktopApp || isInstalledPwa())
   const [isStoppingServer, setIsStoppingServer] = useState(false)
 
   const installTooltip = useTooltip()
@@ -33,6 +34,8 @@ export default function Header() {
   const shutdownTooltip = useTooltip()
 
   useEffect(() => {
+    if (isDesktopApp) return
+
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault()
       setInstallPrompt(event as BeforeInstallPromptEvent)
@@ -51,7 +54,7 @@ export default function Header() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
       window.removeEventListener('appinstalled', handleAppInstalled)
     }
-  }, [])
+  }, [isDesktopApp])
 
   const handleInstallClick = async () => {
     if (installPrompt) {
@@ -143,7 +146,7 @@ export default function Header() {
             </a>
           </h1>
           <div className="flex shrink-0 items-center gap-1">
-            {!isPwaInstalled && (
+            {!isDesktopApp && !isPwaInstalled && (
               <div
                 className="relative"
                 {...installTooltip.handlers}

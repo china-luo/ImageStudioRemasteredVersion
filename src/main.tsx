@@ -5,10 +5,12 @@ import App from './App'
 import 'streamdown/styles.css'
 import './index.css'
 import { installMobileViewportGuards } from './lib/viewport'
+import { getPublicAssetUrl } from './lib/publicAsset'
 
 installMobileViewportGuards()
+document.documentElement.style.setProperty('--site-background-image', `url("${getPublicAssetUrl('site-background.png')}")`)
 
-if ('serviceWorker' in navigator) {
+if (!window.imageStudioDesktop?.isDesktop && 'serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error) => {
