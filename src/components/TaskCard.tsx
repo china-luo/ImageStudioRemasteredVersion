@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, type ReactNode } from 'react'
 import { DEFAULT_PARAMS } from '../types'
 import type { TaskRecord } from '../types'
-import { useStore, ensureImageThumbnailCached, subscribeImageThumbnail, updateTaskInStore, retryTask } from '../store'
+import { useStore, ensureImageCached, ensureImageThumbnailCached, subscribeImageThumbnail, updateTaskInStore, retryTask } from '../store'
 import { formatImageRatio } from '../lib/size'
 import { getParamDisplay, ActualValueBadge } from '../lib/paramDisplay'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_FAL_MODEL } from '../lib/apiProfiles'
@@ -291,10 +291,22 @@ export default function TaskCard({
     if (imageId) {
       unsubscribe = subscribeImageThumbnail(imageId, applyThumbnail)
       ensureImageThumbnailCached(imageId).then((thumbnail) => {
-        if (cancelled || !thumbnail) return
-        applyThumbnail(thumbnail)
+        if (cancelled) return
+        if (thumbnail) {
+          applyThumbnail(thumbnail)
+          return
+        }
+        ensureImageCached(imageId).then((dataUrl) => {
+          if (!cancelled && dataUrl) setThumbSrc(dataUrl)
+        }).catch(() => {
+          if (!cancelled) setThumbSrc('')
+        })
       }).catch(() => {
-        if (!cancelled) setThumbSrc('')
+        ensureImageCached(imageId).then((dataUrl) => {
+          if (!cancelled) setThumbSrc(dataUrl ?? '')
+        }).catch(() => {
+          if (!cancelled) setThumbSrc('')
+        })
       })
     }
 

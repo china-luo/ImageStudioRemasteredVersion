@@ -425,6 +425,59 @@ describe('mask draft lifecycle in store actions', () => {
     expect(state.pendingTaskCategory).toBeNull()
   })
 
+  it('stores the hidden API prompt while matching the visible prompt', async () => {
+    useStore.setState({
+      prompt: 'visible listing prompt',
+      pendingTaskCategory: {
+        mode: 'prompt-match',
+        prompt: 'visible listing prompt',
+        apiPrompt: 'full listing prompt with hidden style reference rule',
+        category: {
+          productTitle: 'Large Folding Umbrella',
+          workflow: 'amazon-listing',
+          amazonSlot: 'PT01',
+        },
+      },
+    })
+
+    await submitTask()
+
+    const task = useStore.getState().tasks[0]
+    expect(task?.prompt).toBe('full listing prompt with hidden style reference rule')
+    expect(task?.category).toMatchObject({
+      productTitle: 'Large Folding Umbrella',
+      workflow: 'amazon-listing',
+      amazonSlot: 'PT01',
+    })
+  })
+
+  it('submits a hidden workbench prompt without showing it in the visible input', async () => {
+    useStore.setState({
+      prompt: '',
+      pendingTaskCategory: {
+        mode: 'prompt-match',
+        prompt: '',
+        apiPrompt: 'hidden listing prompt for image generation',
+        category: {
+          productTitle: 'Large Folding Umbrella',
+          workflow: 'amazon-listing',
+          amazonSlot: 'PT02',
+        },
+      },
+    })
+
+    await submitTask()
+
+    const task = useStore.getState().tasks[0]
+    expect(task?.prompt).toBe('hidden listing prompt for image generation')
+    expect(task?.category).toMatchObject({
+      productTitle: 'Large Folding Umbrella',
+      workflow: 'amazon-listing',
+      amazonSlot: 'PT02',
+    })
+    expect(useStore.getState().pendingTaskCategory).toBeNull()
+  })
+
   it('stores pending Amazon A+ category when the submitted prompt still matches', async () => {
     useStore.setState({
       prompt: 'aplus prompt',

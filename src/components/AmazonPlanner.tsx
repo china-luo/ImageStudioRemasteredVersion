@@ -34,11 +34,12 @@ import { callAmazonPlannerApi, type PlannerApiResult } from '../lib/listingPlann
 import { AMAZON_WORKBENCH_NAME } from '../lib/appBrand'
 import { callImageApi } from '../lib/api'
 import { deleteAmazonPlannerSession, getAllAmazonPlannerSessions, putAmazonPlannerSession, storeImage } from '../lib/db'
+import { summarizeGenerationError } from '../lib/generationError'
 import { normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { prepareReferenceImagePayload, type PlannerReferenceImagePayload } from '../lib/referenceImagePayload'
 import { DEFAULT_PARAMS, type ApiMode, type ApiProfile } from '../types'
 import type { AmazonPlannerSession } from '../types'
-import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, EyeIcon, HistoryIcon, PhotoIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons'
+import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, EyeIcon, HistoryIcon, PhotoIcon, PlusIcon, TrashIcon } from './icons'
 
 const FIELD_CLASS = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
 const LABEL_CLASS = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400'
@@ -192,6 +193,10 @@ function getPlannerFailureDetail(err: unknown): string {
   }
 
   return [message, ...hints].join('\n\n')
+}
+
+function getStyleGenerationFailureDetail(err: unknown): string {
+  return summarizeGenerationError(err)
 }
 
 function updateDraft<K extends keyof AmazonPromptDraft>(
@@ -353,6 +358,7 @@ export default function AmazonPlanner() {
   })
   const [styleCandidates, setStyleCandidates] = useState<AmazonStyleCandidate[]>([])
   const [styleImages, setStyleImages] = useState<StyleImageState[]>([])
+  const styleImagesRef = useRef<StyleImageState[]>([])
   const [selectedStyleIndex, setSelectedStyleIndex] = useState<number | null>(null)
   const [styleDensityMode, setStyleDensityMode] = useState<AmazonStyleDensityMode>('rich')
   const [stylePreview, setStylePreview] = useState<StylePreviewState | null>(null)
@@ -396,15 +402,16 @@ export default function AmazonPlanner() {
         styleDensityMode,
       })
       : ''
-  const activePlanMarkdown = plannerMode === 'aplus' ? selectedAPlusPlan?.planMarkdown ?? '' : selectedPlan?.planMarkdown ?? ''
-  const activePlanPreview = activePlanMarkdown
-    ? [
-        activePlanMarkdown,
-        '',
-        '英文生图提示词 Prompt',
-        activePrompt,
-      ].join('\n')
-    : activePrompt
+  const activeVisiblePrompt = plannerMode === 'aplus'
+    ? selectedAPlusPlan ? buildAmazonAPlusPlanPrompt({ ...selectedAPlusPlan, seriesStyleGuide: activeSeriesStyleGuide, styleReferenceAttached: false, styleDensityMode }) : ''
+    : selectedPlan
+      ? (plannerPlatform === 'tiktok' ? buildTiktokPlanPrompt : buildAmazonPlanPrompt)({
+        ...selectedPlan,
+        seriesStyleGuide: isMainListingPlan ? null : activeSeriesStyleGuide,
+        styleReferenceAttached: false,
+        styleDensityMode,
+      })
+      : ''
   const plannerProfile = getAmazonPlannerProfile(settings)
   const plannerProfileValidation = plannerProfile ? validateApiProfile(plannerProfile) : '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置'
   const plannerApiLabel = plannerProfile ? getApiModeLabel(plannerProfile.apiMode) : 'Responses API'
@@ -440,9 +447,9 @@ export default function AmazonPlanner() {
     ? plannerMode === 'aplus' ? '先选择一个 A+ 模块' : '先选择一个图片位'
     : currentActionSubmitted
       ? `已提交 ${actionSlot ?? '当前'} ${actionKindLabel}，${canGoNext ? '点击下一张继续' : '已是最后一张'}`
-      : currentActionFilled
-        ? '已填入右侧输入框，下一步提交生成'
-        : `先填入当前 ${actionSlot ?? '当前'} ${actionKindLabel}提示词`
+    : currentActionFilled
+        ? '已准备好隐藏生图提示词，下一步提交生成'
+        : `先准备当前 ${actionSlot ?? '当前'} ${actionKindLabel}生图提示词`
   const mainStyleGuidance = isMainListingPlan
     ? hasStyleReference
       ? 'MAIN 主图不附加风格板；附图和 A+ 会使用已选风格。'
@@ -450,8 +457,8 @@ export default function AmazonPlanner() {
     : ''
   const actionProgressSteps = [
     {
-      label: '1 填入',
-      detail: currentActionFilled ? '已填入' : '待填入',
+      label: '1 准备',
+      detail: currentActionFilled ? '已准备' : '待准备',
       status: currentActionFilled ? 'done' : 'current',
     },
     {
@@ -509,7 +516,7 @@ export default function AmazonPlanner() {
                   ? canGoNext ? '下一步：点击下一张继续处理' : '当前图片已提交，已是最后一张'
                   : currentActionFilled
                     ? '下一步：提交生成当前图片'
-                    : `下一步：填入当前 ${actionSlot ?? '当前'} ${actionKindLabel}提示词`,
+                    : `下一步：准备当前 ${actionSlot ?? '当前'} ${actionKindLabel}生图提示词`,
               }
   const plannerGuideActive = guideState.target === 'planner-api' || guideState.target === 'planner-input' || guideState.target === 'planner-action'
   const styleGuideActive = guideState.target === 'style' || guideState.target === 'style-choice'
@@ -546,6 +553,10 @@ export default function AmazonPlanner() {
   useEffect(() => {
     setReferencePayloadNotice('')
   }, [inputImages])
+
+  useEffect(() => {
+    styleImagesRef.current = styleImages
+  }, [styleImages])
 
   const upsertPlannerSessionList = (session: AmazonPlannerSession) => {
     setPlannerSessions((current) => sortPlannerSessions([
@@ -626,10 +637,12 @@ export default function AmazonPlanner() {
       return false
     }
 
-    setPrompt(activePrompt)
+    const hiddenSubmitPrompt = activePrompt.trim()
+    setPrompt('')
     setPendingTaskCategory({
       mode: 'prompt-match',
-      prompt: activePrompt,
+      prompt: '',
+      apiPrompt: hiddenSubmitPrompt,
       category: {
         productTitle: draft.productTitle.trim(),
         workflow: plannerPlatform === 'tiktok' ? `tiktok-${tiktokDesignType}` : plannerMode === 'aplus' ? 'amazon-aplus' : 'amazon-listing',
@@ -647,7 +660,7 @@ export default function AmazonPlanner() {
       n: 1,
     })
     markActionProgress(currentActionKey, 'filled')
-    showToast(plannerPlatform === 'tiktok' ? '已填入 TikTok 商品图提示词' : plannerMode === 'aplus' ? '已填入 A+ 图片提示词' : '已填入亚马逊图片提示词', 'success')
+    showToast(plannerPlatform === 'tiktok' ? '已准备 TikTok 商品图隐藏提示词' : plannerMode === 'aplus' ? '已准备 A+ 图片隐藏提示词' : '已准备亚马逊图片隐藏提示词', 'success')
     return true
   }
 
@@ -672,7 +685,7 @@ export default function AmazonPlanner() {
     }
 
     try {
-      await navigator.clipboard.writeText(activePrompt)
+      await navigator.clipboard.writeText(activeVisiblePrompt.trim() || activePrompt)
       showToast('提示词已复制', 'success')
     } catch {
       showToast('复制失败，请手动选择提示词', 'error')
@@ -774,7 +787,9 @@ export default function AmazonPlanner() {
     setStyleError('')
     setSelectedStyleIndex(null)
     setStylePreview(null)
-    setStyleImages(styleCandidates.map((_, index) => ({ candidateIndex: index, status: 'running' })))
+    const initialStyleImages: StyleImageState[] = styleCandidates.map((_, index) => ({ candidateIndex: index, status: 'running' }))
+    styleImagesRef.current = initialStyleImages
+    setStyleImages(initialStyleImages)
 
     const styleParams = normalizeParamsForSettings({
       size: '1024x1024',
@@ -816,9 +831,10 @@ export default function AmazonPlanner() {
         return {
           candidateIndex: index,
           status: 'error',
-          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          error: getStyleGenerationFailureDetail(result.reason),
         }
       })
+      styleImagesRef.current = nextStyleImages
       setStyleImages(nextStyleImages)
 
       const failed = nextStyleImages.filter((image) => image.status === 'error')
@@ -840,8 +856,18 @@ export default function AmazonPlanner() {
       showToast('风格板已生成，请选择一个视觉风格', 'success')
     } catch (err) {
       if (styleAbortControllerRef.current !== controller || isAbortError(err) || controller.signal.aborted) return
-      const message = err instanceof Error ? err.message : String(err)
-      setStyleImages([])
+      const message = getStyleGenerationFailureDetail(err)
+      const failedStyleImages: StyleImageState[] = styleCandidates.map((_, index) => ({
+        candidateIndex: index,
+        status: 'error',
+        error: message,
+      }))
+      styleImagesRef.current = failedStyleImages
+      setStyleImages(failedStyleImages)
+      updateCurrentPlannerSession({
+        styleImages: getSessionStyleImages(failedStyleImages),
+        selectedStyleIndex: null,
+      })
       setStyleError(message)
       showToast('风格板生成失败，请查看详情', 'error')
     } finally {
@@ -871,7 +897,11 @@ export default function AmazonPlanner() {
     setIsGeneratingStyleImages(true)
     setStyleError('')
     setStylePreview(null)
-    setStyleImages((current) => upsertStyleImageState(current, { candidateIndex, status: 'running' }))
+    setStyleImages((current) => {
+      const next = upsertStyleImageState(current, { candidateIndex, status: 'running' })
+      styleImagesRef.current = next
+      return next
+    })
 
     const styleParams = normalizeParamsForSettings({
       size: '1024x1024',
@@ -898,14 +928,16 @@ export default function AmazonPlanner() {
       const imageId = await storeImage(dataUrl, 'generated')
       if (styleAbortControllerRef.current !== controller) return
 
-      const nextStyleImages = upsertStyleImageState(styleImages, {
+      const doneState: StyleImageState = {
         candidateIndex,
         status: 'done',
         imageId,
         dataUrl,
-      })
-      const failed = nextStyleImages.filter((image) => image.status === 'error')
+      }
+      const nextStyleImages = upsertStyleImageState(styleImagesRef.current, doneState)
+      styleImagesRef.current = nextStyleImages
       setStyleImages(nextStyleImages)
+      const failed = nextStyleImages.filter((image) => image.status === 'error')
       setStyleError(failed.length > 0 ? `${failed.length} 张风格板生成失败，可先选择已成功的风格板。` : '')
       updateCurrentPlannerSession({
         styleImages: getSessionStyleImages(nextStyleImages),
@@ -914,14 +946,16 @@ export default function AmazonPlanner() {
       showToast('风格板重试成功，已更新原位置', 'success')
     } catch (err) {
       if (styleAbortControllerRef.current !== controller || isAbortError(err) || controller.signal.aborted) return
-      const message = err instanceof Error ? err.message : String(err)
-      const nextStyleImages = upsertStyleImageState(styleImages, {
+      const message = getStyleGenerationFailureDetail(err)
+      const nextStyleImages = upsertStyleImageState(styleImagesRef.current, {
         candidateIndex,
         status: 'error',
         error: message,
       })
+      styleImagesRef.current = nextStyleImages
       setStyleImages(nextStyleImages)
-      setStyleError(message)
+      const failed = nextStyleImages.filter((image) => image.status === 'error')
+      setStyleError(failed.length > 0 ? message : '')
       updateCurrentPlannerSession({
         styleImages: getSessionStyleImages(nextStyleImages),
         selectedStyleIndex,
@@ -1002,13 +1036,15 @@ export default function AmazonPlanner() {
     setIsGeneratingStyleImages(false)
     setStylePreview(null)
     setStyleError('')
-    setStyleImages((current) =>
-      current.map((image) =>
+    setStyleImages((current) => {
+      const next: StyleImageState[] = current.map((image): StyleImageState =>
         image.status === 'running'
           ? { ...image, status: 'stopped', error: '已停止' }
           : image,
-      ),
-    )
+      )
+      styleImagesRef.current = next
+      return next
+    })
     showToast('风格板生成已停止', 'info')
   }
 
@@ -1047,6 +1083,7 @@ export default function AmazonPlanner() {
     }
     setSeriesStyleGuides(nextSeriesStyleGuides)
     setStyleCandidates(result.styleCandidates)
+    styleImagesRef.current = []
     setStyleImages([])
     setSelectedStyleIndex(null)
     setStylePreview(null)
@@ -1213,6 +1250,10 @@ export default function AmazonPlanner() {
     updateCurrentPlannerSession({ styleDensityMode: mode })
   }
 
+  const openStylePreview = (imageId: string) => {
+    setLightboxImageId(imageId, styleLightboxImageIds.length ? styleLightboxImageIds : [imageId])
+  }
+
   const updateStylePreview = (
     candidate: AmazonStyleCandidate,
     imageState: StyleImageState | undefined,
@@ -1227,8 +1268,17 @@ export default function AmazonPlanner() {
     })
   }
 
-  const openStylePreview = (imageId: string) => {
-    setLightboxImageId(imageId, styleLightboxImageIds.length ? styleLightboxImageIds : [imageId])
+  const openStyleFailureDetail = (candidate: AmazonStyleCandidate, candidateIndex: number, imageState?: StyleImageState) => {
+    const message = imageState?.error?.trim() || (imageState?.status === 'stopped' ? '风格板生成已停止' : '风格板生成失败')
+    setConfirmDialog({
+      title: `${candidate.label} 生成失败`,
+      message,
+      confirmText: '重试此风格板',
+      cancelText: '关闭',
+      action: () => {
+        void retryStyleCandidateImage(candidateIndex)
+      },
+    })
   }
 
   const selectPlan = (index: number) => {
@@ -1266,6 +1316,7 @@ export default function AmazonPlanner() {
     setImagePlans([])
     setAPlusPlans([])
     setStyleCandidates([])
+    styleImagesRef.current = []
     setStyleImages([])
     setSelectedStyleIndex(null)
     setStylePreview(null)
@@ -1304,6 +1355,7 @@ export default function AmazonPlanner() {
       setSelectedAPlusPlanIndex(null)
       setSeriesStyleGuides((current) => ({ ...current, aplus: '' }))
       setStyleCandidates([])
+      styleImagesRef.current = []
       setStyleImages([])
       setSelectedStyleIndex(null)
       setStylePreview(null)
@@ -1357,6 +1409,7 @@ export default function AmazonPlanner() {
       tiktokDetail: session.seriesStyleGuides.tiktokDetail ?? '',
     })
     setStyleCandidates(session.styleCandidates)
+    styleImagesRef.current = restoredStyleImages
     setStyleImages(restoredStyleImages)
     setSelectedStyleIndex(selectedStyleRestored ? session.selectedStyleIndex : null)
     setStyleDensityMode(session.styleDensityMode ?? 'rich')
@@ -2012,7 +2065,7 @@ export default function AmazonPlanner() {
                       ) : (
                         <PhotoIcon className="h-3.5 w-3.5" />
                       )}
-                      {currentActionFilled ? '已填入' : '填入'}
+                      {currentActionFilled ? '已准备' : '准备'}
                     </button>
                     <button
                       type="button"
@@ -2092,51 +2145,53 @@ export default function AmazonPlanner() {
                     const canSelect = Boolean(previewImageId)
                     const canPreview = Boolean(previewImageId && imageState?.dataUrl)
                     const canRetryStyleImage = imageState?.status === 'error' || imageState?.status === 'stopped'
+                    const canOpenFailureDetail = canRetryStyleImage
                     return (
                       <div
                         key={`${candidate.label}-${index}`}
                         onMouseEnter={(event) => updateStylePreview(candidate, imageState, event)}
                         onMouseMove={(event) => updateStylePreview(candidate, imageState, event)}
                         onMouseLeave={() => setStylePreview(null)}
-                        className={`relative min-w-0 overflow-hidden rounded-xl border text-left transition ${isSelected ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/15 dark:border-violet-300/70 dark:bg-violet-500/10' : canSelect ? 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:hover:bg-white/[0.05]' : 'border-gray-200 bg-white opacity-70 dark:border-white/[0.08] dark:bg-gray-900'}`}
+                        className={`relative min-w-0 overflow-hidden rounded-xl border text-left transition ${isSelected ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/15 dark:border-violet-300/70 dark:bg-violet-500/10' : canSelect ? 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:hover:bg-white/[0.05]' : 'border-gray-200 bg-white opacity-80 dark:border-white/[0.08] dark:bg-gray-900'}`}
                       >
                         {canPreview && previewImageId && (
                           <button
                             type="button"
-                            onClick={() => openStylePreview(previewImageId)}
-                            title="预览风格板大图"
-                            aria-label={`预览 ${candidate.label} 风格板大图`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              openStylePreview(previewImageId)
+                            }}
+                            title="查看风格板大图"
+                            aria-label={`查看 ${candidate.label} 风格板大图`}
                             className="absolute right-2 top-2 z-10 inline-flex h-8 items-center gap-1 rounded-lg bg-white/95 px-2 text-[11px] font-semibold text-gray-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white dark:bg-gray-950/90 dark:text-gray-100 dark:ring-white/10 dark:hover:bg-gray-900"
                           >
                             <EyeIcon className="h-3.5 w-3.5" />
-                            预览
-                          </button>
-                        )}
-                        {canRetryStyleImage && (
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              void retryStyleCandidateImage(index)
-                            }}
-                            className="absolute right-2 top-2 z-10 inline-flex h-8 items-center gap-1 rounded-lg bg-red-600 px-2 text-[11px] font-semibold text-white shadow-sm transition hover:bg-red-500 dark:bg-red-500 dark:hover:bg-red-400"
-                          >
-                            <RefreshIcon className="h-3.5 w-3.5" />
-                            重试
+                            查看
                           </button>
                         )}
                         <button
                           type="button"
-                          onClick={() => canSelect && selectStyleCandidate(index)}
-                          disabled={!canSelect}
+                          onClick={() => {
+                            if (canSelect) {
+                              selectStyleCandidate(index)
+                              return
+                            }
+                            if (canOpenFailureDetail) openStyleFailureDetail(candidate, index, imageState)
+                          }}
+                          disabled={!canSelect && !canOpenFailureDetail}
                           className="block h-full w-full text-left disabled:cursor-not-allowed"
                         >
                           <div className="aspect-square bg-gray-100 dark:bg-white/[0.04]">
                             {imageState?.status === 'done' && imageState.dataUrl ? (
                               <img src={imageState.dataUrl} alt={candidate.label} className="h-full w-full object-cover" />
                             ) : (
-                              <div className="flex h-full w-full items-center justify-center px-3 text-center text-xs text-gray-400">
-                                {getStyleImagePlaceholder(imageState?.status)}
+                              <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-xs text-gray-400">
+                                <span>{getStyleImagePlaceholder(imageState?.status)}</span>
+                                {canOpenFailureDetail && (
+                                  <span className="rounded bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-600 dark:bg-red-400/10 dark:text-red-200">
+                                    点击查看 / 重试
+                                  </span>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2148,11 +2203,6 @@ export default function AmazonPlanner() {
                               )}
                             </div>
                             <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{candidate.description}</div>
-                            {imageState?.status === 'error' && imageState.error && (
-                              <div className="mt-1 line-clamp-2 rounded bg-red-50 px-1.5 py-1 text-[10px] leading-relaxed text-red-700 dark:bg-red-400/10 dark:text-red-200">
-                                {imageState.error}
-                              </div>
-                            )}
                           </div>
                         </button>
                       </div>
@@ -2197,7 +2247,7 @@ export default function AmazonPlanner() {
                 <div>
                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">逐张策划</div>
                   <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    选择图片位后，Prompt Preview 和生成按钮会切换到对应提示词。
+                    选择图片位后，生成按钮会切换到对应提示词。
                   </div>
                 </div>
                 <span className="shrink-0 rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
@@ -2225,7 +2275,7 @@ export default function AmazonPlanner() {
                         )}
                         {planActionProgress && (
                           <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${planActionProgress === 'submitted' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'}`}>
-                            {planActionProgress === 'submitted' ? '已提交' : '已填入'}
+                            {planActionProgress === 'submitted' ? '已提交' : '已准备'}
                           </span>
                         )}
                       </div>
@@ -2250,7 +2300,7 @@ export default function AmazonPlanner() {
                 <div>
                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">A+ 模块编排</div>
                   <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    选择模块后，Prompt Preview 和生成按钮会切换到对应 A+ 提示词与尺寸。
+                    选择模块后，生成按钮会切换到对应 A+ 提示词与尺寸。
                   </div>
                 </div>
                 <span className="shrink-0 rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
@@ -2280,7 +2330,7 @@ export default function AmazonPlanner() {
                         )}
                         {planActionProgress && (
                           <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${planActionProgress === 'submitted' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'}`}>
-                            {planActionProgress === 'submitted' ? '已提交' : '已填入'}
+                            {planActionProgress === 'submitted' ? '已提交' : '已准备'}
                           </span>
                         )}
                       </div>
@@ -2350,14 +2400,12 @@ export default function AmazonPlanner() {
           <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                Prompt Preview{plannerMode === 'aplus' && selectedAPlusPlan ? ` · ${selectedAPlusPlan.slot}` : selectedPlan ? ` · ${selectedPlan.slot}` : ''}
+                单图调整区{plannerMode === 'aplus' && selectedAPlusPlan ? ` · ${selectedAPlusPlan.slot}` : selectedPlan ? ` · ${selectedPlan.slot}` : ''}
               </span>
               <span className="text-xs text-gray-400">{targetSize} / {generationParamLabel}</span>
             </div>
             <textarea
-              value={plannerMode === 'aplus' && !selectedAPlusPlan
-                ? '请先点击 AI策划A+，再在右侧选择一个 A+ 模块。'
-                : activePlanPreview || '请先粘贴 Listing 并点击 AI策划，LLM 会生成中文策划、英文 Prompt 和 Negative Prompt。'}
+              value=""
               className="h-[430px] w-full resize-none rounded-lg border border-gray-200 bg-white p-3 font-mono text-xs leading-relaxed text-gray-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200"
               spellCheck={false}
               readOnly
@@ -2390,9 +2438,9 @@ export default function AmazonPlanner() {
               </div>
             </div>
           )}
-          {activePrompt.trim() && prompt.trim() && prompt !== activePrompt && (
+          {activeVisiblePrompt.trim() && prompt.trim() && prompt !== activeVisiblePrompt && (
             <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200">
-              底部输入框已有内容，点击“填入”会用当前亚马逊提示词覆盖。
+              右侧单图调整区已有内容，点击“准备”会清空可见文本，并改用当前工作台的隐藏生图提示词提交。
             </div>
           )}
         </div>

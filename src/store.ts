@@ -95,6 +95,7 @@ type PendingTaskCategory =
   | {
       mode: 'prompt-match'
       prompt: string
+      apiPrompt?: string
       category: NonNullable<TaskRecord['category']>
     }
   | {
@@ -169,6 +170,15 @@ function resolvePendingTaskCategory(
     ? pendingTaskCategory.category
     : { workflow: 'gallery' }
   return removeMainStyleReference(category)
+}
+
+function resolvePendingTaskPrompt(
+  pendingTaskCategory: PendingTaskCategory | null,
+  trimmedPrompt: string,
+): string {
+  if (pendingTaskCategory?.mode !== 'prompt-match') return trimmedPrompt
+  if (pendingTaskCategory.prompt.trim() !== trimmedPrompt) return trimmedPrompt
+  return pendingTaskCategory.apiPrompt?.trim() || trimmedPrompt
 }
 
 export function getErrorToastMessage(message: string): string {
@@ -1986,7 +1996,8 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   }
 
   const trimmedPrompt = prompt.trim()
-  if (!trimmedPrompt) {
+  const taskPrompt = resolvePendingTaskPrompt(pendingTaskCategory, trimmedPrompt)
+  if (!taskPrompt.trim()) {
     showToast('请输入提示词', 'error')
     return false
   }
@@ -2052,7 +2063,7 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   const taskId = genId()
   const task: TaskRecord = {
     id: taskId,
-    prompt: trimmedPrompt,
+    prompt: taskPrompt,
     params: normalizedParams,
     apiProvider: activeProfile.provider,
     apiProfileId: activeProfile.id,

@@ -10,6 +10,7 @@ import { copyImageSourceToClipboard, copyTextToClipboard, getClipboardFailureMes
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { downloadImageIds } from '../lib/downloadImages'
+import { summarizeGenerationError } from '../lib/generationError'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
 import { getAspectLabel, getTaskHistoryCategory, getWorkflowLabel } from '../lib/taskHistory'
 import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, LinkIcon, TrashIcon } from './icons'
@@ -85,6 +86,7 @@ export default function DetailModal() {
   }, [task?.params.n, task?.status, streamPreviewSlots, streamPreviewSrc])
   const activeStreamPreviewSrc = streamPreviewItems[imageIndex]?.src || ''
   const historyCategory = useMemo(() => task ? getTaskHistoryCategory(task) : null, [task])
+  const taskErrorDisplay = useMemo(() => summarizeGenerationError(task?.error || '生成失败'), [task?.error])
 
   useEffect(() => {
     setStreamPreviewLoaded(false)
@@ -624,7 +626,7 @@ export default function DetailModal() {
                   WebkitLineClamp: 10,
                 }}
               >
-                {task.error || '生成失败'}
+                {taskErrorDisplay}
               </p>
               <div className="mt-3 flex items-center justify-center gap-2">
                 <div className="relative group">
