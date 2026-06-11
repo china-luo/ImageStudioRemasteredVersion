@@ -5,12 +5,15 @@ import {
   buildAmazonAPlusPlanPrompt,
   buildAmazonPlanPrompt,
   buildAmazonStyleCandidatePrompt,
+  buildAdaptiveStylePresetCandidate,
   buildTiktokPlanPrompt,
+  CROSS_BORDER_STYLE_PRESETS,
   formatAPlusModuleText,
   getAPlusContentTypeLabel,
   getAPlusModuleDisplayName,
   getAPlusModuleEnglishName,
   getAPlusModuleSpecs,
+  getStylePresetCandidate,
   isAmazonListingMainSlot,
 } from './listingPlanner'
 import { callAmazonPlannerApi } from './listingPlannerApi'
@@ -200,6 +203,61 @@ describe('Amazon prompt builders', () => {
     expect(prompt).toContain('warm off-white backgrounds')
     expect(prompt).toContain('Negative prompt:')
     expect(prompt).toContain('Chinese characters, QR code, price badge')
+  })
+
+  it('ships reusable cross-border style presets for selectable style boards', () => {
+    expect(CROSS_BORDER_STYLE_PRESETS.length).toBeGreaterThanOrEqual(10)
+    expect(new Set(CROSS_BORDER_STYLE_PRESETS.map((preset) => preset.id)).size).toBe(CROSS_BORDER_STYLE_PRESETS.length)
+
+    for (const preset of CROSS_BORDER_STYLE_PRESETS) {
+      expect(preset.id).toMatch(/^[a-z0-9-]+$/)
+      expect(preset.category).toBeTruthy()
+      expect(preset.label).toBeTruthy()
+      expect(preset.description).toBeTruthy()
+      expect(preset.prompt).toContain('visual style reference board')
+      expect(preset.prompt).toMatch(/typography|layout|composition|palette/i)
+      expect(preset.prompt).not.toMatch(/Amazon|TikTok/i)
+      expect(preset.prompt).not.toMatch(/[\u4e00-\u9fff]/)
+      expect(preset.negativePrompt).toContain('Chinese characters')
+      expect(preset.negativePrompt).not.toMatch(/Amazon|TikTok|Prime/i)
+      expect(preset.negativePrompt).not.toMatch(/[\u4e00-\u9fff]/)
+      expect(getStylePresetCandidate(preset.id)).toBe(preset)
+    }
+  })
+
+  it('adapts preset style prompts with product context without mutating the preset', () => {
+    const preset = CROSS_BORDER_STYLE_PRESETS[0]!
+    const originalPrompt = preset.prompt
+    const adapted = buildAdaptiveStylePresetCandidate(preset, [
+      'Product title: Stainless steel kitchen organizer',
+      'Material: brushed metal and oak handle',
+      'Usage scene: premium kitchen counter storage',
+    ], 'amazon')
+
+    expect(adapted).not.toBe(preset)
+    expect(preset.prompt).toBe(originalPrompt)
+    expect(adapted.prompt).toContain(originalPrompt)
+    expect(adapted.prompt).toContain('Platform target: Amazon listing image style board.')
+    expect(adapted.prompt).toContain('Adapt this preset to the current product context')
+    expect(adapted.prompt).toContain('Stainless steel kitchen organizer')
+    expect(adapted.prompt).toContain('brushed metal and oak handle')
+    expect(adapted.prompt).toContain('premium kitchen counter storage')
+    expect(adapted.prompt).not.toContain('AI-planned visual directions')
+    expect(adapted.prompt).not.toContain('Platform target: TikTok Shop US product image style board.')
+    expect(adapted.negativePrompt).toContain('Chinese characters')
+    expect(adapted.negativePrompt).toContain('Prime badge')
+  })
+
+  it('adds TikTok-only platform guidance for preset style prompts when TikTok workbench is active', () => {
+    const preset = CROSS_BORDER_STYLE_PRESETS[0]!
+    const adapted = buildAdaptiveStylePresetCandidate(preset, ['Product title: Portable blender'], 'tiktok')
+
+    expect(adapted.prompt).toContain('Platform target: TikTok Shop US product image style board.')
+    expect(adapted.prompt).toContain('mobile-first readability')
+    expect(adapted.prompt).toContain('Do not include Amazon-specific listing badges')
+    expect(adapted.prompt).not.toContain('Platform target: Amazon listing image style board.')
+    expect(adapted.negativePrompt).toContain('TikTok logo')
+    expect(adapted.negativePrompt).toContain('Amazon logo')
   })
 })
 

@@ -30,6 +30,182 @@ export interface AmazonStyleCandidate {
   negativePrompt: string
 }
 
+export interface AmazonStylePresetCandidate extends AmazonStyleCandidate {
+  id: string
+  category: string
+}
+
+const COMMON_STYLE_NEGATIVE_PROMPT = [
+  'Chinese characters',
+  'real brand logos unless provided in product references',
+  'prices',
+  'promotional badges',
+  'QR codes',
+  'contact details',
+  'external URLs',
+  'messy collage',
+  'illegible typography',
+  'unrealistic product colors',
+  'invented accessories',
+].join(', ')
+
+const PLATFORM_STYLE_PRESET_GUIDANCE: Record<CommercePlannerPlatform, string> = {
+  amazon: [
+    'Platform target: Amazon listing image style board.',
+    'Design for Amazon gallery usage: clean marketplace hierarchy, compliant product-first composition, readable secondary-image information structure, controlled studio or lifestyle realism, and Amazon-safe visual language.',
+    'Do not include TikTok Shop-specific mobile feed cues, social-commerce badges, app interface elements, or short-video platform styling.',
+  ].join(' '),
+  tiktok: [
+    'Platform target: TikTok Shop US product image style board.',
+    'Design for TikTok Shop gallery usage: mobile-first readability, stronger thumbnail recognition, faster visual rhythm, scroll-stopping product hierarchy, US-English typography samples, and social-commerce clarity.',
+    'Do not include Amazon-specific listing badges, Prime-style marketplace cues, A+ module cues, or Amazon gallery compliance language.',
+  ].join(' '),
+}
+
+const PLATFORM_STYLE_NEGATIVE_PROMPT: Record<CommercePlannerPlatform, string> = {
+  amazon: 'Amazon logo, Prime badge, TikTok logo, TikTok Shop marks, social app UI, short-video interface elements',
+  tiktok: 'TikTok logo, TikTok Shop marks, Amazon logo, Prime badge, A+ module chrome, marketplace badge clutter',
+}
+
+export const CROSS_BORDER_STYLE_PRESETS: AmazonStylePresetCandidate[] = [
+  {
+    id: 'premium-clean-infographic',
+    category: '信息图',
+    label: '高级信息图',
+    description: '适合功能卖点、参数对比、配件说明，层级清楚且移动端易读。',
+    prompt: 'Create a premium clean e-commerce infographic visual style reference board for cross-border product images. Use a crisp white or light neutral base, disciplined grid alignment, refined sans-serif typography samples, precise thin-line callout treatments, tidy icon language, measured spacing, and a polished commercial hierarchy for secondary product images and detail images.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'white-tech-conversion',
+    category: '主图',
+    label: '白底科技感',
+    description: '适合电子、工具、车品、数码配件，白底干净但不廉价。',
+    prompt: 'Create a clean white-background tech-commerce visual style reference board. Use pure white and cool light gray surfaces, subtle cyan or electric-blue accents, glossy product-finish samples, crisp studio lighting, precise shadow control, compact typography samples, and minimal high-conversion layout cues for marketplace main images and hero product images.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'dark-rugged-tech',
+    category: '科技',
+    label: '硬核暗色科技',
+    description: '适合车品、户外电源、工具、安防，强调力量感和专业感。',
+    prompt: 'Create a rugged dark-tech visual style reference board for durable cross-border products. Use graphite black, charcoal gray, controlled red or cyan accents, hard directional light, reflective material samples, industrial texture swatches, bold condensed typography samples, and sharp callout treatments that feel robust, technical, and trustworthy without looking like gaming graphics.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'outdoor-lifestyle-editorial',
+    category: '生活方式',
+    label: '户外生活方式',
+    description: '适合露营、运动、车载、旅行场景，真实环境中突出产品。',
+    prompt: 'Create an outdoor lifestyle editorial visual style reference board for e-commerce product images. Use natural daylight, realistic US outdoor environments, breathable composition, earthy but clean color swatches, tactile material samples, subtle documentary-style product detail crops, and understated typography treatments that keep the product dominant and credible.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'home-soft-daylight',
+    category: '生活方式',
+    label: '家居柔光',
+    description: '适合家居、厨房、收纳、宠物用品，温和真实且有品质感。',
+    prompt: 'Create a soft daylight home-commerce visual style reference board. Use clean modern home surfaces, gentle window light, warm-neutral and fresh-white palette swatches, natural material texture samples, rounded but disciplined typography samples, soft shadow treatment, and calm lifestyle composition cues for home, kitchen, storage, pet, and family products.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'beauty-wellness-soft-luxury',
+    category: '品牌',
+    label: '美妆轻奢',
+    description: '适合个护、美妆、香氛、健康护理，柔和高级但不堆装饰。',
+    prompt: 'Create a soft luxury beauty and wellness visual style reference board for cross-border commerce. Use luminous studio lighting, smooth cream-white or pale gray surfaces, restrained pastel accent swatches, elegant sans-serif typography samples, refined product-finish close-ups, delicate line icons, and spacious premium composition cues suitable for skincare, personal care, fragrance, and wellness products.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'dtc-minimal-brand',
+    category: '品牌',
+    label: 'DTC极简品牌',
+    description: '适合品牌感强的系列图，少元素、强秩序、适合长期复用。',
+    prompt: 'Create a minimal direct-to-consumer brand visual style reference board. Use monochrome or near-monochrome palette swatches with one controlled accent color, generous spacing, modern geometric sans-serif typography samples, clean product crop samples, restrained icon language, and confident editorial composition cues that feel premium, repeatable, and brand-owned.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'social-commerce-bold-mobile',
+    category: 'TikTok',
+    label: '移动端强转化',
+    description: '适合 TikTok 商品图和信息图，手机上强识别、节奏更快。',
+    prompt: 'Create a bold mobile-first social-commerce visual style reference board. Use high-contrast product lighting, strong thumbnail readability, concise US-English typography samples, energetic but organized layout zones, bright controlled accent swatches, simple icon and callout treatments, and clear hierarchy designed for mobile commerce gallery images and mobile detail pages.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'material-macro-detail',
+    category: '细节',
+    label: '材质微距细节',
+    description: '适合展示工艺、纹理、结构、接口和质量感。',
+    prompt: 'Create a material macro detail visual style reference board. Use close-up product-finish samples, texture swatches, precision lighting, shallow-depth detail crops, fine-line annotation styles, compact technical typography samples, and premium material evidence cues for products that need to communicate build quality, structure, finish, or craftsmanship.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'giftable-bundle-clean',
+    category: '套装',
+    label: '礼品套装陈列',
+    description: '适合套装、包装、配件清单，画面有秩序且显价值。',
+    prompt: 'Create a clean giftable bundle visual style reference board. Use organized flat-lay and kit-layout cues, balanced accessory grouping samples, soft premium studio light, tasteful packaging texture swatches, clear quantity hierarchy, refined typography samples, and elegant composition language for showing included items without clutter or exaggerated promotion.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'performance-sport-energy',
+    category: '运动',
+    label: '运动性能感',
+    description: '适合运动、健身、户外性能产品，动感强但保持商业干净。',
+    prompt: 'Create a performance sport energy visual style reference board. Use dynamic diagonal composition cues, crisp motion lighting, high-contrast product detail samples, energetic accent swatches, durable material textures, bold athletic typography samples, and clean action-oriented callout treatments for sports, fitness, outdoor, and performance products.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+  {
+    id: 'eco-natural-fresh',
+    category: '自然',
+    label: '自然环保清新',
+    description: '适合母婴、家居、健康、环保材料，清爽可信不土味。',
+    prompt: 'Create a fresh natural eco-commerce visual style reference board. Use clean botanical or natural material texture samples, airy white and soft green palette swatches, gentle daylight, honest product detail crops, friendly rounded sans-serif typography samples, and calm trustworthy composition cues for health, baby, home, and sustainable-material products.',
+    negativePrompt: COMMON_STYLE_NEGATIVE_PROMPT,
+  },
+]
+
+export function getStylePresetCandidate(id: string): AmazonStylePresetCandidate | undefined {
+  return CROSS_BORDER_STYLE_PRESETS.find((preset) => preset.id === id)
+}
+
+function mergeNegativePrompts(...prompts: Array<string | null | undefined>) {
+  const seen = new Set<string>()
+  const parts: string[] = []
+  for (const prompt of prompts) {
+    for (const part of (prompt ?? '').split(',')) {
+      const item = part.trim()
+      const key = item.toLowerCase()
+      if (!item || seen.has(key)) continue
+      seen.add(key)
+      parts.push(item)
+    }
+  }
+  return parts.join(', ')
+}
+
+export function buildAdaptiveStylePresetCandidate(
+  preset: AmazonStylePresetCandidate,
+  productContext: Array<string | null | undefined>,
+  platform: CommercePlannerPlatform = 'amazon',
+): AmazonStylePresetCandidate {
+  const contextLines = productContext
+    .map((item) => item?.replace(/\s+/g, ' ').trim())
+    .filter((item): item is string => Boolean(item))
+
+  return {
+    ...preset,
+    prompt: [
+      preset.prompt.trim(),
+      PLATFORM_STYLE_PRESET_GUIDANCE[platform],
+      'Adapt this preset to the current product context below. Keep the preset as the dominant visual style system and do not borrow any other style direction. Use the context only to choose relevant product details, material evidence, usage scenarios, benefit hierarchy, accessory cues, and category-appropriate presentation within this preset style.',
+      contextLines.length ? `Current product context:\n${contextLines.map((line) => `- ${line}`).join('\n')}` : '',
+    ].join('\n\n'),
+    negativePrompt: mergeNegativePrompts(preset.negativePrompt, PLATFORM_STYLE_NEGATIVE_PROMPT[platform]),
+  }
+}
+
 export interface AmazonImagePlan {
   slot: string
   label: string
