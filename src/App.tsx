@@ -5,6 +5,7 @@ import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams 
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import Header from './components/Header'
 import AmazonPlanner from './components/AmazonPlanner'
+import SopReverseWorkspace from './components/SopReverseWorkspace'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
 import InputBar from './components/InputBar'
@@ -19,6 +20,7 @@ import { useGlobalClickSuppression } from './lib/clickSuppression'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
+  const appMode = useStore((s) => s.appMode)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -54,14 +56,24 @@ export default function App() {
   return (
     <>
       <Header />
-      <main data-home-main data-drag-select-surface className="home-main-with-dock pb-48 lg:pb-10">
+      <main
+        data-home-main
+        data-drag-select-surface
+        className={appMode === 'sop' ? 'pb-10' : 'home-main-with-dock pb-48 lg:pb-10'}
+      >
         <div className="safe-area-x max-w-7xl mx-auto lg:!px-6">
-          <AmazonPlanner />
-          <SearchBar />
-          <TaskGrid />
+          {appMode === 'sop' ? (
+            <SopReverseWorkspace />
+          ) : (
+            <>
+              <AmazonPlanner />
+              <SearchBar />
+              <TaskGrid />
+            </>
+          )}
         </div>
       </main>
-      <InputBar />
+      {appMode !== 'sop' && <InputBar />}
       <DetailModal />
       <Lightbox />
       <SettingsModal />

@@ -461,6 +461,17 @@ function resolveAmazonPlannerProfileId(profiles: ApiProfile[], value: unknown): 
   return profiles.find(isAmazonPlannerProfile)?.id ?? ''
 }
 
+function resolveSopReverseProfileId(profiles: ApiProfile[], value: unknown, fallbackId: string): string {
+  const requestedId = typeof value === 'string' ? value : ''
+  const requestedProfile = requestedId ? profiles.find((profile) => profile.id === requestedId) : undefined
+  if (requestedProfile && isAmazonPlannerProfile(requestedProfile)) return requestedProfile.id
+
+  const fallbackProfile = fallbackId ? profiles.find((profile) => profile.id === fallbackId) : undefined
+  if (fallbackProfile && isAmazonPlannerProfile(fallbackProfile)) return fallbackProfile.id
+
+  return profiles.find(isAmazonPlannerProfile)?.id ?? ''
+}
+
 function createDefaultProfilePair(overrides: Partial<ApiProfile> = {}): ApiProfile[] {
   return [
     createDefaultImageProfile(overrides),
@@ -614,6 +625,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
     ? record.activeProfileId
     : profiles[0].id
   const amazonPlannerProfileId = resolveAmazonPlannerProfileId(profiles, record.amazonPlannerProfileId)
+  const sopReverseProfileId = resolveSopReverseProfileId(profiles, record.sopReverseProfileId, amazonPlannerProfileId)
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
 
   return {
@@ -640,6 +652,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
     profiles,
     activeProfileId,
     amazonPlannerProfileId,
+    sopReverseProfileId,
   }
 }
 
@@ -740,6 +753,11 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
 export function getAmazonPlannerProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
   const normalized = normalizeSettings(settings)
   return normalized.profiles.find((profile) => profile.id === normalized.amazonPlannerProfileId && isAmazonPlannerProfile(profile)) ?? null
+}
+
+export function getSopReverseProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
+  const normalized = normalizeSettings(settings)
+  return normalized.profiles.find((profile) => profile.id === normalized.sopReverseProfileId && isAmazonPlannerProfile(profile)) ?? null
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {
@@ -985,4 +1003,5 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   profiles: createDefaultProfilePair(),
   activeProfileId: DEFAULT_OPENAI_PROFILE_ID,
   amazonPlannerProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
+  sopReverseProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
 })

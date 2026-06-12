@@ -18,6 +18,8 @@ function isInstalledPwa() {
 }
 
 export default function Header() {
+  const appMode = useStore((s) => s.appMode)
+  const setAppMode = useStore((s) => s.setAppMode)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const isDesktopApp = window.imageStudioDesktop?.isDesktop === true
@@ -143,6 +145,27 @@ export default function Header() {
               <GithubIcon className="hidden h-4 w-4 shrink-0 text-gray-300 transition-colors group-hover:text-gray-700 dark:text-white/20 dark:group-hover:text-gray-200 sm:block" />
             </a>
           </h1>
+          <nav className="mx-2 hidden min-w-0 flex-1 justify-center sm:flex" aria-label="功能板块">
+            <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+              {([
+                ['gallery', '图片生成'],
+                ['sop', '拆图反推'],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setAppMode(mode)}
+                  className={`h-8 rounded-lg px-3 text-sm font-medium transition ${
+                    appMode === mode
+                      ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+                      : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </nav>
           <div className="flex shrink-0 items-center gap-1">
             {!isDesktopApp && !isPwaInstalled && (
               <div
@@ -222,6 +245,30 @@ export default function Header() {
       <div className="safe-area-top invisible pointer-events-none" aria-hidden="true">
         <div className="safe-header-inner" />
       </div>
+      <div data-no-drag-select className="safe-area-x fixed left-0 right-0 top-[calc(var(--safe-area-top)+3.5rem)] z-30 border-b border-gray-200 bg-white/80 py-2 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80 sm:hidden">
+        <nav className="mx-auto flex max-w-7xl justify-center" aria-label="功能板块">
+          <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+            {([
+              ['gallery', '图片生成'],
+              ['sop', '拆图反推'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setAppMode(mode)}
+                className={`h-8 rounded-lg px-4 text-sm font-medium transition ${
+                  appMode === mode
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+                    : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </nav>
+      </div>
+      <div className="h-[52px] sm:hidden" aria-hidden="true" />
       {showHelp && <HelpModal appMode="gallery" onClose={() => setShowHelp(false)} />}
     </>
   )
