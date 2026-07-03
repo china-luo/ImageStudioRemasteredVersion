@@ -472,6 +472,10 @@ function resolveSopReverseProfileId(profiles: ApiProfile[], value: unknown, fall
   return profiles.find(isAmazonPlannerProfile)?.id ?? ''
 }
 
+function resolveVocProfileId(profiles: ApiProfile[], value: unknown, fallbackId: string): string {
+  return resolveSopReverseProfileId(profiles, value, fallbackId)
+}
+
 function createDefaultProfilePair(overrides: Partial<ApiProfile> = {}): ApiProfile[] {
   return [
     createDefaultImageProfile(overrides),
@@ -626,6 +630,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
     : profiles[0].id
   const amazonPlannerProfileId = resolveAmazonPlannerProfileId(profiles, record.amazonPlannerProfileId)
   const sopReverseProfileId = resolveSopReverseProfileId(profiles, record.sopReverseProfileId, amazonPlannerProfileId)
+  const vocProfileId = resolveVocProfileId(profiles, record.vocProfileId, amazonPlannerProfileId)
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
 
   return {
@@ -653,6 +658,8 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
     activeProfileId,
     amazonPlannerProfileId,
     sopReverseProfileId,
+    vocProfileId,
+    vocApiKey: typeof record.vocApiKey === 'string' ? record.vocApiKey : '',
   }
 }
 
@@ -758,6 +765,11 @@ export function getAmazonPlannerProfile(settings: Partial<AppSettings> | unknown
 export function getSopReverseProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
   const normalized = normalizeSettings(settings)
   return normalized.profiles.find((profile) => profile.id === normalized.sopReverseProfileId && isAmazonPlannerProfile(profile)) ?? null
+}
+
+export function getVocAnalysisProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
+  const normalized = normalizeSettings(settings)
+  return normalized.profiles.find((profile) => profile.id === normalized.vocProfileId && isAmazonPlannerProfile(profile)) ?? null
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {
@@ -1004,4 +1016,6 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   activeProfileId: DEFAULT_OPENAI_PROFILE_ID,
   amazonPlannerProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
   sopReverseProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
+  vocProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
+  vocApiKey: '',
 })

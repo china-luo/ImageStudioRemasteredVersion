@@ -13,6 +13,7 @@ import {
   findEquivalentApiProfile,
   getAmazonPlannerProfile,
   getImageGenerationProfile,
+  getVocAnalysisProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
   isOpenRouterImageGenerationProfile,
@@ -767,6 +768,66 @@ describe('amazon planner profile', () => {
     })
 
     expect(getImageGenerationProfile(settings)?.id).toBe(imageProfile.id)
+  })
+
+  it('keeps VOC analysis profile and Shulex key separate from image generation', () => {
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      name: 'Image Profile',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: DEFAULT_IMAGES_MODEL,
+    })
+    const plannerProfile = createDefaultOpenAIProfile({
+      id: 'planner-profile',
+      name: 'Planner Profile',
+      apiKey: 'planner-key',
+      apiMode: 'responses',
+      model: DEFAULT_RESPONSES_MODEL,
+    })
+    const vocProfile = createDefaultOpenAIProfile({
+      id: 'voc-profile',
+      name: 'VOC Profile',
+      apiKey: 'voc-ai-key',
+      apiMode: 'chat',
+      model: DEFAULT_CHAT_MODEL,
+    })
+
+    const settings = normalizeSettings({
+      profiles: [imageProfile, plannerProfile, vocProfile],
+      activeProfileId: imageProfile.id,
+      amazonPlannerProfileId: plannerProfile.id,
+      vocProfileId: vocProfile.id,
+      vocApiKey: 'shulex-key',
+    })
+
+    expect(settings.activeProfileId).toBe(imageProfile.id)
+    expect(settings.amazonPlannerProfileId).toBe(plannerProfile.id)
+    expect(settings.vocProfileId).toBe(vocProfile.id)
+    expect(settings.vocApiKey).toBe('shulex-key')
+    expect(getVocAnalysisProfile(settings)?.id).toBe(vocProfile.id)
+  })
+
+  it('defaults VOC analysis to the planner Chat/Responses profile when unset', () => {
+    const settings = normalizeSettings({
+      profiles: [
+        createDefaultOpenAIProfile({
+          id: 'image-profile',
+          apiMode: 'images',
+          model: DEFAULT_IMAGES_MODEL,
+        }),
+        createDefaultOpenAIProfile({
+          id: 'planner-profile',
+          apiMode: 'responses',
+          model: DEFAULT_RESPONSES_MODEL,
+        }),
+      ],
+      activeProfileId: 'image-profile',
+      amazonPlannerProfileId: 'planner-profile',
+    })
+
+    expect(settings.vocProfileId).toBe('planner-profile')
+    expect(getVocAnalysisProfile(settings)?.id).toBe('planner-profile')
   })
 })
 

@@ -278,6 +278,11 @@ profiles 中不要包含 apiKey（用户导入后自行填写）。
 const normalizeDraftSettings = (value: Partial<AppSettings> | unknown) =>
   normalizeSettings(value)
 
+function getAppVersionLabel() {
+  const buildVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''
+  return buildVersion.trim() || import.meta.env.VITE_APP_VERSION?.trim() || 'dev'
+}
+
 export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
   const settingsTabRequest = useStore((s) => s.settingsTabRequest)
@@ -399,6 +404,12 @@ export default function SettingsModal() {
         value: profile.id,
       }))
     : [{ label: '暂无 Chat/Responses 拆图配置', value: '' }]
+  const vocProfileOptions = amazonPlannerProfiles.length
+    ? amazonPlannerProfiles.map((profile) => ({
+        label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
+        value: profile.id,
+      }))
+    : [{ label: '暂无 Chat/Responses VOC 配置', value: '' }]
 
   const wasSettingsOpenRef = useRef(false)
 
@@ -1103,7 +1114,7 @@ export default function SettingsModal() {
             设置
           </h3>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">v{__APP_VERSION__}</span>
+            <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">v{getAppVersionLabel()}</span>
             <button
               onClick={handleClose}
               className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
@@ -1494,6 +1505,32 @@ export default function SettingsModal() {
                 />
                 <div data-selectable-text className="mt-2 text-xs leading-relaxed text-emerald-800 dark:text-emerald-200">
                   只用于「电商图片拆解反推 SOP」板块，把竞品图、表单信息和 SOP 一起发送给文本/多模态模型分析；不会改变图片生成板块的当前配置。
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-3 dark:border-amber-400/20 dark:bg-amber-400/10">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-amber-900 dark:text-amber-100">VOC 评论分析配置</span>
+                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-200">
+                    Reviews
+                  </span>
+                </div>
+                <Select
+                  value={draft.vocProfileId}
+                  onChange={(value) => commitSettings({ ...draft, vocProfileId: String(value) })}
+                  disabled={amazonPlannerProfiles.length === 0}
+                  options={vocProfileOptions}
+                  className="w-full rounded-xl border border-amber-200/70 bg-white/80 px-3 py-2.5 text-sm text-amber-900 outline-none transition focus:border-amber-300 dark:border-amber-400/20 dark:bg-gray-950/40 dark:text-amber-100 dark:focus:border-amber-500/50"
+                />
+                <input
+                  value={draft.vocApiKey}
+                  onChange={(event) => commitSettings({ ...draft, vocApiKey: event.target.value })}
+                  type="password"
+                  placeholder="Shulex API Key"
+                  className="mt-2 w-full rounded-xl border border-amber-200/70 bg-white/80 px-3 py-2.5 text-sm text-amber-900 outline-none transition placeholder:text-amber-700/45 focus:border-amber-300 dark:border-amber-400/20 dark:bg-gray-950/40 dark:text-amber-100 dark:placeholder:text-amber-200/35 dark:focus:border-amber-500/50"
+                />
+                <div data-selectable-text className="mt-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+                  只用于「VOC 评论分析」板块。ASIN 模式通过 Shulex 接口拉取评论，不再读取 Amazon 买家账号 Cookie；AI 分析使用这里选择的 Chat/Responses 模型。
                 </div>
               </div>
 

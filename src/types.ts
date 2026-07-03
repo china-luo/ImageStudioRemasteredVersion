@@ -1,7 +1,7 @@
 // ===== 设置 =====
 
 export type ApiMode = 'images' | 'responses' | 'chat'
-export type AppMode = 'gallery' | 'agent' | 'sop'
+export type AppMode = 'gallery' | 'agent' | 'sop' | 'voc'
 export type TaskWorkflow = 'amazon-listing' | 'amazon-aplus' | 'tiktok-main' | 'tiktok-detail' | 'gallery' | 'agent' | 'unknown'
 export type TaskAspect = 'square' | 'landscape' | 'portrait'
 export type HistoryWorkflowFilter = 'all' | TaskWorkflow
@@ -103,6 +103,8 @@ export interface AppSettings {
   activeProfileId: string
   amazonPlannerProfileId: string
   sopReverseProfileId: string
+  vocProfileId: string
+  vocApiKey: string
 }
 
 // ===== 任务参数 =====

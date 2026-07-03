@@ -1135,6 +1135,41 @@ describe('agent draft lifecycle', () => {
     })
   })
 
+  it('enters VOC mode as an independent non-agent workspace', () => {
+    useStore.getState().setAppMode('voc')
+
+    const state = useStore.getState()
+    expect(state.appMode).toBe('voc')
+    expect(state.prompt).toBe('')
+    expect(state.inputImages).toEqual([])
+    expect(state.maskDraft).toBeNull()
+    expect(state.maskEditorImageId).toBeNull()
+    expect(state.agentEditingRoundId).toBeNull()
+    expect(state.agentInputDrafts['conversation-a']).toMatchObject({
+      prompt: draftState.prompt,
+      inputImages: draftState.inputImages,
+      maskDraft: draftState.maskDraft,
+      maskEditorImageId: imageA.id,
+    })
+  })
+
+  it('persists the gallery draft while VOC mode is active', () => {
+    const galleryPrompt = 'voc page gallery draft'
+    useStore.setState({
+      appMode: 'voc',
+      prompt: galleryPrompt,
+      inputImages: [imageB],
+      maskDraft: null,
+      maskEditorImageId: null,
+    })
+
+    const persisted = getPersistedState(useStore.getState())
+
+    expect(persisted.appMode).toBe('voc')
+    expect(persisted.prompt).toBe(galleryPrompt)
+    expect(persisted.inputImages).toEqual([{ id: imageB.id, dataUrl: '' }])
+  })
+
   it('normalizes persisted agent mode back to gallery while retaining agent drafts', () => {
     const merged = mergePersistedState({
       appMode: 'agent',

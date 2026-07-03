@@ -150,6 +150,7 @@ export default function Header() {
               {([
                 ['gallery', '图片生成'],
                 ['sop', '拆图反推'],
+                ['voc', 'VOC评论'],
               ] as const).map(([mode, label]) => (
                 <button
                   key={mode}
@@ -251,6 +252,7 @@ export default function Header() {
             {([
               ['gallery', '图片生成'],
               ['sop', '拆图反推'],
+              ['voc', 'VOC评论'],
             ] as const).map(([mode, label]) => (
               <button
                 key={mode}

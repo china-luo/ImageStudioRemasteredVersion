@@ -5,6 +5,7 @@ import { readFileSync } from 'fs'
 import { normalizeDevProxyConfig } from './src/lib/devProxy'
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
+process.env.VITE_APP_VERSION = process.env.VITE_APP_VERSION || pkg.version
 const shutdownPath = '/__amazon-image-studio/stop'
 
 function loadDevProxyConfig() {
@@ -71,6 +72,7 @@ export default defineConfig(({ command }) => {
     base: './',
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
       __DEV_PROXY_CONFIG__: JSON.stringify(devProxyConfig),
     },
     server: {
