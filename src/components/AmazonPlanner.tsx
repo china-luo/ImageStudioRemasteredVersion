@@ -9,7 +9,9 @@ import {
   buildAmazonAPlusPlanPrompt,
   buildAmazonPlanPrompt,
   buildAmazonStyleCandidatePrompt,
+  buildAdaptiveStylePresetCandidate,
   buildTiktokPlanPrompt,
+  CROSS_BORDER_STYLE_PRESETS,
   formatAPlusModuleText,
   getAPlusContentTypeLabel,
   getAPlusModuleDisplayName,
@@ -17,6 +19,7 @@ import {
   getAPlusModuleGenerationSize,
   getAPlusModuleSpecs,
   getAPlusModuleUploadSize,
+  getStylePresetCandidate,
   isCommerceMainSlot,
   isAmazonListingMainSlot,
   isAPlusTextModule,
@@ -37,7 +40,7 @@ import { deleteAmazonPlannerSession, getAllAmazonPlannerSessions, putAmazonPlann
 import { summarizeGenerationError } from '../lib/generationError'
 import { normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { prepareReferenceImagePayload, type PlannerReferenceImagePayload } from '../lib/referenceImagePayload'
-import { DEFAULT_PARAMS, type ApiMode, type ApiProfile } from '../types'
+import { DEFAULT_PARAMS, type AmazonStyleSourceMode, type ApiMode, type ApiProfile } from '../types'
 import type { AmazonPlannerSession } from '../types'
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, EyeIcon, HistoryIcon, PhotoIcon, PlusIcon, TrashIcon } from './icons'
 
@@ -53,6 +56,11 @@ const STYLE_DENSITY_OPTIONS: Array<{ value: AmazonStyleDensityMode; label: strin
   { value: 'rich', label: '信息丰富' },
   { value: 'minimal', label: '简约' },
 ]
+const STYLE_SOURCE_OPTIONS: Array<{ value: AmazonStyleSourceMode; label: string; description: string }> = [
+  { value: 'ai', label: 'AI推荐', description: '使用 AI 策划返回的 3 款风格' },
+  { value: 'preset', label: '内置风格库', description: '从常用跨境品牌风格中自选' },
+]
+const DEFAULT_STYLE_PRESET_IDS = CROSS_BORDER_STYLE_PRESETS.slice(0, 3).map((preset) => preset.id)
 
 function getApiModeLabel(apiMode: ApiMode) {
   if (apiMode === 'responses') return 'Responses API'
@@ -88,6 +96,10 @@ type StylePreviewState = {
   description: string
   left: number
   top: number
+}
+type StyleBoardModeState = {
+  images: StyleImageState[]
+  selectedStyleIndex: number | null
 }
 const PLANNER_HISTORY_LIMIT = 30
 
@@ -357,8 +369,14 @@ export default function AmazonPlanner() {
     tiktokDetail: '',
   })
   const [styleCandidates, setStyleCandidates] = useState<AmazonStyleCandidate[]>([])
+  const [styleSourceMode, setStyleSourceMode] = useState<AmazonStyleSourceMode>('ai')
+  const [selectedStylePresetIds, setSelectedStylePresetIds] = useState<string[]>(DEFAULT_STYLE_PRESET_IDS)
   const [styleImages, setStyleImages] = useState<StyleImageState[]>([])
   const styleImagesRef = useRef<StyleImageState[]>([])
+  const styleBoardCacheRef = useRef<Record<AmazonStyleSourceMode, StyleBoardModeState>>({
+    ai: { images: [], selectedStyleIndex: null },
+    preset: { images: [], selectedStyleIndex: null },
+  })
   const [selectedStyleIndex, setSelectedStyleIndex] = useState<number | null>(null)
   const [styleDensityMode, setStyleDensityMode] = useState<AmazonStyleDensityMode>('rich')
   const [stylePreview, setStylePreview] = useState<StylePreviewState | null>(null)
@@ -380,12 +398,29 @@ export default function AmazonPlanner() {
   const selectedPlan = selectedPlanIndex == null ? null : imagePlans[selectedPlanIndex] ?? null
   const selectedAPlusPlan = selectedAPlusPlanIndex == null ? null : aPlusPlansWithSizes[selectedAPlusPlanIndex] ?? null
   const selectedAPlusText = selectedAPlusPlan ? formatAPlusModuleText(selectedAPlusPlan) : ''
-  const selectedStyleImage = selectedStyleIndex == null ? null : styleImages.find((image) => image.candidateIndex === selectedStyleIndex && image.status === 'done') ?? null
-  const selectedStyleCandidate = selectedStyleIndex == null ? null : styleCandidates[selectedStyleIndex] ?? null
-  const styleLightboxImageIds = useMemo(() => styleImages.flatMap((image) => image.status === 'done' && image.imageId ? [image.imageId] : []), [styleImages])
   const activeSeriesStyleGuide = plannerPlatform === 'tiktok'
     ? tiktokDesignType === 'detail' ? seriesStyleGuides.tiktokDetail : seriesStyleGuides.tiktokMain
     : plannerMode === 'aplus' ? seriesStyleGuides.aplus : seriesStyleGuides.listing
+  const presetProductContext = useMemo(() => [
+    draft.productTitle ? `Product title: ${draft.productTitle}` : '',
+    draft.category ? `Category: ${draft.category}` : '',
+    draft.brand ? `Brand: ${draft.brand}` : '',
+    draft.color ? `Color: ${draft.color}` : '',
+    draft.material ? `Material: ${draft.material}` : '',
+    draft.audience ? `Target audience: ${draft.audience}` : '',
+    draft.sellingPoints ? `Selling points: ${draft.sellingPoints}` : '',
+    draft.packageIncludes ? `Package includes: ${draft.packageIncludes}` : '',
+    draft.scene ? `Usage scene: ${draft.scene}` : '',
+    activeSeriesStyleGuide ? `AI series style guide: ${activeSeriesStyleGuide}` : '',
+  ], [activeSeriesStyleGuide, draft.audience, draft.brand, draft.category, draft.color, draft.material, draft.packageIncludes, draft.productTitle, draft.scene, draft.sellingPoints])
+  const presetStyleCandidates = useMemo(() => selectedStylePresetIds
+    .map((id) => getStylePresetCandidate(id))
+    .filter((preset): preset is NonNullable<typeof preset> => Boolean(preset))
+    .map((preset) => buildAdaptiveStylePresetCandidate(preset, presetProductContext, plannerPlatform)), [plannerPlatform, presetProductContext, selectedStylePresetIds])
+  const activeStyleCandidates = styleSourceMode === 'preset' ? presetStyleCandidates : styleCandidates
+  const selectedStyleImage = selectedStyleIndex == null ? null : styleImages.find((image) => image.candidateIndex === selectedStyleIndex && image.status === 'done') ?? null
+  const selectedStyleCandidate = selectedStyleIndex == null ? null : activeStyleCandidates[selectedStyleIndex] ?? null
+  const styleLightboxImageIds = useMemo(() => styleImages.flatMap((image) => image.status === 'done' && image.imageId ? [image.imageId] : []), [styleImages])
   const isMainListingPlan = plannerMode === 'listing' && isCommerceMainSlot(plannerPlatform, selectedPlan?.slot)
   const styleReferenceRequired = plannerPlatform === 'tiktok' ? true : !isMainListingPlan
   const hasStyleReference = Boolean(selectedStyleImage?.imageId)
@@ -556,7 +591,11 @@ export default function AmazonPlanner() {
 
   useEffect(() => {
     styleImagesRef.current = styleImages
-  }, [styleImages])
+    styleBoardCacheRef.current[styleSourceMode] = {
+      images: styleImages,
+      selectedStyleIndex,
+    }
+  }, [selectedStyleIndex, styleImages, styleSourceMode])
 
   const upsertPlannerSessionList = (session: AmazonPlannerSession) => {
     setPlannerSessions((current) => sortPlannerSessions([
@@ -586,6 +625,8 @@ export default function AmazonPlanner() {
       styleImages: overrides.styleImages ?? getSessionStyleImages(styleImages),
       selectedStyleIndex: overrides.selectedStyleIndex ?? selectedStyleIndex,
       styleDensityMode: overrides.styleDensityMode ?? styleDensityMode,
+      styleSourceMode: overrides.styleSourceMode ?? styleSourceMode,
+      selectedStylePresetIds: overrides.selectedStylePresetIds ?? selectedStylePresetIds,
       imagePlans: overrides.imagePlans ?? imagePlans,
       aPlusPlans: overrides.aPlusPlans ?? aPlusPlansWithSizes,
       selectedPlanIndex: overrides.selectedPlanIndex ?? selectedPlanIndex,
@@ -608,6 +649,40 @@ export default function AmazonPlanner() {
     void savePlannerSession(overrides).catch((err) => {
       showToast(`策划历史保存失败：${err instanceof Error ? err.message : String(err)}`, 'error')
     })
+  }
+
+  const rememberCurrentStyleBoardState = (mode: AmazonStyleSourceMode = styleSourceMode) => {
+    styleBoardCacheRef.current[mode] = {
+      images: styleImagesRef.current,
+      selectedStyleIndex,
+    }
+  }
+
+  const restoreStyleBoardState = (mode: AmazonStyleSourceMode) => {
+    const cached = styleBoardCacheRef.current[mode] ?? { images: [], selectedStyleIndex: null }
+    styleImagesRef.current = cached.images
+    setStyleImages(cached.images)
+    setSelectedStyleIndex(cached.selectedStyleIndex)
+    setStylePreview(null)
+    setStyleError('')
+  }
+
+  const clearStyleBoardImages = (persist = false, mode: AmazonStyleSourceMode = styleSourceMode) => {
+    styleImagesRef.current = []
+    setStyleImages([])
+    setSelectedStyleIndex(null)
+    setStylePreview(null)
+    setStyleError('')
+    styleBoardCacheRef.current[mode] = {
+      images: [],
+      selectedStyleIndex: null,
+    }
+    if (persist) {
+      updateCurrentPlannerSession({
+        styleImages: [],
+        selectedStyleIndex: null,
+      })
+    }
   }
 
   const markActionProgress = (key: string, progress: PlannerActionProgress) => {
@@ -773,8 +848,8 @@ export default function AmazonPlanner() {
       showToast('风格板正在生成中', 'info')
       return
     }
-    if (!styleCandidates.length) {
-      showToast('请先完成 AI 策划，再生成风格板', 'error')
+    if (!activeStyleCandidates.length) {
+      showToast(styleSourceMode === 'preset' ? '请先选择至少 1 个内置风格' : '请先完成 AI 策划，再生成风格板', 'error')
       return
     }
 
@@ -787,7 +862,7 @@ export default function AmazonPlanner() {
     setStyleError('')
     setSelectedStyleIndex(null)
     setStylePreview(null)
-    const initialStyleImages: StyleImageState[] = styleCandidates.map((_, index) => ({ candidateIndex: index, status: 'running' }))
+    const initialStyleImages: StyleImageState[] = activeStyleCandidates.map((_, index) => ({ candidateIndex: index, status: 'running' }))
     styleImagesRef.current = initialStyleImages
     setStyleImages(initialStyleImages)
 
@@ -804,7 +879,7 @@ export default function AmazonPlanner() {
       const referencePayload = await prepareReferencePayloadForRequest(inputImages.map((image) => image.dataUrl), controller.signal)
       if (styleAbortControllerRef.current !== controller) return
 
-      const settled = await Promise.allSettled(styleCandidates.map(async (candidate, candidateIndex) => {
+      const settled = await Promise.allSettled(activeStyleCandidates.map(async (candidate, candidateIndex) => {
         const result = await callImageApi({
           settings: imageSettings,
           prompt: buildAmazonStyleCandidatePrompt(candidate, activeSeriesStyleGuide),
@@ -842,7 +917,7 @@ export default function AmazonPlanner() {
         styleImages: getSessionStyleImages(nextStyleImages),
         selectedStyleIndex: null,
       })
-      if (failed.length === styleCandidates.length) {
+      if (failed.length === activeStyleCandidates.length) {
         const message = failed[0]?.error || '风格板生成失败'
         setStyleError(message)
         showToast('风格板生成失败，请查看详情', 'error')
@@ -857,7 +932,7 @@ export default function AmazonPlanner() {
     } catch (err) {
       if (styleAbortControllerRef.current !== controller || isAbortError(err) || controller.signal.aborted) return
       const message = getStyleGenerationFailureDetail(err)
-      const failedStyleImages: StyleImageState[] = styleCandidates.map((_, index) => ({
+      const failedStyleImages: StyleImageState[] = activeStyleCandidates.map((_, index) => ({
         candidateIndex: index,
         status: 'error',
         error: message,
@@ -883,9 +958,9 @@ export default function AmazonPlanner() {
       showToast('风格板正在生成中', 'info')
       return
     }
-    const candidate = styleCandidates[candidateIndex]
+    const candidate = activeStyleCandidates[candidateIndex]
     if (!candidate) {
-      showToast('风格候选不存在，请重新 AI 策划', 'error')
+      showToast(styleSourceMode === 'preset' ? '风格候选不存在，请重新选择内置风格' : '风格候选不存在，请重新 AI 策划', 'error')
       return
     }
 
@@ -974,8 +1049,8 @@ export default function AmazonPlanner() {
       showToast('风格板正在生成中', 'info')
       return
     }
-    if (!styleCandidates.length) {
-      showToast('请先完成 AI 策划，再生成风格板', 'error')
+    if (!activeStyleCandidates.length) {
+      showToast(styleSourceMode === 'preset' ? '请先选择至少 1 个内置风格' : '请先完成 AI 策划，再生成风格板', 'error')
       return
     }
 
@@ -1012,7 +1087,8 @@ export default function AmazonPlanner() {
       title: '确认生成风格板',
       icon: 'info',
       message: [
-        '即将生成 3 张低清风格参考板，用于统一后续商品图视觉。',
+        `即将生成 ${activeStyleCandidates.length} 张低清风格参考板，用于统一后续商品图视觉。`,
+        `风格来源：${styleSourceMode === 'preset' ? '内置风格库' : 'AI 推荐'}`,
         `生图配置：${imageProfile.name}`,
         `模型：${imageProfile.model}`,
         `接口：${getImageProfileApiLabel(imageProfile)}`,
@@ -1083,11 +1159,12 @@ export default function AmazonPlanner() {
     }
     setSeriesStyleGuides(nextSeriesStyleGuides)
     setStyleCandidates(result.styleCandidates)
-    styleImagesRef.current = []
-    setStyleImages([])
-    setSelectedStyleIndex(null)
-    setStylePreview(null)
-    setStyleError('')
+    setStyleSourceMode('ai')
+    styleBoardCacheRef.current = {
+      ai: { images: [], selectedStyleIndex: null },
+      preset: { images: [], selectedStyleIndex: null },
+    }
+    clearStyleBoardImages(false, 'ai')
     setPlannerError('')
     setActionProgress({})
     void savePlannerSession({
@@ -1100,6 +1177,8 @@ export default function AmazonPlanner() {
       styleCandidates: result.styleCandidates,
       styleImages: [],
       selectedStyleIndex: null,
+      styleSourceMode: 'ai',
+      selectedStylePresetIds,
       styleDensityMode,
       imagePlans: nextImagePlans,
       aPlusPlans: nextAPlusPlans,
@@ -1248,6 +1327,65 @@ export default function AmazonPlanner() {
   const changeStyleDensityMode = (mode: AmazonStyleDensityMode) => {
     setStyleDensityMode(mode)
     updateCurrentPlannerSession({ styleDensityMode: mode })
+  }
+
+  const changeStyleSourceMode = (mode: AmazonStyleSourceMode) => {
+    if (mode === styleSourceMode) return
+    rememberCurrentStyleBoardState()
+    setStyleSourceMode(mode)
+    restoreStyleBoardState(mode)
+    const cached = styleBoardCacheRef.current[mode] ?? { images: [], selectedStyleIndex: null }
+    updateCurrentPlannerSession({
+      styleSourceMode: mode,
+      selectedStylePresetIds,
+      styleImages: getSessionStyleImages(cached.images),
+      selectedStyleIndex: cached.selectedStyleIndex,
+    })
+  }
+
+  const changeStylePresetAt = (index: number, presetId: string) => {
+    if (selectedStylePresetIds.some((id, currentIndex) => currentIndex !== index && id === presetId)) {
+      showToast('这个内置风格已在其他位置选择', 'info')
+      return
+    }
+    const next = [...selectedStylePresetIds]
+    next[index] = presetId
+    const nextIds = next.filter(Boolean).slice(0, 3)
+    if (styleSourceMode !== 'preset') {
+      rememberCurrentStyleBoardState()
+      setStyleSourceMode('preset')
+    }
+    setSelectedStylePresetIds(nextIds)
+    clearStyleBoardImages(false, 'preset')
+    updateCurrentPlannerSession({
+      selectedStylePresetIds: nextIds,
+      styleSourceMode: 'preset',
+      styleImages: [],
+      selectedStyleIndex: null,
+    })
+  }
+
+  const openStylePresetDetail = (presetId: string) => {
+    const preset = getStylePresetCandidate(presetId)
+    if (!preset) return
+    setConfirmDialog({
+      title: preset.label,
+      icon: 'info',
+      message: [
+        `分类：${preset.category}`,
+        `适用：${preset.description}`,
+        '',
+        '核心提示词：',
+        preset.prompt,
+        '',
+        plannerPlatform === 'tiktok'
+          ? '当前平台：TikTok Shop US，生成时会追加 TikTok 专用风格板规则。'
+          : '当前平台：亚马逊，生成时会追加 Amazon 专用风格板规则。',
+      ].join('\n'),
+      confirmText: '知道了',
+      showCancel: false,
+      action: () => {},
+    })
   }
 
   const openStylePreview = (imageId: string) => {
@@ -1413,6 +1551,8 @@ export default function AmazonPlanner() {
     setStyleImages(restoredStyleImages)
     setSelectedStyleIndex(selectedStyleRestored ? session.selectedStyleIndex : null)
     setStyleDensityMode(session.styleDensityMode ?? 'rich')
+    setStyleSourceMode(session.styleSourceMode ?? 'ai')
+    setSelectedStylePresetIds(session.selectedStylePresetIds?.length ? session.selectedStylePresetIds : DEFAULT_STYLE_PRESET_IDS)
     setStylePreview(null)
     setImagePlans(session.imagePlans as AmazonImagePlan[])
     setAPlusPlans(session.aPlusPlans as AmazonAPlusPlan[])
@@ -2093,7 +2233,7 @@ export default function AmazonPlanner() {
                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">视觉风格选择</div>
                   <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                     {imageGenerationProfile
-                      ? `先生成 3 张低清风格参考板；将自动使用生图配置「${imageGenerationProfile.name}」${imageGenerationProfileValidation ? `（${imageGenerationProfileValidation}）` : ''}。`
+                      ? `先选择风格来源，再生成低清风格参考板；将自动使用生图配置「${imageGenerationProfile.name}」${imageGenerationProfileValidation ? `（${imageGenerationProfileValidation}）` : ''}。`
                       : imageGenerationProfileValidation}
                   </div>
                 </div>
@@ -2113,8 +2253,8 @@ export default function AmazonPlanner() {
                   <button
                     type="button"
                     onClick={confirmGenerateStyleImages}
-                    disabled={isGeneratingStyleImages || styleCandidates.length === 0}
-                    className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition ${isGeneratingStyleImages || styleCandidates.length === 0 ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200'} ${guideState.target === 'style' ? 'ring-2 ring-blue-500/25 ring-offset-2 ring-offset-blue-50 dark:ring-offset-gray-950' : ''}`}
+                    disabled={isGeneratingStyleImages || activeStyleCandidates.length === 0}
+                    className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition ${isGeneratingStyleImages || activeStyleCandidates.length === 0 ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200'} ${guideState.target === 'style' ? 'ring-2 ring-blue-500/25 ring-offset-2 ring-offset-blue-50 dark:ring-offset-gray-950' : ''}`}
                   >
                     <PhotoIcon className="h-4 w-4" />
                     {isGeneratingStyleImages ? '生成中...' : '生成风格板'}
@@ -2131,14 +2271,90 @@ export default function AmazonPlanner() {
                   )}
                 </div>
               </div>
+              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white/70 p-2.5 dark:border-white/[0.08] dark:bg-gray-950/40">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {STYLE_SOURCE_OPTIONS.map((option) => {
+                    const isSelected = styleSourceMode === option.value
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => changeStyleSourceMode(option.value)}
+                        className={`rounded-lg border px-3 py-2 text-left transition ${isSelected ? 'border-gray-900 bg-gray-900 text-white shadow-sm dark:border-white dark:bg-white dark:text-gray-950' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.05]'}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold">{option.label}</span>
+                          {isSelected && (
+                            <span className="rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-bold dark:bg-gray-950/10">当前</span>
+                          )}
+                        </div>
+                        <div className={`mt-1 text-[11px] leading-relaxed ${isSelected ? 'text-white/70 dark:text-gray-700' : 'text-gray-500 dark:text-gray-400'}`}>
+                          {option.description}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                {styleSourceMode === 'preset' && (
+                  <div>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">常用跨境品牌风格</div>
+                        <div className="mt-0.5 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                          {activeSeriesStyleGuide ? '已按当前商品信息和系列风格说明动态适配，不混入 AI 推荐的其他风格候选。' : '未完成 AI 策划时，将使用基础内置风格模板。'}
+                        </div>
+                      </div>
+                      <span className={`rounded px-2 py-1 text-[11px] font-semibold ${selectedStylePresetIds.length ? 'bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-200' : 'bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-200'}`}>
+                        已选 {selectedStylePresetIds.length}/3
+                      </span>
+                    </div>
+                    <div className="grid gap-2">
+                      {selectedStylePresetIds.map((presetId, index) => {
+                        const preset = getStylePresetCandidate(presetId) ?? CROSS_BORDER_STYLE_PRESETS[0]
+                        return (
+                          <div key={`${index}-${presetId}`} className="grid gap-2 rounded-lg border border-gray-200 bg-white p-2 dark:border-white/[0.08] dark:bg-gray-900 sm:grid-cols-[86px_minmax(0,1fr)_auto] sm:items-center">
+                            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">风格 {index + 1}</div>
+                            <select
+                              value={presetId}
+                              onChange={(event) => changeStylePresetAt(index, event.target.value)}
+                              className="h-9 min-w-0 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                            >
+                              {CROSS_BORDER_STYLE_PRESETS.map((option) => (
+                                <option
+                                  key={option.id}
+                                  value={option.id}
+                                  disabled={selectedStylePresetIds.some((id, currentIndex) => currentIndex !== index && id === option.id)}
+                                >
+                                  {option.category} - {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => openStylePresetDetail(presetId)}
+                              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-blue-400/10 dark:hover:text-blue-200"
+                            >
+                              <EyeIcon className="h-3.5 w-3.5" />
+                              查看
+                            </button>
+                            <div className="line-clamp-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400 sm:col-span-3">
+                              {preset?.description}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
               {styleError && (
                 <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">
                   {styleError}
                 </div>
               )}
-              {styleCandidates.length > 0 && (
+              {activeStyleCandidates.length > 0 && (
                 <div className={`mt-3 grid gap-2 rounded-xl transition sm:grid-cols-3 ${getGuideFocusClass(guideState.target === 'style-choice')}`}>
-                  {styleCandidates.map((candidate, index) => {
+                  {activeStyleCandidates.map((candidate, index) => {
                     const imageState = styleImages.find((image) => image.candidateIndex === index)
                     const isSelected = selectedStyleIndex === index && imageState?.status === 'done'
                     const previewImageId = imageState?.status === 'done' ? imageState.imageId : undefined

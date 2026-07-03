@@ -1,7 +1,7 @@
 // ===== 设置 =====
 
 export type ApiMode = 'images' | 'responses' | 'chat'
-export type AppMode = 'gallery' | 'agent'
+export type AppMode = 'gallery' | 'agent' | 'sop' | 'voc'
 export type TaskWorkflow = 'amazon-listing' | 'amazon-aplus' | 'tiktok-main' | 'tiktok-detail' | 'gallery' | 'agent' | 'unknown'
 export type TaskAspect = 'square' | 'landscape' | 'portrait'
 export type HistoryWorkflowFilter = 'all' | TaskWorkflow
@@ -102,6 +102,9 @@ export interface AppSettings {
   profiles: ApiProfile[]
   activeProfileId: string
   amazonPlannerProfileId: string
+  sopReverseProfileId: string
+  vocProfileId: string
+  vocApiKey: string
 }
 
 // ===== 任务参数 =====
@@ -280,6 +283,7 @@ export interface AmazonPlannerSessionStyleImage {
 }
 
 export type AmazonStyleDensityMode = 'rich' | 'minimal'
+export type AmazonStyleSourceMode = 'ai' | 'preset'
 
 export interface AmazonPlannerSession {
   id: string
@@ -302,6 +306,8 @@ export interface AmazonPlannerSession {
   styleImages: AmazonPlannerSessionStyleImage[]
   selectedStyleIndex: number | null
   styleDensityMode?: AmazonStyleDensityMode
+  styleSourceMode?: AmazonStyleSourceMode
+  selectedStylePresetIds?: string[]
   imagePlans: AmazonPlannerSessionImagePlan[]
   aPlusPlans: AmazonPlannerSessionAPlusPlan[]
   selectedPlanIndex: number | null

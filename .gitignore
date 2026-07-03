@@ -10,6 +10,8 @@ release/
 .env.*
 !.env.example
 dev-proxy.config.json
+amazon_cookies*.txt
+.amazon-playwright-state*.json
 
 # Local dev/runtime state
 .amazon-image-studio-dev.pid

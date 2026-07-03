@@ -47,9 +47,9 @@ function createMainWindow() {
     event.preventDefault()
     dialog.showMessageBox(mainWindow, {
       type: 'question',
-      title: '关闭跨境Image工作台',
+      title: `关闭${APP_TITLE}`,
       message: '请选择关闭后的操作',
-      detail: '退出应用会完全关闭程序；最小化会将窗口收起到任务栏，稍后可从任务栏恢复。',
+      detail: '退出应用会完全关闭程序；最小化会将窗口收起到任务栏，稍后可以从任务栏恢复。',
       buttons: ['退出应用', '最小化', '取消'],
       defaultId: 1,
       cancelId: 2,

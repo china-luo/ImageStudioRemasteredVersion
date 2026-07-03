@@ -619,7 +619,7 @@ export function getPersistedState(state: AppState) {
   return {
     settings,
     params: state.params,
-    ...(settings.persistInputOnRestart && (state.appMode === 'gallery' || galleryInputDraft)
+    ...(settings.persistInputOnRestart && (state.appMode === 'gallery' || state.appMode === 'sop' || state.appMode === 'voc' || galleryInputDraft)
       ? {
           prompt: galleryInputDraft?.prompt ?? '',
           inputImages: galleryInputDraft?.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) ?? [],
@@ -986,7 +986,7 @@ function saveActiveAgentInputDrafts(state: Pick<AppState, 'appMode' | 'activeAge
 }
 
 function saveGalleryInputDraft(state: Pick<AppState, 'appMode' | 'galleryInputDraft' | 'prompt' | 'inputImages' | 'maskDraft' | 'maskEditorImageId'>) {
-  if (state.appMode !== 'gallery') return state.galleryInputDraft
+  if (state.appMode !== 'gallery' && state.appMode !== 'sop' && state.appMode !== 'voc') return state.galleryInputDraft
   const draft = getCurrentAgentInputDraft(state)
   return isEmptyAgentInputDraft(draft) ? null : copyAgentInputDraft(draft)
 }
@@ -1020,7 +1020,7 @@ function syncActiveInputDraft<T extends Partial<AgentInputDraft>>(
     maskDraft: patch.maskDraft !== undefined ? patch.maskDraft : state.maskDraft,
     maskEditorImageId: patch.maskEditorImageId !== undefined ? patch.maskEditorImageId : state.maskEditorImageId,
   }
-  if (state.appMode === 'gallery') {
+  if (state.appMode === 'gallery' || state.appMode === 'sop' || state.appMode === 'voc') {
     return {
       ...patch,
       galleryInputDraft: isEmptyAgentInputDraft(draft) ? null : copyAgentInputDraft(draft),
@@ -1052,12 +1052,13 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       // Mode
       appMode: 'gallery',
-      setAppMode: () => {
+      setAppMode: (mode) => {
         const state = get()
         const agentInputDrafts = saveActiveAgentInputDrafts(state)
         const galleryInputDraft = saveGalleryInputDraft(state)
+        const nextMode: AppMode = mode === 'sop' || mode === 'voc' ? mode : 'gallery'
         set((state) => ({
-          appMode: 'gallery',
+          appMode: nextMode,
           agentInputDrafts,
           galleryInputDraft,
           agentMobileHeaderVisible: true,

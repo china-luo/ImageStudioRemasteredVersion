@@ -51,9 +51,10 @@ function Find-Rcedit {
 
 $packageJson = Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = [string]$packageJson.version
+$releaseDate = '2026-07-03'
 $releaseDir = Assert-WorkspacePath (Join-Path $root 'release')
 $appDir = Assert-WorkspacePath (Join-Path $releaseDir 'win-unpacked')
-$installerPath = Assert-WorkspacePath (Join-Path $releaseDir "ImageStudioRemasteredVersion-Setup-$version-x64.exe")
+$installerPath = Assert-WorkspacePath (Join-Path $releaseDir "ImageStudioRemasteredVersion-Setup-V$version-$releaseDate-x64.exe")
 $electronDist = Join-Path $root 'node_modules\electron\dist'
 $electronExe = Join-Path $electronDist 'electron.exe'
 $iconPng = Join-Path $root 'build\icon.png'
