@@ -93,4 +93,35 @@ Good,4,Good value and sturdy design,2026-01-03`, 'csv')
     expect(envelope.meta.diagnostics?.pages?.map((page) => page.rawReviewCount)).toEqual([10, 1])
   })
 
+  it('caps Shulex realtime maxPage at the API limit', async () => {
+    let submitMaxPage: unknown = null
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url)
+      if (href.includes('RtTask01')) {
+        submitMaxPage = (JSON.parse(String(init?.body)) as Record<string, unknown>).maxPage
+        return new Response(JSON.stringify({ code: 0, data: { taskId: 'task-1' } }))
+      }
+      return new Response(JSON.stringify({
+        code: 0,
+        data: {
+          status: 'SUCCESS',
+          asin: 'B0DFC2G8NG',
+          market: 'US',
+          total: 1,
+          reviews: [{ rating: 5, title: 'Good', body: 'Review body', reviewId: 'r1' }],
+        },
+      }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchShulexReviews({
+      asin: 'B0DFC2G8NG',
+      market: 'US',
+      limit: 1000,
+      apiKey: 'test-key',
+    })
+
+    expect(submitMaxPage).toBe(10)
+  })
+
 })

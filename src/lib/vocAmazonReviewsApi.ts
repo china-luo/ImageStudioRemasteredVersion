@@ -135,6 +135,9 @@ const MARKET_ALIASES: Record<string, string> = {
   au: 'AU',
 }
 
+export const SHULEX_REALTIME_MAX_REVIEWS = 100
+const SHULEX_REALTIME_PAGE_SIZE = 10
+
 const PAIN_KEYWORDS = [
   { label: '质量或耐用性问题', terms: ['broke', 'broken', 'defect', 'poor quality', 'cheap', 'durable', 'stopped working', 'fall apart', '裂', '坏', '质量', '耐用'] },
   { label: '尺寸或适配不符', terms: ['small', 'large', 'size', 'fit', 'fits', 'too big', 'too small', '尺寸', '太小', '太大', '不合适'] },
@@ -171,15 +174,15 @@ function readNumber(value: unknown): number {
 
 function normalizeShulexReview(review: Record<string, unknown>): VocReview {
   return {
-    rating: readNumber(review.rating),
-    title: readString(review.title),
-    body: readString(review.body) || readString(review.content),
-    date: readString(review.reviewDate) || readString(review.date),
+    rating: readNumber(review.rating ?? review.starRating ?? review.star),
+    title: readString(review.title) || readString(review.reviewTitle) || readString(review.review_title),
+    body: readString(review.body) || readString(review.content) || readString(review.reviewText) || readString(review.review_text) || readString(review.text),
+    date: readString(review.reviewDate) || readString(review.review_date) || readString(review.date),
     verified: Boolean(review.verified || review.verifiedPurchase),
-    variant: readString(review.variant),
-    author: readString(review.author) || readString(review.reviewerName),
-    helpful: readNumber(review.helpfulVotes ?? review.helpful),
-    reviewId: readString(review.reviewId),
+    variant: readString(review.variant) || readString(review.variation) || readString(review.variationInfo),
+    author: readString(review.author) || readString(review.reviewerName) || readString(review.userName) || readString(review.profileName),
+    helpful: readNumber(review.helpfulVotes ?? review.helpful_votes ?? review.helpful),
+    reviewId: readString(review.reviewId) || readString(review.review_id) || readString(review.id),
   }
 }
 
@@ -280,11 +283,11 @@ export async function fetchShulexReviews(options: {
   const asin = options.asin.trim().toUpperCase()
   if (!/^[A-Z0-9]{10}$/.test(asin)) throw new Error('ASIN 应为 10 位字母数字')
   const market = normalizeVocMarket(options.market)
-  const limit = Math.min(1000, Math.max(1, Math.trunc(Number(options.limit) || 100)))
+  const limit = Math.min(SHULEX_REALTIME_MAX_REVIEWS, Math.max(1, Math.trunc(Number(options.limit) || SHULEX_REALTIME_MAX_REVIEWS)))
   const apiKey = options.apiKey.trim()
   if (!apiKey) throw new Error('请先在系统设置里填写 Shulex API Key')
-  const maxPage = Math.min(100, Math.max(1, Math.ceil(limit / 10)))
-  const queryPageSize = 10
+  const maxPage = Math.min(10, Math.max(1, Math.ceil(limit / SHULEX_REALTIME_PAGE_SIZE)))
+  const queryPageSize = SHULEX_REALTIME_PAGE_SIZE
   const headers = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,

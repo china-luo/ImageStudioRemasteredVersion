@@ -1526,11 +1526,11 @@ export default function SettingsModal() {
                   value={draft.vocApiKey}
                   onChange={(event) => commitSettings({ ...draft, vocApiKey: event.target.value })}
                   type="password"
-                  placeholder="Shulex API Key"
+                  placeholder="Shulex OpenAPI Key（实时任务）"
                   className="mt-2 w-full rounded-xl border border-amber-200/70 bg-white/80 px-3 py-2.5 text-sm text-amber-900 outline-none transition placeholder:text-amber-700/45 focus:border-amber-300 dark:border-amber-400/20 dark:bg-gray-950/40 dark:text-amber-100 dark:placeholder:text-amber-200/35 dark:focus:border-amber-500/50"
                 />
                 <div data-selectable-text className="mt-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
-                  只用于「VOC 评论分析」板块。ASIN 模式通过 Shulex 接口拉取评论，不再读取 Amazon 买家账号 Cookie；AI 分析使用这里选择的 Chat/Responses 模型。
+                  只用于「VOC 评论分析」板块。评论拉取使用 Shulex OpenAPI Key；AI 分析使用这里选择的 Chat/Responses 模型。
                 </div>
               </div>
 

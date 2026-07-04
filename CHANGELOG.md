@@ -2,6 +2,17 @@
 
 按自然周（周一至周日）整理，最新一周在最上方。每个周块可展开查看本周推送内容，提交号用于回溯具体改动。
 
+<details open>
+<summary><strong>2026-06-29 至 2026-07-05</strong> - V1.4.2 VOC 修正与打赏入口</summary>
+
+- VOC 评论分析改回 Shulex OpenAPI 实时任务路径，移除误导性的 DataHub X-Token 配置。
+- VOC 板块保留独立 AI 配置和 OpenAPI Key 配置，不影响图片生成、拆图反推等既有功能。
+- 顶部品牌区新增“打赏”按钮，点击后弹出微信 / 支付宝收款码，并优化桌面和移动端显示尺寸。
+- 修复顶部品牌区 hover 时 JackLuo 签名不高亮的问题。
+- 更新 GitHub 仓库 About 描述，覆盖 Amazon / TikTok Shop、商品图生成、A+ 策划、拆图反推、VOC 评论分析和 Windows 桌面端交付。
+
+</details>
+
 <details>
 <summary><strong>2026-06-01 至 2026-06-07</strong> - OpenRouter、参考图压缩与策划体验</summary>
 

@@ -9,6 +9,7 @@ import {
   normalizeVocMarket,
   parseReviewsCsv,
   renderVocDashboardHtml,
+  SHULEX_REALTIME_MAX_REVIEWS,
   type VocReviewEnvelope,
 } from '../lib/vocAmazonReviewsApi'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
@@ -118,6 +119,10 @@ export default function VocAmazonReviewsWorkspace() {
     showToast('VOC 配置已保存', 'success')
   }
 
+  const updateLimit = (value: number) => {
+    setLimit(Math.max(1, Math.min(SHULEX_REALTIME_MAX_REVIEWS, Number(value) || 1)))
+  }
+
   const fetchByAsin = async () => {
     const controller = new AbortController()
     abortControllerRef.current = controller
@@ -125,7 +130,7 @@ export default function VocAmazonReviewsWorkspace() {
     setAiReport('')
     setIsFetching(true)
     try {
-      setStatusText('正在通过 Shulex 拉取 Amazon 评论')
+      setStatusText('正在通过 Shulex OpenAPI 实时任务拉取 Amazon 评论')
       const envelope = await fetchShulexReviews({
         asin,
         market: normalizeVocMarket(market),
@@ -139,6 +144,7 @@ export default function VocAmazonReviewsWorkspace() {
         `已抓取 ${envelope.reviews.length} 条评论`,
         envelope.meta.totalAvailable ? `Shulex total：${envelope.meta.totalAvailable}` : '',
         envelope.meta.pagesFetched ? `页数：${envelope.meta.pagesFetched}` : '',
+        '来源：实时任务',
         envelope.meta.status ? `状态：${envelope.meta.status}` : '',
       ].filter(Boolean).join('，'))
       showToast('VOC 评论数据已获取', 'success')
@@ -247,7 +253,7 @@ export default function VocAmazonReviewsWorkspace() {
               Amazon VOC 评论分析
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-              ASIN 模式通过 Shulex 接口拉取 Amazon 评论；CSV 可直接解析，再由独立 VOC AI 配置生成痛点、卖点、Listing 建议和 HTML dashboard。
+              ASIN 模式通过 Shulex OpenAPI 实时任务拉取 Amazon 评论；CSV 可直接解析，再由独立 VOC AI 配置生成痛点、卖点、Listing 建议和 HTML dashboard。
             </p>
           </div>
           <div className="grid min-w-[260px] gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-gray-900">
@@ -293,7 +299,7 @@ export default function VocAmazonReviewsWorkspace() {
         </div>
 
         {sourceMode === 'asin' ? (
-          <div className="grid gap-4 lg:grid-cols-[1fr_180px_160px]">
+          <div className="grid gap-4 lg:grid-cols-[1fr_180px_170px]">
             <label>
               <span className={LABEL_CLASS}>Amazon ASIN</span>
               <input value={asin} onChange={(event) => setAsin(event.target.value.toUpperCase())} className={FIELD_CLASS} placeholder="例如 B08N5WRWNW" />
@@ -304,11 +310,14 @@ export default function VocAmazonReviewsWorkspace() {
             </label>
             <label>
               <span className={LABEL_CLASS}>评论数量</span>
-              <input value={limit} onChange={(event) => setLimit(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))} type="number" min={1} max={1000} className={FIELD_CLASS} />
+              <input value={limit} onChange={(event) => updateLimit(Number(event.target.value))} type="number" min={1} max={SHULEX_REALTIME_MAX_REVIEWS} className={FIELD_CLASS} />
             </label>
+            <div className="lg:col-span-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
+              Shulex OpenAPI 实时任务受接口限制，最大 10 页，每页 10 条，因此最多抓取 {SHULEX_REALTIME_MAX_REVIEWS} 条评论。当前版本不再使用 Amazon 买家账号 Cookie。
+            </div>
             {!hasShulexKey && (
               <div className="lg:col-span-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
-                请先在系统设置里填写 Shulex API Key。当前版本不再使用 Amazon 买家账号 Cookie。
+                请先在系统设置里填写 Shulex OpenAPI Key。
               </div>
             )}
           </div>
@@ -474,13 +483,13 @@ export default function VocAmazonReviewsWorkspace() {
 
           <div className="mt-5 grid gap-4">
             <label>
-              <span className={LABEL_CLASS}>Shulex API Key</span>
+              <span className={LABEL_CLASS}>Shulex OpenAPI Key（实时任务）</span>
               <input
                 value={draftVocApiKey}
                 onChange={(event) => setDraftVocApiKey(event.target.value)}
                 type="password"
                 className={FIELD_CLASS}
-                placeholder="填写 Shulex API Key"
+                placeholder="用于 openapi.shulex.com 实时抓取，最多 100 条"
               />
             </label>
             <label>
