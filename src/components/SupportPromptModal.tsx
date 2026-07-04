@@ -33,7 +33,7 @@ export default function SupportPromptModal() {
     >
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" />
       <div
-        className="relative z-10 w-full max-w-sm rounded-[2rem] border border-white/50 bg-white/95 p-6 pb-7 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 flex flex-col"
+        className="relative z-10 flex max-h-[92vh] w-full max-w-md flex-col overflow-y-auto rounded-[2rem] border border-white/50 bg-white/95 p-6 pb-7 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="absolute right-4 top-4">
@@ -49,9 +49,9 @@ export default function SupportPromptModal() {
 
         <div className="mb-5 mt-4 flex justify-center">
           <img
-            src={getPublicAssetUrl('support-wechat-pay.jpg')}
+            src={getPublicAssetUrl('support-wechat-pay-qr.png')}
             alt="微信赞助码"
-            className="h-36 w-36 rounded-[1.5rem] border border-gray-200 bg-white object-cover p-1 shadow-sm dark:border-white/[0.08]"
+            className="w-full max-w-[280px] rounded-[1.5rem] border border-gray-200 bg-white object-contain p-1.5 shadow-sm dark:border-white/[0.08]"
           />
         </div>
 

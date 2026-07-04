@@ -1946,7 +1946,7 @@ export default function SettingsModal() {
             )}
 
             {activeTab === 'about' && (
-              <div className="flex h-full min-h-[300px] flex-col items-center justify-center pb-8 px-6">
+              <div className="flex h-full min-h-[300px] flex-col items-center overflow-y-auto px-6 py-6">
                 <div className="mb-5 flex h-[88px] w-[88px] items-center justify-center rounded-3xl border border-gray-200/80 bg-white p-1.5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04]">
                   <img
                     src={getPublicAssetUrl('pwa-icon.png')}
@@ -1958,7 +1958,7 @@ export default function SettingsModal() {
                 <p className="mt-3 max-w-[420px] text-center text-[13px] leading-relaxed text-gray-500 dark:text-gray-400">
                   面向 Amazon 与 TikTok Shop 商品图二次创作，支持主图、卖点图、详情图、A+ 模块策划与图片生成。
                 </p>
-                <div className="mt-6 flex w-full max-w-[420px] flex-col items-center gap-4 rounded-2xl border border-gray-200/70 bg-gray-50/70 p-5 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                <div className="mt-5 flex w-full max-w-[420px] flex-col items-center gap-3 rounded-2xl border border-gray-200/70 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
                   <a
                     href={APP_REPOSITORY_URL}
                     target="_blank"
@@ -1972,9 +1972,9 @@ export default function SettingsModal() {
                   </a>
                   <div className="flex flex-col items-center gap-2">
                     <img
-                      src={getPublicAssetUrl('support-wechat-pay.jpg')}
+                      src={getPublicAssetUrl('support-wechat-pay-qr.png')}
                       alt="微信赞助码"
-                      className="h-36 w-36 rounded-2xl border border-gray-200 bg-white object-cover p-1 shadow-sm dark:border-white/[0.08]"
+                      className="w-full max-w-[200px] rounded-2xl border border-gray-200 bg-white object-contain p-1.5 shadow-sm dark:border-white/[0.08]"
                     />
                     <span className="text-xs text-gray-500 dark:text-gray-400">微信赞助码</span>
                   </div>
