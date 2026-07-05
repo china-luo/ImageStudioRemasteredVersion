@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createLocalVocSummary, fetchShulexReviews, normalizeVocMarket, parseReviewsCsv } from './vocAmazonReviewsApi'
+import * as XLSX from 'xlsx'
+import { createLocalVocSummary, fetchShulexReviews, normalizeVocMarket, parseReviewsCsv, parseReviewsXlsx } from './vocAmazonReviewsApi'
 
 describe('VOC Amazon reviews helpers', () => {
   afterEach(() => {
@@ -29,6 +30,32 @@ Empty,5,,2026-01-03`, 'paste')
       rating: 5,
       body: 'Works great, easy to use',
       date: '2026-01-01',
+    })
+  })
+
+  it('parses review XLSX from the first worksheet with detected columns', async () => {
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ['标题', '评分', '内容', '日期'],
+      ['Great', 5, 'Works great and feels sturdy', '2026-01-01'],
+      ['Bad', 1, 'Broke quickly after delivery', '2026-01-02'],
+      ['Empty', 5, '', '2026-01-03'],
+    ])
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Reviews')
+    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+
+    const envelope = await parseReviewsXlsx(buffer)
+
+    expect(envelope.meta.source).toBe('xlsx')
+    expect(envelope.meta.rowsInFile).toBe(3)
+    expect(envelope.meta.rowsUsed).toBe(2)
+    expect(envelope.meta.rowsDropped).toBe(1)
+    expect(envelope.meta.columnsDetected?.body).toBe('内容')
+    expect(envelope.reviews[1]).toMatchObject({
+      title: 'Bad',
+      rating: 1,
+      body: 'Broke quickly after delivery',
+      date: '2026-01-02',
     })
   })
 

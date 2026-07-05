@@ -283,6 +283,8 @@ function getAppVersionLabel() {
   return buildVersion.trim() || import.meta.env.VITE_APP_VERSION?.trim() || 'dev'
 }
 
+const ABOUT_DESCRIPTION = '面向 Amazon 与 TikTok Shop 的跨境电商图片工作台，支持商品图生成、Listing 与 A+ 图片策划、竞品图片拆解反推、VOC 评论分析，以及 CSV/XLSX 评论导入后的 AI 报告生成。适合主图、卖点图、详情图、A+ 模块和多平台视觉素材的本地化创作流程。'
+
 export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
   const settingsTabRequest = useStore((s) => s.settingsTabRequest)
@@ -315,6 +317,7 @@ export default function SettingsModal() {
   const [profileImportUrlTooltipVisible, setProfileImportUrlTooltipVisible] = useState(false)
   const [duplicateProfileTooltipVisible, setDuplicateProfileTooltipVisible] = useState(false)
   const [llmPromptTooltipVisible, setLlmPromptTooltipVisible] = useState(false)
+  const [aboutDescriptionExpanded, setAboutDescriptionExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('api')
   const [exportConfig, setExportConfig] = useState(true)
   const [exportTasks, setExportTasks] = useState(true)
@@ -1955,9 +1958,28 @@ export default function SettingsModal() {
                   />
                 </div>
                 <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">{APP_BRAND_NAME}</h4>
-                <p className="mt-3 max-w-[420px] text-center text-[13px] leading-relaxed text-gray-500 dark:text-gray-400">
-                  面向 Amazon 与 TikTok Shop 商品图二次创作，支持主图、卖点图、详情图、A+ 模块策划与图片生成。
-                </p>
+                <button
+                  type="button"
+                  title={ABOUT_DESCRIPTION}
+                  onClick={() => setAboutDescriptionExpanded((expanded) => !expanded)}
+                  className="group mt-3 max-w-[460px] rounded-2xl px-3 py-2 text-center transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:hover:bg-white/[0.04]"
+                  aria-expanded={aboutDescriptionExpanded}
+                >
+                  <span
+                    className="block text-[13px] leading-relaxed text-gray-500 dark:text-gray-400"
+                    style={aboutDescriptionExpanded ? undefined : {
+                      display: '-webkit-box',
+                      WebkitBoxOrient: 'vertical',
+                      WebkitLineClamp: 2,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {ABOUT_DESCRIPTION}
+                  </span>
+                  <span className="mt-1 block text-[11px] font-medium text-blue-500 opacity-0 transition group-hover:opacity-100 group-focus:opacity-100 dark:text-blue-300">
+                    {aboutDescriptionExpanded ? '收起介绍' : '查看完整介绍'}
+                  </span>
+                </button>
                 <div className="mt-5 flex w-full max-w-[420px] flex-col items-center gap-3 rounded-2xl border border-gray-200/70 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
                   <a
                     href={APP_REPOSITORY_URL}

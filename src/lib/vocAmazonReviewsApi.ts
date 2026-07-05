@@ -19,7 +19,7 @@ export interface VocReview {
 export interface VocReviewEnvelope {
   reviews: VocReview[]
   meta: {
-    source: 'asin' | 'shulex' | 'csv' | 'paste'
+    source: 'asin' | 'shulex' | 'csv' | 'xlsx' | 'paste'
     asin?: string
     market?: string
     totalAvailable?: number
@@ -480,9 +480,18 @@ function findColumn(headers: string[], keys: string[]): number {
   })
 }
 
-export function parseReviewsCsv(text: string, source: 'csv' | 'paste' = 'csv'): VocReviewEnvelope {
-  const rows = parseCsvRows(text.replace(/^\uFEFF/, ''))
-  if (rows.length < 2) throw new Error('CSV 至少需要表头和 1 行评论')
+type ReviewImportSource = 'csv' | 'xlsx' | 'paste'
+
+function normalizeImportedCell(value: unknown): string {
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  return String(value ?? '').trim()
+}
+
+function parseReviewRows(inputRows: unknown[][], source: ReviewImportSource, label: string): VocReviewEnvelope {
+  const rows = inputRows
+    .map((row) => row.map(normalizeImportedCell))
+    .filter((row) => row.some((cellValue) => cellValue.trim()))
+  if (rows.length < 2) throw new Error(`${label} 至少需要表头和 1 行评论`)
   const headers = rows[0]
   const bodyIndex = findColumn(headers, ['内容', '评价', '正文', 'review', 'body', 'text', 'content', 'comment'])
   if (bodyIndex < 0) throw new Error(`未识别评论内容列。支持列名包含：内容、评价、review、body、content。当前列：${headers.join(', ')}`)
@@ -503,7 +512,7 @@ export function parseReviewsCsv(text: string, source: 'csv' | 'paste' = 'csv'): 
       title: titleIndex >= 0 ? String(row[titleIndex] ?? '').trim() : '',
       body,
       date: dateIndex >= 0 ? String(row[dateIndex] ?? '').trim() : '',
-      reviewId: `csv-${index + 1}`,
+      reviewId: `${source}-${index + 1}`,
     })
   })
 
@@ -521,6 +530,25 @@ export function parseReviewsCsv(text: string, source: 'csv' | 'paste' = 'csv'): 
       },
     },
   }
+}
+
+export function parseReviewsCsv(text: string, source: 'csv' | 'paste' = 'csv'): VocReviewEnvelope {
+  return parseReviewRows(parseCsvRows(text.replace(/^\uFEFF/, '')), source, 'CSV')
+}
+
+export async function parseReviewsXlsx(buffer: ArrayBuffer): Promise<VocReviewEnvelope> {
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+  const firstSheetName = workbook.SheetNames[0]
+  if (!firstSheetName) throw new Error('XLSX 文件没有可读取的工作表')
+  const sheet = workbook.Sheets[firstSheetName]
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    raw: false,
+    defval: '',
+    blankrows: false,
+  }) as unknown[][]
+  return parseReviewRows(rows, 'xlsx', 'XLSX')
 }
 
 function containsAny(text: string, terms: string[]) {

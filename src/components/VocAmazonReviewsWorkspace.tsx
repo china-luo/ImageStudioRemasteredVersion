@@ -8,6 +8,7 @@ import {
   fetchShulexReviews,
   normalizeVocMarket,
   parseReviewsCsv,
+  parseReviewsXlsx,
   renderVocDashboardHtml,
   SHULEX_REALTIME_MAX_REVIEWS,
   type VocReviewEnvelope,
@@ -48,6 +49,10 @@ function downloadText(filename: string, text: string, type: string) {
 
 async function readFileText(file: File) {
   return file.text()
+}
+
+function isXlsxFile(file: File) {
+  return /\.xlsx$/i.test(file.name) || file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 }
 
 function formatPct(value: number) {
@@ -177,6 +182,22 @@ export default function VocAmazonReviewsWorkspace() {
   const handleCsvFile = async (files: FileList | null) => {
     const file = files?.[0]
     if (!file) return
+    if (isXlsxFile(file)) {
+      setError('')
+      setAiReport('')
+      try {
+        const envelope = await parseReviewsXlsx(await file.arrayBuffer())
+        setCsvText('')
+        setReviewsEnvelope(envelope)
+        setStatusText(`已解析 ${envelope.reviews.length} 条评论`)
+        showToast('XLSX 评论已解析', 'success')
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setError(message)
+        showToast(`XLSX 解析失败：${message}`, 'error')
+      }
+      return
+    }
     const text = await readFileText(file)
     setCsvText(text)
     parseCsvInput(text, 'csv')
@@ -285,7 +306,7 @@ export default function VocAmazonReviewsWorkspace() {
         <div className="mb-4 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
           {([
             ['asin', 'ASIN 拉取'],
-            ['csv', 'CSV 导入'],
+            ['csv', '文件导入'],
           ] as const).map(([mode, label]) => (
             <button
               key={mode}
@@ -326,14 +347,14 @@ export default function VocAmazonReviewsWorkspace() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={(event) => void handleCsvFile(event.target.files)}
             />
             <div className="flex flex-col gap-3 rounded-xl border border-dashed border-gray-300 bg-gray-50/80 p-3 dark:border-white/[0.12] dark:bg-gray-950/40 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">CSV 评论文件</div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">自动识别 review/body/content/评价/内容、rating/star/评分、date/日期列。</div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">CSV / XLSX 评论文件</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">XLSX 默认读取第一个工作表；自动识别 review/body/content/评价/内容、rating/star/评分、date/日期列。</div>
               </div>
               <button
                 type="button"
@@ -341,7 +362,7 @@ export default function VocAmazonReviewsWorkspace() {
                 className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]"
               >
                 <ImportIcon className="h-4 w-4" />
-                上传 CSV
+                上传 CSV / XLSX
               </button>
             </div>
             <label>

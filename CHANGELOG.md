@@ -3,6 +3,16 @@
 按自然周（周一至周日）整理，最新一周在最上方。每个周块可展开查看本周推送内容，提交号用于回溯具体改动。
 
 <details open>
+<summary><strong>2026-06-29 至 2026-07-05</strong> - V1.4.3 VOC 导入与关于页优化</summary>
+
+- VOC 文件导入支持 `.xlsx`，与 CSV 共用评论字段识别和本地/AI 分析流程。
+- XLSX 解析按需加载，避免影响主界面首屏加载体积。
+- 更新设置页“关于”说明，覆盖图片生成、Listing/A+ 策划、拆图反推、VOC 评论分析与 CSV/XLSX 导入。
+- 关于页说明默认两行截断，支持悬浮查看完整内容，并可点击展开/收起。
+
+</details>
+
+<details>
 <summary><strong>2026-06-29 至 2026-07-05</strong> - V1.4.2 VOC 修正与打赏入口</summary>
 
 - VOC 评论分析改回 Shulex OpenAPI 实时任务路径，移除误导性的 DataHub X-Token 配置。
