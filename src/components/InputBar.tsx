@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect, type ReactNode } from 'react'
+import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, updateTaskInStore, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds } from '../store'
 import { DEFAULT_PARAMS } from '../types'
@@ -340,6 +340,11 @@ const API_MAX_IMAGES = 16
 const DESKTOP_DOCK_MIN_WIDTH = 1024
 const DESKTOP_DOCK_BOTTOM_CLEARANCE = 32
 const AT_IMAGE_MENU_WIDTH = 256
+const AT_IMAGE_MENU_MAX_HEIGHT = 256
+const AT_IMAGE_MENU_MIN_HEIGHT = 96
+const AT_IMAGE_MENU_GAP = 8
+const AT_IMAGE_MENU_VIEWPORT_PADDING = 8
+const AT_IMAGE_MENU_DESKTOP_TOP_CLEARANCE = 68
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640)
@@ -354,6 +359,12 @@ function useIsMobile() {
 type AtImageOption =
   | { type: 'input'; key: string; label: string; imageId: string; dataUrl: string; imageIndex: number }
   | { type: 'agent-output'; key: string; label: string; imageId: string; insertText: string }
+
+type AtImageMenuAnchor = {
+  left: number
+  top: number
+  bottom: number
+}
 
 function agentImageMentionMatches(query: string, label: string) {
   const normalized = query.trim().toLowerCase()
@@ -535,8 +546,14 @@ export default function InputBar() {
   const isUserInputRef = useRef(false)
   const imageHintLockedRef = useRef(false)
   const imageHintReleaseRef = useRef<(() => void) | null>(null)
+  const atImageMenuAnchorRef = useRef<AtImageMenuAnchor | null>(null)
   const [cursorPos, setCursorPos] = useState(0)
   const [menuLeft, setMenuLeft] = useState(0)
+  const [atImageMenuStyle, setAtImageMenuStyle] = useState<CSSProperties>({
+    left: AT_IMAGE_MENU_VIEWPORT_PADDING,
+    bottom: AT_IMAGE_MENU_VIEWPORT_PADDING,
+    maxHeight: AT_IMAGE_MENU_MAX_HEIGHT,
+  })
   const maskConflictNoticeShownRef = useRef(false)
 
   const updateInputBarClearance = useCallback(() => {
@@ -718,6 +735,69 @@ export default function InputBar() {
       ]
     : []
   const showAtImageMenu = !atImageMenuDismissed && atImageOptions.length > 0
+
+  const updateAtImageMenuPosition = useCallback((anchorLeft = menuLeft, anchor = atImageMenuAnchorRef.current) => {
+    const el = textareaRef.current
+    if (!el) return
+
+    const rect = el.getBoundingClientRect()
+    const anchorRect = anchor ?? {
+      left: rect.left + anchorLeft,
+      top: rect.top,
+      bottom: rect.bottom,
+    }
+    const visualViewport = window.visualViewport
+    const viewportLeft = visualViewport?.offsetLeft ?? 0
+    const viewportTop = visualViewport?.offsetTop ?? 0
+    const viewportWidth = visualViewport?.width ?? window.innerWidth
+    const viewportHeight = visualViewport?.height ?? window.innerHeight
+    const minLeft = viewportLeft + AT_IMAGE_MENU_VIEWPORT_PADDING
+    const maxLeft = Math.max(minLeft, viewportLeft + viewportWidth - AT_IMAGE_MENU_VIEWPORT_PADDING - AT_IMAGE_MENU_WIDTH)
+    const left = Math.min(Math.max(anchorRect.left, minLeft), maxLeft)
+    const topBoundary = viewportTop + (window.innerWidth >= 640 ? AT_IMAGE_MENU_DESKTOP_TOP_CLEARANCE : AT_IMAGE_MENU_VIEWPORT_PADDING)
+    const bottomBoundary = viewportTop + viewportHeight - AT_IMAGE_MENU_VIEWPORT_PADDING
+    const spaceAbove = Math.max(0, anchorRect.top - AT_IMAGE_MENU_GAP - topBoundary)
+    const spaceBelow = Math.max(0, bottomBoundary - anchorRect.bottom - AT_IMAGE_MENU_GAP)
+    const openBelow = spaceBelow >= AT_IMAGE_MENU_MIN_HEIGHT || spaceBelow >= spaceAbove
+    const availableHeight = openBelow ? spaceBelow : spaceAbove
+    const maxHeight = Math.max(
+      AT_IMAGE_MENU_MIN_HEIGHT,
+      Math.min(AT_IMAGE_MENU_MAX_HEIGHT, availableHeight || Math.max(spaceAbove, spaceBelow)),
+    )
+
+    setAtImageMenuStyle(openBelow
+      ? {
+          left,
+          top: Math.max(topBoundary, Math.min(anchorRect.bottom + AT_IMAGE_MENU_GAP, bottomBoundary - maxHeight)),
+          maxHeight,
+        }
+      : {
+          left,
+          bottom: Math.max(AT_IMAGE_MENU_VIEWPORT_PADDING, window.innerHeight - anchorRect.top + AT_IMAGE_MENU_GAP),
+          maxHeight,
+        })
+  }, [menuLeft])
+
+  useLayoutEffect(() => {
+    if (!showAtImageMenu) return
+
+    const update = () => updateAtImageMenuPosition()
+    update()
+    const frame = window.requestAnimationFrame(update)
+    const visualViewport = window.visualViewport
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    visualViewport?.addEventListener('resize', update)
+    visualViewport?.addEventListener('scroll', update)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+      visualViewport?.removeEventListener('resize', update)
+      visualViewport?.removeEventListener('scroll', update)
+    }
+  }, [showAtImageMenu, atImageOptions.length, updateAtImageMenuPosition])
 
 
 
@@ -1352,14 +1432,20 @@ export default function InputBar() {
 
       const rangeRect = domRange.getBoundingClientRect()
       const elRect = el.getBoundingClientRect()
-      if (rangeRect.width === 0 && rangeRect.height === 0) return
+      const hasRangeRect = rangeRect.width !== 0 || rangeRect.height !== 0
       const nextLeft = rangeRect.left - elRect.left
       const maxLeft = Math.max(0, elRect.width - AT_IMAGE_MENU_WIDTH)
-      setMenuLeft(Math.min(Math.max(nextLeft, 0), maxLeft))
+      const clampedLeft = Math.min(Math.max(hasRangeRect ? nextLeft : menuLeft, 0), maxLeft)
+      const nextAnchor = hasRangeRect
+        ? { left: rangeRect.left, top: rangeRect.top, bottom: rangeRect.bottom }
+        : null
+      atImageMenuAnchorRef.current = nextAnchor
+      setMenuLeft(clampedLeft)
+      updateAtImageMenuPosition(clampedLeft, nextAnchor)
     }
     document.addEventListener('selectionchange', handleSelectionChange)
     return () => document.removeEventListener('selectionchange', handleSelectionChange)
-  }, [])
+  }, [updateAtImageMenuPosition])
 
   // 点击屏幕外部、空白处、卡片间隙等，使输入栏相关输入框失焦
   useEffect(() => {
@@ -2113,10 +2199,14 @@ export default function InputBar() {
 
           {/* 输入框 */}
           <div className="relative grid lg:min-h-0 lg:flex-1">
-            {showAtImageMenu && (
-              <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
-                <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>
-                <div className="max-h-56 overflow-y-auto custom-scrollbar">
+            {showAtImageMenu && createPortal(
+              <div
+                data-input-bar
+                style={atImageMenuStyle}
+                className="fixed z-[160] flex w-64 flex-col overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
+              >
+                <div className="shrink-0 px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>
+                <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
                   {atImageOptions.map((option, optionIndex) => (
                     <button
                       key={option.key}
@@ -2138,7 +2228,8 @@ export default function InputBar() {
                     </button>
                   ))}
                 </div>
-              </div>
+              </div>,
+              document.body,
             )}
             <div
               ref={textareaRef}
