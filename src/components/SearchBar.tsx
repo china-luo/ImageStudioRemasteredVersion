@@ -40,6 +40,22 @@ export default function SearchBar() {
     ]
   }, [filterProductTitle, tasks])
 
+  const hasAgentTasks = useMemo(
+    () => tasks.some((task) => task.sourceMode === 'agent' || Boolean(task.agentConversationId || task.agentRoundId)),
+    [tasks],
+  )
+  const workflowOptions = useMemo(() => [
+    { label: '全部来源', value: 'all' },
+    { label: 'Listing 图', value: 'amazon-listing' },
+    { label: 'A+ 图', value: 'amazon-aplus' },
+    { label: 'TikTok 商品主图', value: 'tiktok-main' },
+    { label: 'TikTok 商品详情图', value: 'tiktok-detail' },
+    { label: '普通生图', value: 'gallery' },
+    ...((hasAgentTasks || filterWorkflow === 'agent')
+      ? [{ label: 'Agent (legacy)', value: 'agent' }]
+      : []),
+  ], [filterWorkflow, hasAgentTasks])
+
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => matchesTaskHistoryFilters(task, {
       searchQuery,
@@ -122,15 +138,7 @@ export default function SearchBar() {
           <Select
             value={filterWorkflow}
             onChange={(val) => setFilterWorkflow(val as HistoryWorkflowFilter)}
-            options={[
-              { label: '全部来源', value: 'all' },
-              { label: 'Listing 图', value: 'amazon-listing' },
-              { label: 'A+ 图', value: 'amazon-aplus' },
-              { label: 'TikTok 商品主图', value: 'tiktok-main' },
-              { label: 'TikTok 商品详情图', value: 'tiktok-detail' },
-              { label: '普通生图', value: 'gallery' },
-              { label: 'Agent', value: 'agent' },
-            ]}
+            options={workflowOptions}
             className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
           />
         </div>

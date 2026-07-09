@@ -1,3 +1,5 @@
+// Legacy experimental Agent workspace. It is intentionally not mounted by the main app.
+// Keep only for old data compatibility and possible future extraction.
 import { useEffect, useMemo, useState, useRef, useCallback, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import type { AgentConversation, AgentMessage, AgentRound, ResponsesOutputItem, TaskRecord } from '../types'
 import { editOutputs, getActiveAgentRounds, getAgentBranchLeafId, getAgentSiblingRounds, getCachedImage, ensureImageCached, regenerateAgentAssistantMessage, removeMultipleTasks, removeTask, reuseConfig, updateTaskInStore, useStore } from '../store'

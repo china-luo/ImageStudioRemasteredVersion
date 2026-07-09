@@ -1,6 +1,9 @@
+import type { AmazonMarketplaceId } from './lib/amazonMarketplaces'
+
 // ===== 设置 =====
 
 export type ApiMode = 'images' | 'responses' | 'chat'
+// `agent` is retained only for legacy persisted data and old import/export payloads.
 export type AppMode = 'gallery' | 'agent' | 'sop' | 'voc'
 export type TaskWorkflow = 'amazon-listing' | 'amazon-aplus' | 'tiktok-main' | 'tiktok-detail' | 'gallery' | 'agent' | 'unknown'
 export type TaskAspect = 'square' | 'landscape' | 'portrait'
@@ -22,7 +25,6 @@ export interface CustomProviderFileMapping {
   source: CustomProviderFileSource
   array?: boolean
 }
-
 export interface CustomProviderResultMapping {
   imageUrlPaths?: string[]
   b64JsonPaths?: string[]
@@ -220,6 +222,7 @@ export interface TaskRecord {
     aPlusType?: 'standard' | 'standard-large' | 'premium'
     platform?: 'amazon' | 'tiktok'
     tiktokDesignType?: 'main' | 'detail'
+    marketplaceId?: AmazonMarketplaceId
     styleReferenceImageId?: string
   }
 }
@@ -283,12 +286,12 @@ export interface AmazonPlannerSessionStyleImage {
 }
 
 export type AmazonStyleDensityMode = 'rich' | 'minimal'
-export type AmazonStyleSourceMode = 'ai' | 'preset'
 
 export interface AmazonPlannerSession {
   id: string
   title: string
   platform?: 'amazon' | 'tiktok'
+  marketplaceId?: AmazonMarketplaceId
   tiktokDesignType?: 'main' | 'detail'
   mode: 'listing' | 'aplus'
   aPlusType: 'standard' | 'standard-large' | 'premium'
@@ -306,8 +309,6 @@ export interface AmazonPlannerSession {
   styleImages: AmazonPlannerSessionStyleImage[]
   selectedStyleIndex: number | null
   styleDensityMode?: AmazonStyleDensityMode
-  styleSourceMode?: AmazonStyleSourceMode
-  selectedStylePresetIds?: string[]
   imagePlans: AmazonPlannerSessionImagePlan[]
   aPlusPlans: AmazonPlannerSessionAPlusPlan[]
   selectedPlanIndex: number | null
@@ -369,8 +370,8 @@ export interface StoredImage {
   dataUrl: string
   /** 图片首次存储时间（ms） */
   createdAt?: number
-  /** 图片来源：用户上传 / API 生成 / 遮罩 */
-  source?: 'upload' | 'generated' | 'mask'
+  /** 图片来源：用户上传 / API 生成 / 遮罩；preset 仅用于兼容旧历史数据 */
+  source?: 'upload' | 'generated' | 'mask' | 'preset'
   /** 原图宽度 */
   width?: number
   /** 原图高度 */
@@ -515,7 +516,7 @@ export interface ExportData {
   imageFiles?: Record<string, {
     path: string
     createdAt?: number
-    source?: 'upload' | 'generated' | 'mask'
+    source?: 'upload' | 'generated' | 'mask' | 'preset'
     width?: number
     height?: number
   }>

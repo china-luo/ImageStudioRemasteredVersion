@@ -5,15 +5,12 @@ import {
   buildAmazonAPlusPlanPrompt,
   buildAmazonPlanPrompt,
   buildAmazonStyleCandidatePrompt,
-  buildAdaptiveStylePresetCandidate,
   buildTiktokPlanPrompt,
-  CROSS_BORDER_STYLE_PRESETS,
   formatAPlusModuleText,
   getAPlusContentTypeLabel,
   getAPlusModuleDisplayName,
   getAPlusModuleEnglishName,
   getAPlusModuleSpecs,
-  getStylePresetCandidate,
   isAmazonListingMainSlot,
 } from './listingPlanner'
 import { callAmazonPlannerApi } from './listingPlannerApi'
@@ -72,6 +69,20 @@ describe('Amazon prompt builders', () => {
     expect(prompt).toContain('refined minimal Amazon layout')
     expect(prompt).toContain('fewer callouts')
     expect(prompt).not.toContain('information-rich Amazon gallery layout')
+  })
+
+  it('adds Amazon marketplace visible-copy guidance without changing the prompt body language', () => {
+    const prompt = buildAmazonPlanPrompt({
+      prompt: 'Create a premium Amazon secondary image with benefit callouts.',
+      negativePrompt: 'Chinese UI wording, fake badges',
+      marketplaceId: 'jp',
+    })
+
+    expect(prompt).toContain('Target marketplace:')
+    expect(prompt).toContain('Amazon.co.jp')
+    expect(prompt).toContain('Keep all image-generation instructions written in English')
+    expect(prompt).toContain('visible customer-facing copy rendered inside the image must be natural Japanese')
+    expect(prompt).toContain('Japanese visible text may use Japanese characters')
   })
 
   it('builds TikTok prompts with TikTok Shop density guidance', () => {
@@ -205,60 +216,6 @@ describe('Amazon prompt builders', () => {
     expect(prompt).toContain('Chinese characters, QR code, price badge')
   })
 
-  it('ships reusable cross-border style presets for selectable style boards', () => {
-    expect(CROSS_BORDER_STYLE_PRESETS.length).toBeGreaterThanOrEqual(10)
-    expect(new Set(CROSS_BORDER_STYLE_PRESETS.map((preset) => preset.id)).size).toBe(CROSS_BORDER_STYLE_PRESETS.length)
-
-    for (const preset of CROSS_BORDER_STYLE_PRESETS) {
-      expect(preset.id).toMatch(/^[a-z0-9-]+$/)
-      expect(preset.category).toBeTruthy()
-      expect(preset.label).toBeTruthy()
-      expect(preset.description).toBeTruthy()
-      expect(preset.prompt).toContain('visual style reference board')
-      expect(preset.prompt).toMatch(/typography|layout|composition|palette/i)
-      expect(preset.prompt).not.toMatch(/Amazon|TikTok/i)
-      expect(preset.prompt).not.toMatch(/[\u4e00-\u9fff]/)
-      expect(preset.negativePrompt).toContain('Chinese characters')
-      expect(preset.negativePrompt).not.toMatch(/Amazon|TikTok|Prime/i)
-      expect(preset.negativePrompt).not.toMatch(/[\u4e00-\u9fff]/)
-      expect(getStylePresetCandidate(preset.id)).toBe(preset)
-    }
-  })
-
-  it('adapts preset style prompts with product context without mutating the preset', () => {
-    const preset = CROSS_BORDER_STYLE_PRESETS[0]!
-    const originalPrompt = preset.prompt
-    const adapted = buildAdaptiveStylePresetCandidate(preset, [
-      'Product title: Stainless steel kitchen organizer',
-      'Material: brushed metal and oak handle',
-      'Usage scene: premium kitchen counter storage',
-    ], 'amazon')
-
-    expect(adapted).not.toBe(preset)
-    expect(preset.prompt).toBe(originalPrompt)
-    expect(adapted.prompt).toContain(originalPrompt)
-    expect(adapted.prompt).toContain('Platform target: Amazon listing image style board.')
-    expect(adapted.prompt).toContain('Adapt this preset to the current product context')
-    expect(adapted.prompt).toContain('Stainless steel kitchen organizer')
-    expect(adapted.prompt).toContain('brushed metal and oak handle')
-    expect(adapted.prompt).toContain('premium kitchen counter storage')
-    expect(adapted.prompt).not.toContain('AI-planned visual directions')
-    expect(adapted.prompt).not.toContain('Platform target: TikTok Shop US product image style board.')
-    expect(adapted.negativePrompt).toContain('Chinese characters')
-    expect(adapted.negativePrompt).toContain('Prime badge')
-  })
-
-  it('adds TikTok-only platform guidance for preset style prompts when TikTok workbench is active', () => {
-    const preset = CROSS_BORDER_STYLE_PRESETS[0]!
-    const adapted = buildAdaptiveStylePresetCandidate(preset, ['Product title: Portable blender'], 'tiktok')
-
-    expect(adapted.prompt).toContain('Platform target: TikTok Shop US product image style board.')
-    expect(adapted.prompt).toContain('mobile-first readability')
-    expect(adapted.prompt).toContain('Do not include Amazon-specific listing badges')
-    expect(adapted.prompt).not.toContain('Platform target: Amazon listing image style board.')
-    expect(adapted.negativePrompt).toContain('TikTok logo')
-    expect(adapted.negativePrompt).toContain('Amazon logo')
-  })
 })
 
 describe('A+ module helpers', () => {
@@ -415,6 +372,7 @@ describe('callAmazonPlannerApi', () => {
         apiMode: 'responses',
         model: 'gpt-planner-profile',
       }),
+      marketplaceId: 'de',
       signal: controller.signal,
     })
 
@@ -428,11 +386,10 @@ describe('callAmazonPlannerApi', () => {
     expect(body.instructions).toContain('product fills about 85%')
     expect(body.instructions).toContain('no text, logo, watermark')
     expect(body.instructions).toContain('Do not use Amazon, Prime, Alexa, Amazon Choice')
-    expect(body.instructions).toContain('visual style reference board')
-    expect(body.instructions).toContain('typography samples')
-    expect(body.instructions).toContain('color palette swatches')
-    expect(body.instructions).toContain('lighting/material samples')
-    expect(body.instructions).toContain('icon/callout treatment')
+    expect(body.instructions).toContain('Target marketplace: 德国站 (Amazon.de, locale de-DE).')
+    expect(body.instructions).toContain('Customer-facing visible copy must be concise, natural German.')
+    expect(body.instructions).toContain('Keep image-generation prompt and negativePrompt fields written in English')
+    expect(body.instructions).toContain('Return exactly 3 styleCandidates')
     expect(body.instructions).toContain('fully plan the finished Amazon image')
     expect(body.instructions).toContain('complete information design')
     expect(body.instructions).not.toContain('sparse copy')
@@ -446,7 +403,8 @@ describe('callAmazonPlannerApi', () => {
     expect(body.text.format.schema.properties.product.properties).toHaveProperty('brand')
     expect(body.text.format.schema.properties.imagePlans.items.properties).toHaveProperty('planMarkdown')
     expect(body.text.format.schema.properties.imagePlans.items.properties).toHaveProperty('negativePrompt')
-    expect(body.input[0].content[0].text).toContain('Parse this Amazon listing copy')
+    expect(body.input[0].content[0].text).toContain('Parse this Amazon.de listing copy')
+    expect(body.input[0].content[0].text).toContain('Target marketplace language for visible customer-facing copy: German.')
     expect(body.input[0].content[1]).toEqual({ type: 'input_image', image_url: 'data:image/png;base64,ref' })
     expect(result.parsed.title).toBe('AI planned tumbler')
     expect(result.seriesStyleGuide).toContain('cohesive warm')
@@ -493,9 +451,10 @@ describe('callAmazonPlannerApi', () => {
     expect(url).toBe('https://api.deepseek.com/chat/completions')
     const body = JSON.parse(String(init?.body))
     expect(body.messages[0].content).toContain('Return a valid JSON object only')
+    expect(body.messages[0].content).toContain('seriesStyleGuide string')
     expect(body.messages[0].content).toContain('styleCandidates array of exactly 3')
     expect(body.messages[0].content).toContain('Amazon Listing reference material for the planner')
-    expect(body.messages[0].content).toContain('visual style reference board')
+    expect(body.messages[0].content).toContain('Return exactly 3 styleCandidates')
     expect(body.messages[1].content[0]).toMatchObject({ type: 'text' })
     expect(body.messages[1].content[1]).toEqual({
       type: 'image_url',
@@ -536,6 +495,7 @@ describe('callAmazonPlannerApi', () => {
     expect(body.text.format.schema.properties.aPlusPlans.items.properties).toHaveProperty('planMarkdown')
     expect(body.text.format.schema.properties.aPlusPlans.items.properties).toHaveProperty('negativePrompt')
     expect(body.text.format.schema.required).toContain('seriesStyleGuide')
+    expect(body.text.format.schema.required).toContain('styleCandidates')
     expect(body.text.format.schema.required).not.toContain('visualSystem')
     expect(body.instructions).toContain('The application only fixes the module order, module type, upload size, and generation size')
     expect(body.instructions).toContain('Amazon A+ reference material for the planner')
@@ -545,10 +505,7 @@ describe('callAmazonPlannerApi', () => {
     expect(body.instructions).toContain('Comparison Thumbnail 150x300')
     expect(body.instructions).toContain('QR codes')
     expect(body.instructions).toContain('mobile-readable')
-    expect(body.instructions).toContain('visual style reference board')
-    expect(body.instructions).toContain('typography samples')
-    expect(body.instructions).toContain('color palette swatches')
-    expect(body.instructions).toContain('lighting/material samples')
+    expect(body.instructions).toContain('Return exactly 3 styleCandidates')
     expect(body.instructions).toContain('fully plan the finished Amazon image')
     expect(body.instructions).toContain('complete information design')
     expect(body.instructions).toContain('Known brand/model: ExampleBrand')
@@ -601,6 +558,7 @@ describe('callAmazonPlannerApi', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
     expect(body.text.format.name).toBe('tiktok_main_image_plan')
     expect(body.text.format.schema.properties.imagePlans.items.properties.slot.enum).toEqual(['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06'])
+    expect(body.text.format.schema.required).toContain('styleCandidates')
     expect(body.instructions).toContain('TikTok Shop US main-image slot strategy')
     expect(body.instructions).toContain('TTM01: pure-white front compliance main image')
     expect(body.instructions).toContain('one small real brand-name mark or real brand logo')
@@ -609,6 +567,7 @@ describe('callAmazonPlannerApi', () => {
     expect(body.instructions).toContain('except that TTM01 may include one small real brand-name mark')
     expect(body.instructions).toContain('brand name, or brand logo, do not invent it')
     expect(body.instructions).toContain('no misleading AI edits')
+    expect(body.instructions).toContain('Return exactly 3 styleCandidates')
     expect(body.instructions).not.toContain('Amazon Listing reference material for the planner')
     expect(body.instructions).not.toContain('Amazon A+ reference material for the planner')
     expect(body.input[0].content[0].text).toContain('Parse this product copy and produce the TikTok Shop main image plan')

@@ -1,14 +1,16 @@
 import { getActiveApiProfile, getCustomProviderDefinition } from './apiProfiles'
 import { callFalAiImageApi } from './falAiImageApi'
 import { callOpenAICompatibleImageApi } from './openaiCompatibleImageApi'
-import type { CallApiOptions, CallApiResult } from './imageApiShared'
+import { appendOutputResolutionToPrompt, type CallApiOptions, type CallApiResult } from './imageApiShared'
 
 export type { CallApiOptions, CallApiResult } from './imageApiShared'
 export { normalizeBaseUrl } from './devProxy'
 
 export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult> {
   const profile = getActiveApiProfile(opts.settings)
-  if (profile.provider === 'fal') return callFalAiImageApi(opts, profile)
+  const prompt = appendOutputResolutionToPrompt(opts.prompt, opts.params.size)
+  const requestOpts = prompt === opts.prompt ? opts : { ...opts, prompt }
+  if (profile.provider === 'fal') return callFalAiImageApi(requestOpts, profile)
 
-  return callOpenAICompatibleImageApi(opts, profile, getCustomProviderDefinition(opts.settings, profile.provider))
+  return callOpenAICompatibleImageApi(requestOpts, profile, getCustomProviderDefinition(opts.settings, profile.provider))
 }

@@ -1,6 +1,7 @@
+// Legacy experimental Agent API. Main image generation should use api.ts instead.
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
-import { getApiErrorMessage, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
+import { appendOutputResolutionToPrompt, getApiErrorMessage, getPromptOutputResolution, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
 import { prepareReferenceImageAndMaskPayload, prepareReferenceImagePayload } from './referenceImagePayload'
 
 export interface AgentApiMessage {
@@ -50,12 +51,21 @@ const AGENT_IMAGE_INSTRUCTIONS = [
   'Resolve user mentions ("the first image") to the matching id. Only use existing ids in image_generation prompts and generate_image_batch reference_ids.',
 ].join('\n')
 
-function createAgentInstructions(settings: AppSettings) {
+function createAgentInstructions(settings: AppSettings, params: TaskParams) {
   const maxToolRounds = Number.isFinite(settings.agentMaxToolRounds)
     ? Math.max(1, Math.trunc(settings.agentMaxToolRounds))
     : DEFAULT_AGENT_MAX_TOOL_ROUNDS
+  const outputResolution = getPromptOutputResolution(params.size)
   return [
     AGENT_IMAGE_INSTRUCTIONS,
+    outputResolution
+      ? [
+          '',
+          '## Technical output',
+          `- Expected output resolution for every generated image: ${outputResolution} px.`,
+          '- Include this exact resolution in final image-generation prompts and generate_image_batch item prompts as a technical output requirement, not visible image text.',
+        ].join('\n')
+      : '',
     '',
     '## Tool policy',
     `- Current maximum tool-use rounds for this Agent turn: ${maxToolRounds}.`,
@@ -669,7 +679,7 @@ export async function callAgentResponsesApi(opts: {
 
     const body: Record<string, unknown> = {
       model: profile.model || settings.model,
-      instructions: createAgentInstructions(settings),
+      instructions: createAgentInstructions(settings, params),
       input: preparedInput,
       tools: createAgentTools(params, profile, settings, preparedPayload.maskDataUrl),
     }
@@ -793,6 +803,7 @@ export async function callBatchImageSingle(opts: {
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<BatchImageCallResult> {
   const { profile, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
+  const promptWithOutputResolution = appendOutputResolutionToPrompt(prompt, params.size)
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
@@ -809,7 +820,7 @@ export async function callBatchImageSingle(opts: {
     const referenceMapping = apiReferenceImageDataUrls.length > 0
       ? `Attached reference images correspond to these ids, in order: ${(referenceIds ?? []).map((id) => `<ref id="${id}" />`).join(', ') || 'reference images'}.`
       : ''
-    const guardedPrompt = [referenceMapping, `${PROMPT_REWRITE_GUARD_PREFIX}\n${prompt}`].filter(Boolean).join('\n\n')
+    const guardedPrompt = [referenceMapping, `${PROMPT_REWRITE_GUARD_PREFIX}\n${promptWithOutputResolution}`].filter(Boolean).join('\n\n')
     let input: unknown
     if (apiReferenceImageDataUrls.length > 0) {
       input = [{

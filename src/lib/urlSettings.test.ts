@@ -81,7 +81,7 @@ describe('URL settings params', () => {
     expect(next.activeProfileId).toBe(existingProfile.id)
   })
 
-  it('creates a separate profile when URL streaming options differ', () => {
+  it('keeps legacy URL streamImages disabled while preserving partial image compatibility value', () => {
     const existingProfile = createDefaultOpenAIProfile({
       id: 'existing-openai',
       name: 'Existing OpenAI',
@@ -107,7 +107,7 @@ describe('URL settings params', () => {
       provider: 'openai',
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'test-key',
-      streamImages: true,
+      streamImages: false,
       streamPartialImages: 3,
     })
   })

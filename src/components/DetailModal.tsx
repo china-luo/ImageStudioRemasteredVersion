@@ -891,7 +891,7 @@ export default function DetailModal() {
                     <option value="tiktok-main">TikTok 商品主图</option>
                     <option value="tiktok-detail">TikTok 商品详情图</option>
                     <option value="gallery">普通生图</option>
-                    <option value="agent">Agent</option>
+                    {(isAgentTask || categoryWorkflowInput === 'agent') && <option value="agent">Agent (legacy)</option>}
                     <option value="unknown">未知来源</option>
                   </select>
                 </label>

@@ -3,6 +3,9 @@ import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
 
+const RESOLUTION_REQUIREMENT_1024 = 'Technical output requirement (not visible text): expected image resolution 1024x1024 px.'
+const RESOLUTION_REQUIREMENT_2048 = 'Technical output requirement (not visible text): expected image resolution 2048x2048 px.'
+
 describe('callImageApi', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -35,6 +38,27 @@ describe('callImageApi', () => {
       expect(body.input).toBe('Use the following text as the complete prompt. Do not rewrite it:\nprompt')
     },
   )
+
+  it('appends explicit output resolution to the final Images API prompt', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, size: '2048x2048' },
+      inputImageDataUrls: [],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.prompt).toBe(`prompt\n\n${RESOLUTION_REQUIREMENT_2048}`)
+    expect(body.size).toBe('2048x2048')
+  })
 
   it('routes OpenRouter Images API profiles through Chat Completions image generation', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
@@ -79,7 +103,7 @@ describe('callImageApi', () => {
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body).toMatchObject({
       model: 'google/gemini-2.5-flash-image',
-      messages: [{ role: 'user', content: 'prompt' }],
+      messages: [{ role: 'user', content: `prompt\n\n${RESOLUTION_REQUIREMENT_1024}` }],
       modalities: ['image', 'text'],
       stream: false,
       image_config: { aspect_ratio: '1:1', image_size: '1K' },
@@ -124,7 +148,7 @@ describe('callImageApi', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/v1/chat/completions')
     const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))
     expect(body.messages[0].content).toEqual([
-      { type: 'text', text: 'edit prompt' },
+      { type: 'text', text: `edit prompt\n\nTechnical output requirement (not visible text): expected image resolution 1024x1536 px.` },
       { type: 'image_url', image_url: { url: 'data:image/png;base64,aW5wdXQ=' } },
     ])
     expect(body.image_config).toEqual({ aspect_ratio: '2:3', image_size: '1K' })
@@ -316,18 +340,12 @@ describe('callImageApi', () => {
     }])
   })
 
-  it('streams Images API partial images and resolves the final completed image', async () => {
-    const streamBody = [
-      'data: {"type":"image_generation.partial_image","partial_image_index":0,"b64_json":"cGFydGlhbA=="}',
-      '',
-      'data: {"type":"image_generation.completed","b64_json":"ZmluYWw=","size":"1024x1024","quality":"auto","output_format":"jpeg","output_compression":70}',
-      '',
-      'data: [DONE]',
-      '',
-    ].join('\n')
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+  it('keeps Images API requests non-streaming when legacy stream settings are present', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'ZmluYWw=', size: '1024x1024', quality: 'auto', output_format: 'jpeg', output_compression: 70 }],
+    }), {
       status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
+      headers: { 'Content-Type': 'application/json' },
     }))
     const partialImages: string[] = []
 
@@ -352,41 +370,27 @@ describe('callImageApi', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.stream).toBeUndefined()
+    expect(body.partial_images).toBeUndefined()
     expect(body).toMatchObject({
-      stream: true,
-      partial_images: 3,
       output_format: 'jpeg',
       output_compression: 70,
       quality: 'auto',
     })
-    expect(partialImages).toEqual(['data:image/jpeg;base64,cGFydGlhbA=='])
+    expect(partialImages).toEqual([])
     expect(result).toMatchObject({
       images: ['data:image/jpeg;base64,ZmluYWw='],
-      actualParams: {
-        output_format: 'jpeg',
-        output_compression: 70,
-        quality: 'auto',
-        size: '1024x1024',
-      },
-      actualParamsList: [{
-        output_format: 'jpeg',
-        output_compression: 70,
-        quality: 'auto',
-        size: '1024x1024',
-      }],
+      actualParamsList: [undefined],
     })
+    expect(result.actualParams).toBeUndefined()
   })
 
-  it('does not expect revised prompts on official Images API stream completed events', async () => {
-    const streamBody = [
-      'data: {"created_at":1779112721,"type":"image_generation.completed","b64_json":"ZmluYWw=","background":"opaque","output_format":"jpeg","quality":"medium","sequence_number":0,"size":"1448x1086","usage":{"total_tokens":1569}}',
-      '',
-      'data: [DONE]',
-      '',
-    ].join('\n')
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+  it('does not expect revised prompts on official Images API non-stream completed responses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'ZmluYWw=', output_format: 'jpeg', quality: 'medium', size: '1448x1086' }],
+    }), {
       status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
+      headers: { 'Content-Type': 'application/json' },
     }))
 
     const result = await callImageApi({
@@ -407,30 +411,21 @@ describe('callImageApi', () => {
 
     expect(result).toMatchObject({
       images: ['data:image/jpeg;base64,ZmluYWw='],
-      actualParams: {
-        output_format: 'jpeg',
-        quality: 'medium',
-        size: '1448x1086',
-      },
       revisedPrompts: [undefined],
     })
+    expect(result.actualParams).toBeUndefined()
   })
 
-  it('splits Images API streaming into concurrent single-image requests when n is greater than 1', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      const streamBody = [
-        'data: {"type":"image_generation.partial_image","partial_image_index":0,"b64_json":"cGFydGlhbA=="}',
-        '',
-        'data: {"type":"image_generation.completed","b64_json":"ZmluYWw=","size":"1024x1024","quality":"auto","output_format":"jpeg","output_compression":70}',
-        '',
-        'data: [DONE]',
-        '',
-      ].join('\n')
-      return new Response(streamBody, {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      })
-    })
+  it('keeps multi-image Images API requests batched when legacy streaming settings are present', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [
+        { b64_json: 'b25l', size: '1024x1024', quality: 'auto', output_format: 'jpeg', output_compression: 70 },
+        { b64_json: 'dHdv', size: '1024x1024', quality: 'auto', output_format: 'jpeg', output_compression: 70 },
+      ],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
     const partials: Array<{ image: string; requestIndex?: number }> = []
 
     const result = await callImageApi({
@@ -452,37 +447,27 @@ describe('callImageApi', () => {
       onPartialImage: (partial: { image: string; requestIndex?: number }) => partials.push(partial),
     } as any)
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     for (const [, init] of fetchMock.mock.calls) {
       const body = JSON.parse(String((init as RequestInit).body))
-      expect(body.n).toBeUndefined()
-      expect(body.stream).toBe(true)
-      expect(body.partial_images).toBe(1)
+      expect(body.n).toBe(2)
+      expect(body.stream).toBeUndefined()
+      expect(body.partial_images).toBeUndefined()
     }
     expect(result.images).toHaveLength(2)
     expect(result.images).toEqual([
-      'data:image/jpeg;base64,ZmluYWw=',
-      'data:image/jpeg;base64,ZmluYWw=',
+      'data:image/jpeg;base64,b25l',
+      'data:image/jpeg;base64,dHdv',
     ])
-    expect(partials.map((partial) => partial.requestIndex).sort()).toEqual([0, 1])
-    expect(partials.map((partial) => partial.image)).toEqual([
-      'data:image/jpeg;base64,cGFydGlhbA==',
-      'data:image/jpeg;base64,cGFydGlhbA==',
-    ])
+    expect(partials).toEqual([])
   })
 
-  it('streams Responses API partial images and resolves the completed response image', async () => {
-    const streamBody = [
-      'data: {"type":"response.image_generation_call.partial_image","partial_image_index":0,"partial_image_b64":"cGFydGlhbA=="}',
-      '',
-      'data: {"type":"response.completed","response":{"output":[{"type":"image_generation_call","result":"ZmluYWw=","revised_prompt":"rewritten","size":"1024x1024"}]}}',
-      '',
-      'data: [DONE]',
-      '',
-    ].join('\n')
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+  it('keeps Responses API image requests non-streaming when legacy stream settings are present', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'image_generation_call', result: 'ZmluYWw=', revised_prompt: 'rewritten', size: '1024x1024' }],
+    }), {
       status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
+      headers: { 'Content-Type': 'application/json' },
     }))
     const partialImages: string[] = []
 
@@ -509,14 +494,14 @@ describe('callImageApi', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
-    expect(body.stream).toBe(true)
-    expect(body.tools[0].partial_images).toBe(1)
+    expect(body.stream).toBeUndefined()
+    expect(body.tools[0].partial_images).toBeUndefined()
     expect(body.tools[0]).toMatchObject({
       output_format: 'jpeg',
       output_compression: 70,
       quality: 'auto',
     })
-    expect(partialImages).toEqual(['data:image/jpeg;base64,cGFydGlhbA=='])
+    expect(partialImages).toEqual([])
     expect(result).toMatchObject({
       images: ['data:image/jpeg;base64,ZmluYWw='],
       actualParams: { size: '1024x1024' },

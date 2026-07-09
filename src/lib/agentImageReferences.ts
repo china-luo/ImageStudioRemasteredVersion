@@ -1,3 +1,4 @@
+// Legacy experimental Agent image-reference helpers. Keep for old Agent records and imports.
 import type { AgentRound, TaskRecord } from '../types'
 import { replaceImageMentionsForApi, stripImageMentionMarkers } from './promptImageMentions'
 

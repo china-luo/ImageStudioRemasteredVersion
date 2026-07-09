@@ -44,7 +44,7 @@ import {
   storeImage,
 } from './lib/db'
 import { callImageApi } from './lib/api'
-import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments, type AgentApiResultImage, type BatchImageCallResult } from './lib/agentApi'
+import type { AgentApiResultImage } from './lib/agentApi'
 import { collectAgentRoundOutputImageSlots, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
@@ -83,6 +83,12 @@ const AGENT_CONVERSATION_TITLE_MAX_LENGTH = 28
 const ERROR_TOAST_MAX_LENGTH = 80
 const API_MAX_INPUT_IMAGES = 16
 type ToastType = 'info' | 'success' | 'error'
+
+// Legacy experimental Agent API. Keep it off the main bundle path until an old Agent action explicitly runs.
+function loadLegacyAgentApi() {
+  return import('./lib/agentApi')
+}
+
 type AgentInputDraft = {
   prompt: string
   inputImages: InputImage[]
@@ -2225,6 +2231,7 @@ async function generateAgentConversationTitle(
   })
   try {
     const imageDataUrls = await readAgentImageDataUrls(inputImageIds)
+    const { callAgentConversationTitleApi } = await loadLegacyAgentApi()
     const title = await callAgentConversationTitleApi({
       settings: requestSettings,
       profile: activeProfile,
@@ -2994,6 +3001,11 @@ async function executeAgentRound(
   const controllerKey = getAgentRoundControllerKey(conversationId, roundId)
   agentRoundControllers.set(controllerKey, controller)
   try {
+    const {
+      callAgentResponsesApi,
+      callBatchImageSingle,
+      parseBatchImageCallArguments,
+    } = await loadLegacyAgentApi()
     const latestState = useStore.getState()
     const conversation = latestState.agentConversations.find((item) => item.id === conversationId)
     if (!conversation) return
@@ -3914,29 +3926,50 @@ export async function reuseConfig(task: TaskRecord) {
 
 /** 编辑输出：清空当前输入，只保留待编辑的输出图 */
 export async function editOutputs(task: TaskRecord, selectedOutputImageId?: string) {
-  const { showToast, setPendingTaskCategory } = useStore.getState()
+  const { showToast, setPendingTaskCategory, setConfirmDialog } = useStore.getState()
   const outputImageId = selectedOutputImageId && task.outputImages?.includes(selectedOutputImageId)
     ? selectedOutputImageId
     : task.outputImages?.[0]
   if (!outputImageId) return
 
   const dataUrl = await ensureImageCached(outputImageId)
+  if (dataUrl) {
+    const prepareOutput = (mode: 'whole' | 'mask') => {
+      useStore.setState((state) => syncActiveInputDraft(state, {
+        prompt: '',
+        inputImages: [{ id: outputImageId, dataUrl }],
+        maskDraft: null,
+        maskEditorImageId: mode === 'mask' ? outputImageId : null,
+      }))
+      setPendingTaskCategory({
+        mode: 'next-submit',
+        category: createNextSubmitTaskCategory(task),
+      })
+      showToast(mode === 'mask' ? '已打开输出图遮罩编辑' : '已准备编辑输出图', 'success')
+    }
+
+    setConfirmDialog({
+      title: '编辑输出图',
+      message: '请选择这次要执行的操作。整图编辑会把这张图放回输入栏继续生成；添加遮罩会先打开遮罩编辑器，用于局部修改。',
+      buttons: [
+        {
+          label: '整图编辑',
+          tone: 'secondary',
+          action: () => prepareOutput('whole'),
+        },
+        {
+          label: '添加遮罩',
+          tone: 'primary',
+          action: () => prepareOutput('mask'),
+        },
+      ],
+    })
+    return
+  }
   if (!dataUrl) {
     showToast('无法读取输出图，请稍后重试', 'error')
     return
   }
-
-  useStore.setState((state) => syncActiveInputDraft(state, {
-    prompt: '',
-    inputImages: [{ id: outputImageId, dataUrl }],
-    maskDraft: null,
-    maskEditorImageId: null,
-  }))
-  setPendingTaskCategory({
-    mode: 'next-submit',
-    category: createNextSubmitTaskCategory(task),
-  })
-  showToast('已准备编辑输出图', 'success')
 }
 
 /** 删除多条任务 */

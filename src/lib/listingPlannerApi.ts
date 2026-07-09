@@ -1,6 +1,11 @@
 import type { ApiProfile } from '../types'
 import { DEFAULT_CHAT_MODEL, DEFAULT_RESPONSES_MODEL } from './apiProfiles'
 import { formatAmazonAPlusReferenceMaterial, formatAmazonListingReferenceMaterial } from './amazonKnowledge'
+import {
+  getAmazonMarketplace,
+  normalizeAmazonMarketplaceId,
+  type AmazonMarketplaceId,
+} from './amazonMarketplaces'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { getApiErrorMessage } from './imageApiShared'
 import type { AmazonPromptDraft } from './amazonPrompt'
@@ -40,6 +45,7 @@ interface PlannerApiPayload {
 
 export interface PlannerApiResult {
   mode: AmazonPlannerMode
+  marketplaceId?: AmazonMarketplaceId
   parsed: ListingParseResult
   seriesStyleGuide: string
   styleCandidates: AmazonStyleCandidate[]
@@ -95,6 +101,27 @@ const NEGATIVE_PROMPT_SCHEMA = {
   description: 'English negative prompt for the image model. Never include Chinese characters.',
 } as const
 
+function getVisibleCopyLanguageRule(marketplaceId?: AmazonMarketplaceId): string {
+  const marketplace = getAmazonMarketplace(marketplaceId)
+  return marketplace.allowsCjkVisibleCopy
+    ? `Visible customer-facing copy inside the prompt must be natural ${marketplace.onImageCopyLanguage} for ${marketplace.domain}; Japanese characters are allowed for visible copy, but do not include Simplified Chinese UI wording.`
+    : `Visible customer-facing copy inside the prompt must be natural ${marketplace.onImageCopyLanguage} for ${marketplace.domain}; never include Chinese or Japanese characters in visible copy.`
+}
+function createAmazonImagePromptSchema(marketplaceId?: AmazonMarketplaceId) {
+  return {
+    type: 'string',
+    description: `Professional English image-generation prompt. ${getVisibleCopyLanguageRule(marketplaceId)} The overall prompt instructions should remain English for image-model stability.`,
+  } as const
+}
+
+function createAPlusExternalTextSchema(field: 'title' | 'body', marketplaceId?: AmazonMarketplaceId) {
+  const marketplace = getAmazonMarketplace(marketplaceId)
+  return {
+    type: 'string',
+    description: `External A+ ${field} text in natural ${marketplace.copyLanguage} for ${marketplace.domain}, or an empty string when not needed.`,
+  } as const
+}
+
 const STYLE_CANDIDATE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -110,42 +137,44 @@ const STYLE_CANDIDATE_SCHEMA = {
   required: ['label', 'description', 'prompt', 'negativePrompt'],
 } as const
 
-const LISTING_PLANNER_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    product: PRODUCT_SCHEMA,
-    sellingPoints: SELLING_POINTS_SCHEMA,
-    seriesStyleGuide: {
-      type: 'string',
-      description: 'LLM-authored English visual style guide to keep the whole image set coherent.',
-    },
-    styleCandidates: {
-      type: 'array',
-      minItems: 3,
-      maxItems: 3,
-      items: STYLE_CANDIDATE_SCHEMA,
-    },
-    imagePlans: {
-      type: 'array',
-      minItems: 7,
-      maxItems: 7,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          slot: { type: 'string', enum: ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06'] },
-          label: CHINESE_LABEL_SCHEMA,
-          planMarkdown: PLAN_MARKDOWN_SCHEMA,
-          prompt: ENGLISH_IMAGE_PROMPT_SCHEMA,
-          negativePrompt: NEGATIVE_PROMPT_SCHEMA,
+function createListingPlannerSchema(marketplaceId?: AmazonMarketplaceId) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      product: PRODUCT_SCHEMA,
+      sellingPoints: SELLING_POINTS_SCHEMA,
+      seriesStyleGuide: {
+        type: 'string',
+        description: 'LLM-authored English visual guide for cross-image product consistency and factual continuity.',
+      },
+      styleCandidates: {
+        type: 'array',
+        minItems: 3,
+        maxItems: 3,
+        items: STYLE_CANDIDATE_SCHEMA,
+      },
+      imagePlans: {
+        type: 'array',
+        minItems: 7,
+        maxItems: 7,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            slot: { type: 'string', enum: ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06'] },
+            label: CHINESE_LABEL_SCHEMA,
+            planMarkdown: PLAN_MARKDOWN_SCHEMA,
+            prompt: createAmazonImagePromptSchema(marketplaceId),
+            negativePrompt: NEGATIVE_PROMPT_SCHEMA,
+          },
+          required: ['slot', 'label', 'planMarkdown', 'prompt', 'negativePrompt'],
         },
-        required: ['slot', 'label', 'planMarkdown', 'prompt', 'negativePrompt'],
       },
     },
-  },
-  required: ['product', 'sellingPoints', 'seriesStyleGuide', 'styleCandidates', 'imagePlans'],
-} as const
+    required: ['product', 'sellingPoints', 'seriesStyleGuide', 'styleCandidates', 'imagePlans'],
+  } as const
+}
 
 const TIKTOK_MAIN_SLOTS = ['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06'] as const
 const TIKTOK_DETAIL_SLOTS = ['TTD01', 'TTD02', 'TTD03', 'TTD04', 'TTD05', 'TTD06', 'TTD07', 'TTD08'] as const
@@ -204,7 +233,7 @@ function createTiktokPlannerSchema(designType: TiktokDesignType) {
   } as const
 }
 
-function createAPlusPlannerSchema(aPlusType: APlusContentType) {
+function createAPlusPlannerSchema(aPlusType: APlusContentType, marketplaceId?: AmazonMarketplaceId) {
   const specs = getAPlusModuleSpecs(aPlusType)
   return {
     type: 'object',
@@ -234,9 +263,9 @@ function createAPlusPlannerSchema(aPlusType: APlusContentType) {
             label: CHINESE_LABEL_SCHEMA,
             moduleType: { type: 'string', enum: Array.from(new Set(specs.map((spec) => spec.moduleType))) },
             planMarkdown: PLAN_MARKDOWN_SCHEMA,
-            textTitle: { type: 'string' },
-            textBody: { type: 'string' },
-            prompt: ENGLISH_IMAGE_PROMPT_SCHEMA,
+            textTitle: createAPlusExternalTextSchema('title', marketplaceId),
+            textBody: createAPlusExternalTextSchema('body', marketplaceId),
+            prompt: createAmazonImagePromptSchema(marketplaceId),
             negativePrompt: NEGATIVE_PROMPT_SCHEMA,
           },
           required: ['slot', 'label', 'moduleType', 'planMarkdown', 'textTitle', 'textBody', 'prompt', 'negativePrompt'],
@@ -479,7 +508,7 @@ function normalizeSeriesStyleGuide(payload: PlannerApiPayload): string {
   return typeof payload.seriesStyleGuide === 'string' ? payload.seriesStyleGuide.trim() : ''
 }
 
-function normalizeListingPlannerApiPayload(payload: PlannerApiPayload, slots = ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06']): PlannerApiResult {
+function normalizeListingPlannerApiPayload(payload: PlannerApiPayload, slots = ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06'], marketplaceId?: AmazonMarketplaceId): PlannerApiResult {
   const parsed = normalizeParsedListing(payload)
   const seriesStyleGuide = normalizeSeriesStyleGuide(payload)
   const styleCandidates = normalizeStyleCandidates(payload)
@@ -488,10 +517,10 @@ function normalizeListingPlannerApiPayload(payload: PlannerApiPayload, slots = [
     : []
 
   if (plans.length !== slots.length) throw new Error(`AI 策划结果不是 ${slots.length} 张图`)
-  if (styleCandidates.length !== 3) throw new Error('AI 策划结果不是 3 个风格候选')
 
   return {
     mode: 'listing',
+    marketplaceId,
     parsed,
     seriesStyleGuide,
     styleCandidates,
@@ -523,7 +552,7 @@ function normalizeAPlusPlan(
   }
 }
 
-function normalizeAPlusPlannerApiPayload(payload: PlannerApiPayload, aPlusType: APlusContentType, tier: SizeTier): PlannerApiResult {
+function normalizeAPlusPlannerApiPayload(payload: PlannerApiPayload, aPlusType: APlusContentType, tier: SizeTier, marketplaceId?: AmazonMarketplaceId): PlannerApiResult {
   const parsed = normalizeParsedListing(payload)
   const seriesStyleGuide = normalizeSeriesStyleGuide(payload)
   const styleCandidates = normalizeStyleCandidates(payload)
@@ -540,10 +569,10 @@ function normalizeAPlusPlannerApiPayload(payload: PlannerApiPayload, aPlusType: 
   if (emptyPrompt) throw new Error(`AI A+ 策划结果缺少 ${emptyPrompt.slot} 的提示词`)
   const emptyPlan = aPlusPlans.find((plan) => !plan.planMarkdown.trim())
   if (emptyPlan) throw new Error(`AI A+ 策划结果缺少 ${emptyPlan.slot} 的策划说明`)
-  if (styleCandidates.length !== 3) throw new Error('AI A+ 策划结果不是 3 个风格候选')
 
   return {
     mode: 'aplus',
+    marketplaceId,
     parsed,
     seriesStyleGuide,
     styleCandidates,
@@ -553,21 +582,48 @@ function normalizeAPlusPlannerApiPayload(payload: PlannerApiPayload, aPlusType: 
   }
 }
 
-function buildListingPlannerInstructions(baseDraft: AmazonPromptDraft) {
+function buildMarketplaceInstructionBlock(marketplaceId?: AmazonMarketplaceId) {
+  const marketplace = getAmazonMarketplace(marketplaceId)
+  return [
+    `Target marketplace: ${marketplace.label} (${marketplace.domain}, locale ${marketplace.locale}).`,
+    `Customer-facing visible copy must be concise, natural ${marketplace.onImageCopyLanguage}.`,
+    ...marketplace.localGuidance,
+    'Keep image-generation prompt and negativePrompt fields written in English for image-model stability, but quote any visible customer-facing copy in the target marketplace language.',
+  ].join('\n')
+}
+
+function buildFieldLanguageRules(marketplaceId?: AmazonMarketplaceId, options: { includeAPlusExternalText?: boolean } = {}) {
+  const marketplace = getAmazonMarketplace(marketplaceId)
+  const externalTextRule = options.includeAPlusExternalText
+    ? ` textTitle/textBody must be natural ${marketplace.copyLanguage} for ${marketplace.domain} or empty;`
+    : ''
+  return `Field language rules: label and planMarkdown must be Simplified Chinese;${externalTextRule} seriesStyleGuide, prompt, and negativePrompt must be English. Visible customer-facing copy described inside prompt must be ${marketplace.onImageCopyLanguage}.`
+}
+
+const PRODUCT_REFERENCE_FACTS_ONLY_PLANNER_GUIDE = [
+  'Product reference image rule:',
+  '- Use product reference images only to identify product facts: real appearance, color, shape, structure, included accessories, materials, package contents, and feature evidence.',
+  '- Do not use product reference images to choose the final visual style, color palette, background mood, typography style, decorative accents, or overall aesthetic unless the listing text explicitly requests it.',
+  '- imagePlans[].prompt and aPlusPlans[].prompt must avoid fixed non-product aesthetics such as coastal resort, warm cream background, botanical accents, luxury editorial, cyberpunk, or magazine fashion unless those are explicit product, brand, or listing requirements.',
+  '- seriesStyleGuide should preserve cross-image product consistency, factual visual continuity, copy hierarchy, and product appearance only; keep final palette, typography, background, lighting mood, or decorative system flexible for the selected style-board mode.',
+].join('\n')
+
+function buildListingPlannerInstructions(baseDraft: AmazonPromptDraft, marketplaceId?: AmazonMarketplaceId) {
+  const marketplace = getAmazonMarketplace(marketplaceId)
   return [
     'You are an Amazon image-planning agent. The user provides listing copy and optional product reference images.',
+    buildMarketplaceInstructionBlock(marketplaceId),
     'Create a complete visual plan for exactly 7 Amazon listing image slots: MAIN, PT01, PT02, PT03, PT04, PT05, PT06.',
     'The application only fixes the slot count and order. You must decide the strategy, composition, copy approach, visual treatment, prompt content, and negative prompt content.',
     'Use the Amazon reference material below to improve compliance judgment. It is not a fixed slot-by-slot framework, and it must not replace the product facts from the listing and reference images.',
-    formatAmazonListingReferenceMaterial(),
+    formatAmazonListingReferenceMaterial(marketplaceId),
+    PRODUCT_REFERENCE_FACTS_ONLY_PLANNER_GUIDE,
     'For each slot, write planMarkdown in Simplified Chinese as a detailed agent-style plan similar to a ChatGPT web response, then write a professional English image prompt and English negative prompt.',
-    'Each image prompt should fully plan the finished Amazon image: composition, product evidence, on-image US-English copy when useful, callouts or information areas when useful, visual hierarchy, and rendering style.',
+    `Each image prompt should fully plan the finished Amazon image: composition, product evidence, on-image ${marketplace.onImageCopyLanguage} copy when useful, callouts or information areas when useful, visual hierarchy, and rendering style.`,
     'For secondary information images, prefer complete information design with clear hierarchy and useful product evidence; lifestyle or beauty slots should still have purposeful composition and visible product support.',
-    'Return one seriesStyleGuide string in English that can keep separately generated images visually coherent.',
-    'Return exactly 3 styleCandidates for low-resolution visual style reference board generation. Each candidate should represent a distinct coherent visual style choice for this same product, not a finished Amazon listing image.',
-    'For each styleCandidates.prompt, describe a 1024x1024 visual style reference board with visible typography samples, color palette swatches, lighting/material samples, background/material texture samples, product-finish detail samples, and icon/callout treatment.',
-    'The style board typography samples must use generic English placeholder words only, such as PRODUCT TITLE, KEY BENEFIT, DETAIL CALLOUT, 01, 02, 03. Do not include Chinese characters, real product claims, brand logos, Amazon marks, prices, promotions, QR codes, contact details, or external URLs in styleCandidates.prompt.',
-    'Field language rules: label and planMarkdown must be Simplified Chinese; seriesStyleGuide, prompt, negativePrompt, and styleCandidates.prompt/negativePrompt must be English.',
+    'Return one seriesStyleGuide string in English for cross-image product consistency and factual visual continuity. Keep it style-neutral and do not use it to choose the final color palette, typography, background mood, lighting mood, or decorative style.',
+    'Return exactly 3 styleCandidates for the local-original style-board mode. Each candidate must be a distinct product-appropriate visual style direction with Simplified Chinese label/description and English prompt/negativePrompt for a 1024x1024 style reference board.',
+    buildFieldLanguageRules(marketplaceId),
     'Do not generate images. Only return JSON matching the schema.',
     baseDraft.category ? `Known category: ${baseDraft.category}` : '',
   ].filter(Boolean).join('\n')
@@ -584,29 +640,30 @@ function getAPlusPlannerTypeName(aPlusType: APlusContentType) {
   }
 }
 
-function buildAPlusPlannerInstructions(baseDraft: AmazonPromptDraft, aPlusType: APlusContentType) {
+function buildAPlusPlannerInstructions(baseDraft: AmazonPromptDraft, aPlusType: APlusContentType, marketplaceId?: AmazonMarketplaceId) {
   const specs = getAPlusModuleSpecs(aPlusType)
   const typeLabel = getAPlusPlannerTypeName(aPlusType)
+  const marketplace = getAmazonMarketplace(marketplaceId)
   return [
     'You are an Amazon A+ Content image-planning agent. The user provides listing copy, optional brand notes, and optional product reference images.',
+    buildMarketplaceInstructionBlock(marketplaceId),
     `Create a ${typeLabel} image module plan. Do not generate images. Only return JSON matching the schema.`,
     `Return exactly ${specs.length} modules in this order: ${specs.map((spec) => `${spec.slot} ${spec.label} ${getAPlusModuleUploadSize(spec)}px`).join('; ')}.`,
     'The application only fixes the module order, module type, upload size, and generation size. You must decide the strategy, composition, copy approach, visual treatment, prompt content, and negative prompt content.',
     'Use the Amazon A+ reference material below to improve compliance judgment. It is not a fixed module creative framework, and it must not replace the product facts from the listing and reference images.',
-    formatAmazonAPlusReferenceMaterial(),
+    formatAmazonAPlusReferenceMaterial(marketplaceId),
+    PRODUCT_REFERENCE_FACTS_ONLY_PLANNER_GUIDE,
     'For each module, write planMarkdown in Simplified Chinese as a detailed agent-style plan similar to a ChatGPT web response, then write a professional English image prompt and English negative prompt.',
-    'Each module prompt should fully plan the finished Amazon image: composition, product evidence, on-image US-English copy when useful, callouts or information areas when useful, visual hierarchy, and rendering style.',
+    `Each module prompt should fully plan the finished Amazon image: composition, product evidence, on-image ${marketplace.onImageCopyLanguage} copy when useful, callouts or information areas when useful, visual hierarchy, and rendering style.`,
     'For A+ information modules, prefer complete information design with clear hierarchy and useful product evidence; lifestyle or brand modules should still have purposeful composition and visible product support.',
     baseDraft.brand
       ? `Known brand/model: ${baseDraft.brand}. For header-banner and hero-banner modules, naturally include this real brand/model as a small brand line, headline prefix, or subline when it improves the composition. For brand-story modules, use this brand/model to frame the brand tone or promise only when supported by the provided listing or brand notes.`
       : 'If no real brand/model is provided, do not invent a brand name, logo, trademark, brand history, brand promise, authorization claim, website, contact detail, or external link.',
     'Use brand names as text only unless the user provides a real logo reference image. Do not invent logo artwork, standalone trademark/copyright symbols, brand history, authorization claims, websites, contact details, or external links.',
-    'Return one seriesStyleGuide string in English that can keep separately generated modules visually coherent.',
-    'Return exactly 3 styleCandidates for low-resolution visual style reference board generation. Each candidate should represent a distinct coherent visual style choice for this same product and A+ set, not a finished Amazon A+ module.',
-    'For each styleCandidates.prompt, describe a 1024x1024 visual style reference board with visible typography samples, color palette swatches, lighting/material samples, background/material texture samples, product-finish detail samples, and icon/callout treatment.',
-    'The style board typography samples must use generic English placeholder words only, such as PRODUCT TITLE, KEY BENEFIT, DETAIL CALLOUT, 01, 02, 03. Do not include Chinese characters, real product claims, brand logos, Amazon marks, prices, promotions, QR codes, contact details, or external URLs in styleCandidates.prompt.',
-    'For modules that need external A+ text outside the image, write textTitle and textBody in natural US English. Otherwise return empty strings.',
-    'Field language rules: label and planMarkdown must be Simplified Chinese; textTitle/textBody must be English or empty; seriesStyleGuide, prompt, negativePrompt, and styleCandidates.prompt/negativePrompt must be English.',
+    'Return one seriesStyleGuide string in English for cross-module product consistency and factual visual continuity. Keep it style-neutral and do not use it to choose the final color palette, typography, background mood, lighting mood, or decorative style.',
+    'Return exactly 3 styleCandidates for the local-original style-board mode. Each candidate must be a distinct product-appropriate visual style direction with Simplified Chinese label/description and English prompt/negativePrompt for a 1024x1024 style reference board.',
+    `For modules that need external A+ text outside the image, write textTitle and textBody in natural ${marketplace.copyLanguage}. Otherwise return empty strings.`,
+    buildFieldLanguageRules(marketplaceId, { includeAPlusExternalText: true }),
     baseDraft.category ? `Known category: ${baseDraft.category}` : '',
   ].filter(Boolean).join('\n')
 }
@@ -634,23 +691,21 @@ function buildTiktokPlannerInstructions(baseDraft: AmazonPromptDraft, designType
       : 'If the product facts or reference images do not support a claimed use, accessory, material, color, quantity, function, brand name, or brand logo, do not invent it. If critical facts are missing, state the uncertainty in planMarkdown and keep the English prompt conservative.',
     'For each slot, write planMarkdown in Simplified Chinese as a detailed agent-style plan, then write a professional English image prompt and English negative prompt.',
     'Return one seriesStyleGuide string in English that can keep separately generated TikTok Shop images visually coherent.',
-    'Return exactly 3 styleCandidates for low-resolution visual style reference board generation. Each candidate should represent a distinct coherent TikTok Shop visual style choice for this product, not a finished product image.',
-    'For each styleCandidates.prompt, describe a 1024x1024 visual style reference board with visible typography samples, color palette swatches, lighting/material samples, background/material texture samples, product-finish detail samples, and icon/callout treatment.',
-    'The style board typography samples must use generic English placeholder words only, such as PRODUCT TITLE, KEY BENEFIT, DETAIL CALLOUT, 01, 02, 03. Do not include Chinese characters, real product claims, brand logos, TikTok marks, Amazon marks, prices, promotions, QR codes, contact details, or external URLs in styleCandidates.prompt.',
-    'Field language rules: label and planMarkdown must be Simplified Chinese; seriesStyleGuide, prompt, negativePrompt, and styleCandidates.prompt/negativePrompt must be English.',
+    'Return exactly 3 styleCandidates for the local-original style-board mode. Each candidate must be a distinct product-appropriate TikTok Shop visual style direction with Simplified Chinese label/description and English prompt/negativePrompt for a 1024x1024 style reference board.',
+    'Field language rules: label and planMarkdown must be Simplified Chinese; seriesStyleGuide, prompt, and negativePrompt must be English.',
     'Do not generate images. Only return JSON matching the schema.',
     baseDraft.category ? `Known category: ${baseDraft.category}` : '',
   ].filter(Boolean).join('\n')
 }
 
-function buildPlannerInstructions(baseDraft: AmazonPromptDraft, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType) {
+function buildPlannerInstructions(baseDraft: AmazonPromptDraft, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId) {
   if (platform === 'tiktok') return buildTiktokPlannerInstructions(baseDraft, tiktokDesignType)
   return mode === 'aplus'
-    ? buildAPlusPlannerInstructions(baseDraft, aPlusType)
-    : buildListingPlannerInstructions(baseDraft)
+    ? buildAPlusPlannerInstructions(baseDraft, aPlusType, marketplaceId)
+    : buildListingPlannerInstructions(baseDraft, marketplaceId)
 }
 
-function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType) {
+function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId) {
   if (platform === 'tiktok') {
     const slots = getTikTokSlots(tiktokDesignType)
     return [
@@ -665,9 +720,11 @@ function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPl
 
   if (mode === 'aplus') {
     const specs = getAPlusModuleSpecs(aPlusType)
+    const marketplace = getAmazonMarketplace(marketplaceId)
     return [
-      `Parse this Amazon listing copy and produce the ${getAPlusContentTypeLabel(aPlusType)} A+ Content module plan.`,
+      `Parse this ${marketplace.domain} listing copy and produce the ${getAPlusContentTypeLabel(aPlusType)} A+ Content module plan for ${marketplace.label}.`,
       'Use the title and bullet points from the pasted text. If a field is uncertain, infer conservatively from the listing.',
+      `Target marketplace language for visible customer-facing copy: ${marketplace.copyLanguage}.`,
       `Use these A+ modules exactly: ${specs.map((spec) => spec.slot).join(', ')}.`,
       'If reference images are attached, use them to understand the actual product appearance and included items.',
       '',
@@ -675,9 +732,11 @@ function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPl
     ].join('\n')
   }
 
+  const marketplace = getAmazonMarketplace(marketplaceId)
   return [
-    'Parse this Amazon listing copy and produce the 7-image visual plan.',
+    `Parse this ${marketplace.domain} listing copy and produce the 7-image visual plan for ${marketplace.label}.`,
     'Use the title and bullet points from the pasted text. If a field is uncertain, infer conservatively from the listing.',
+    `Target marketplace language for visible customer-facing copy: ${marketplace.copyLanguage}.`,
     'If reference images are attached, use them to understand the actual product appearance and included items.',
     '',
     listingText,
@@ -713,9 +772,9 @@ function buildResponsesPlannerInput(text: string, referenceImageDataUrls: string
   ]
 }
 
-function buildChatPlannerSchemaGuide(mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType) {
+function buildChatPlannerSchemaGuide(mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId) {
   const productFields = 'product { title, category, color, material, audience, packageIncludes }'
-  const styleFields = 'seriesStyleGuide string, styleCandidates array of exactly 3 { label, description, prompt, negativePrompt }'
+  const styleFields = 'seriesStyleGuide string, styleCandidates array of exactly 3 style options'
   if (platform === 'tiktok') {
     const slots = getTikTokSlots(tiktokDesignType)
     return [
@@ -727,17 +786,21 @@ function buildChatPlannerSchemaGuide(mode: AmazonPlannerMode, aPlusType: APlusCo
 
   if (mode === 'aplus') {
     const specs = getAPlusModuleSpecs(aPlusType)
+    const marketplace = getAmazonMarketplace(marketplaceId)
     return [
       `Return JSON with: ${productFields}, sellingPoints string[], ${styleFields}, aPlusPlans array.`,
       `aPlusPlans must contain exactly ${specs.length} items in this order: ${specs.map((spec) => spec.slot).join(', ')}.`,
       'Each aPlusPlans item must include: slot, label, moduleType, planMarkdown, textTitle, textBody, prompt, negativePrompt.',
+      `textTitle/textBody and visible on-image copy must use natural ${marketplace.copyLanguage} for ${marketplace.domain}; prompt and negativePrompt should remain English.`,
     ].join('\n')
   }
 
+  const marketplace = getAmazonMarketplace(marketplaceId)
   return [
     `Return JSON with: ${productFields}, sellingPoints string[], ${styleFields}, imagePlans array.`,
     'imagePlans must contain exactly 7 items in this order: MAIN, PT01, PT02, PT03, PT04, PT05, PT06.',
     'Each imagePlans item must include: slot, label, planMarkdown, prompt, negativePrompt.',
+    `Visible on-image copy inside prompt must use natural ${marketplace.copyLanguage} for ${marketplace.domain}; prompt and negativePrompt should remain English.`,
   ].join('\n')
 }
 
@@ -747,11 +810,12 @@ function buildChatPlannerSystemPrompt(
   aPlusType: APlusContentType,
   platform: CommercePlannerPlatform,
   tiktokDesignType: TiktokDesignType,
+  marketplaceId?: AmazonMarketplaceId,
 ) {
   return [
-    buildPlannerInstructions(baseDraft, mode, aPlusType, platform, tiktokDesignType),
+    buildPlannerInstructions(baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId),
     'Return a valid JSON object only. Do not output Markdown fences, comments, or any text outside the JSON object.',
-    buildChatPlannerSchemaGuide(mode, aPlusType, platform, tiktokDesignType),
+    buildChatPlannerSchemaGuide(mode, aPlusType, platform, tiktokDesignType, marketplaceId),
   ].join('\n\n')
 }
 
@@ -763,6 +827,7 @@ export async function callAmazonPlannerApi(options: {
   model?: string
   mode?: AmazonPlannerMode
   platform?: CommercePlannerPlatform
+  marketplaceId?: AmazonMarketplaceId
   tiktokDesignType?: TiktokDesignType
   aPlusType?: APlusContentType
   aPlusGenerationTier?: SizeTier
@@ -771,16 +836,17 @@ export async function callAmazonPlannerApi(options: {
   const model = options.model?.trim() || options.profile.model.trim() || (options.profile.apiMode === 'chat' ? DEFAULT_CHAT_MODEL : DEFAULT_RESPONSES_MODEL)
   const mode = options.mode ?? 'listing'
   const platform = options.platform ?? 'amazon'
+  const marketplaceId = normalizeAmazonMarketplaceId(options.marketplaceId)
   const tiktokDesignType = options.tiktokDesignType ?? 'main'
   const aPlusType = options.aPlusType ?? 'standard-large'
   const aPlusGenerationTier = options.aPlusGenerationTier ?? '2K'
   const schema = platform === 'tiktok'
     ? createTiktokPlannerSchema(tiktokDesignType)
-    : mode === 'aplus' ? createAPlusPlannerSchema(aPlusType) : LISTING_PLANNER_SCHEMA
+    : mode === 'aplus' ? createAPlusPlannerSchema(aPlusType, marketplaceId) : createListingPlannerSchema(marketplaceId)
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(options.profile.apiProxy, proxyConfig)
   const useChatCompletions = options.profile.apiMode === 'chat'
-  const inputText = buildPlannerInputText(options.listingText, mode, aPlusType, platform, tiktokDesignType)
+  const inputText = buildPlannerInputText(options.listingText, mode, aPlusType, platform, tiktokDesignType, marketplaceId)
   const referenceImageDataUrls = options.referenceImageDataUrls ?? []
   const response = await fetch(
     useChatCompletions
@@ -800,7 +866,7 @@ export async function callAmazonPlannerApi(options: {
           messages: [
             {
               role: 'system',
-              content: buildChatPlannerSystemPrompt(options.baseDraft, mode, aPlusType, platform, tiktokDesignType),
+              content: buildChatPlannerSystemPrompt(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId),
             },
             {
               role: 'user',
@@ -812,7 +878,7 @@ export async function callAmazonPlannerApi(options: {
         }
       : {
           model,
-          instructions: buildPlannerInstructions(options.baseDraft, mode, aPlusType, platform, tiktokDesignType),
+          instructions: buildPlannerInstructions(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId),
           input: buildResponsesPlannerInput(inputText, referenceImageDataUrls),
           text: {
             format: {
@@ -836,6 +902,6 @@ export async function callAmazonPlannerApi(options: {
   const payload = parsePlannerPayload(text)
   if (platform === 'tiktok') return normalizeListingPlannerApiPayload(payload, [...getTikTokSlots(tiktokDesignType)])
   return mode === 'aplus'
-    ? normalizeAPlusPlannerApiPayload(payload, aPlusType, aPlusGenerationTier)
-    : normalizeListingPlannerApiPayload(payload)
+    ? normalizeAPlusPlannerApiPayload(payload, aPlusType, aPlusGenerationTier, marketplaceId)
+    : normalizeListingPlannerApiPayload(payload, undefined, marketplaceId)
 }

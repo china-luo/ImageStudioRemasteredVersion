@@ -1,3 +1,4 @@
+// Legacy experimental Agent web-search display helpers. Not used by the current main app shell.
 import type { AgentRound, ResponsesApiResponse, ResponsesOutputItem, TaskRecord } from '../types'
 
 export interface AgentWebSearchCallSummary {

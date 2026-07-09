@@ -6,7 +6,7 @@ const LISTING_REFERENCE_NOTES = [
   'MAIN image exclusions: no text, logo, watermark, border, color block, graphic overlay, badge, prop, support stand, confusing accessory, extra item, duplicate product view, or packaging unless packaging is an actual product feature.',
   'All listing images should match the product title and only show what is sold or needed to explain the sold item. Avoid nudity or sexually suggestive content, buyer reviews, five-star ratings, pricing, coupons, free shipping, seller-specific claims, unsupported claims, and variant-image text/pricing.',
   'Do not use Amazon, Prime, Alexa, Amazon Choice, Premium Choice, Best Seller, hot-sale badges, marketplace marks, or any lookalike logo, badge, or page element.',
-  'Secondary images may use compliant lifestyle, detail, scale, contents, comparison-within-product, or use-step concepts when supported by the listing and references. On-image copy should be concise, US-English, defensible, and readable on mobile.',
+  'Secondary images may use compliant lifestyle, detail, scale, contents, comparison-within-product, or use-step concepts when supported by the listing and references. On-image copy should be concise, defensible, and readable on mobile.',
 ]
 
 const APLUS_REFERENCE_NOTES = [
@@ -30,10 +30,27 @@ function formatReferenceMaterial(title: string, notes: readonly string[]) {
   ].join('\n')
 }
 
-export function formatAmazonListingReferenceMaterial() {
-  return formatReferenceMaterial('Amazon Listing reference material for the planner:', LISTING_REFERENCE_NOTES)
+function getMarketplaceReferenceNotes(marketplaceId?: AmazonMarketplaceId) {
+  const marketplace = getAmazonMarketplace(marketplaceId)
+  return [
+    `Target marketplace: ${marketplace.label} (${marketplace.domain}, locale ${marketplace.locale}).`,
+    `Visible customer-facing copy should be concise, defensible, mobile-readable ${marketplace.onImageCopyLanguage}.`,
+    ...marketplace.localGuidance,
+    `Do not mimic ${marketplace.domain} page UI or use local Amazon marketplace badges, Best Seller badges, ratings, pricing, coupons, urgency claims, or lookalike marks.`,
+  ]
 }
 
-export function formatAmazonAPlusReferenceMaterial() {
-  return formatReferenceMaterial('Amazon A+ reference material for the planner:', APLUS_REFERENCE_NOTES)
+export function formatAmazonListingReferenceMaterial(marketplaceId?: AmazonMarketplaceId) {
+  return formatReferenceMaterial('Amazon Listing reference material for the planner:', [
+    ...LISTING_REFERENCE_NOTES,
+    ...getMarketplaceReferenceNotes(marketplaceId),
+  ])
 }
+
+export function formatAmazonAPlusReferenceMaterial(marketplaceId?: AmazonMarketplaceId) {
+  return formatReferenceMaterial('Amazon A+ reference material for the planner:', [
+    ...APLUS_REFERENCE_NOTES,
+    ...getMarketplaceReferenceNotes(marketplaceId),
+  ])
+}
+import { getAmazonMarketplace, type AmazonMarketplaceId } from './amazonMarketplaces'

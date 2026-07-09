@@ -1652,7 +1652,7 @@ export default function SettingsModal() {
               </div>
 
               {/* 6. API 接口（Images/Responses/Chat） */}
-              {activeProfile.provider === 'openai' && (
+              {false && activeProfile.provider === 'openai' && (
                 <div className="block">
                   <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">API 接口</span>
                   <Select
@@ -1697,7 +1697,7 @@ export default function SettingsModal() {
                   ) : activeCustomProvider ? (
                     <>当前使用 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{activeCustomProvider.name}</code>。</>
                   ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' ? (
-                    <>Responses API 用于 Agent 或 AI 策划等文本/多模态流程；普通生图请切换到 Images API 配置。</>
+                    <>Responses API 用于 AI 策划等文本/多模态流程；普通生图请切换到 Images API 配置。</>
                   ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'chat' ? (
                     isOpenRouterImageGenerationProfile(activeProfile) ? (
                       <>OpenRouter 图片模型通过 Chat Completions 生图；模型需支持 image 输出。</>

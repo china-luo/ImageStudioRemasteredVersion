@@ -238,6 +238,9 @@ describe('mask draft lifecycle in store actions', () => {
     })
 
     await editOutputs(task({ outputImages: [imageB.id] }))
+    const dialog = vi.mocked(useStore.getState().setConfirmDialog).mock.calls.at(-1)?.[0]
+    expect(dialog?.title).toBe('编辑输出图')
+    dialog?.buttons?.[0]?.action()
 
     const state = useStore.getState()
     expect(state.prompt).toBe('')
@@ -645,6 +648,9 @@ describe('mask draft lifecycle in store actions', () => {
         amazonSlot: 'MAIN',
       },
     }))
+    const dialog = vi.mocked(useStore.getState().setConfirmDialog).mock.calls.at(-1)?.[0]
+    expect(dialog?.title).toBe('编辑输出图')
+    dialog?.buttons?.[0]?.action()
 
     useStore.getState().setPrompt('edit this listing image')
     await submitTask()

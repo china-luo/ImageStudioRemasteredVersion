@@ -1,3 +1,4 @@
+// Legacy experimental Agent history modal. It is not part of the current main app shell.
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
 import { removeMultipleTasks, useStore } from '../store'
 import type { AgentConversation } from '../types'

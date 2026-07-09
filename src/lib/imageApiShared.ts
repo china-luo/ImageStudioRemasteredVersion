@@ -47,6 +47,28 @@ export function normalizeBase64Image(value: string, fallbackMime: string): strin
   return value.startsWith('data:') ? value : `data:${fallbackMime};base64,${value}`
 }
 
+export function getPromptOutputResolution(size: string): string | null {
+  const match = size.trim().match(/^(\d+)\s*[xX×]\s*(\d+)$/)
+  if (!match) return null
+
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null
+
+  return `${width}x${height}`
+}
+
+export function appendOutputResolutionToPrompt(prompt: string, size: string): string {
+  const resolution = getPromptOutputResolution(size)
+  if (!resolution) return prompt
+
+  const requirement = `Technical output requirement (not visible text): expected image resolution ${resolution} px.`
+  const trimmedPrompt = prompt.trimEnd()
+  if (!trimmedPrompt || trimmedPrompt.includes(requirement)) return trimmedPrompt || requirement
+
+  return `${trimmedPrompt}\n\n${requirement}`
+}
+
 export function createLinkedAbortController(timeoutSeconds: number, signal?: AbortSignal): {
   controller: AbortController
   clearTimeout: () => void
