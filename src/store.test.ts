@@ -94,10 +94,72 @@ vi.mock('./lib/agentApi', () => ({
 }))
 import { clearAmazonPlannerSessions, clearImages, getAllAmazonPlannerSessions, putAmazonPlannerSession, putImage } from './lib/db'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
-import { cleanStaleAgentInputDrafts, clearData, editOutputs, exportData, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, markInterruptedOpenAIRunningTasks, mergePersistedState, regenerateAgentAssistantMessage, removeTask, retryTask, reuseConfig, submitAgentMessage, submitTask, useStore } from './store'
+import { cleanStaleAgentInputDrafts, clearData, editOutputs, exportData, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, markInterruptedOpenAIRunningTasks, mergePersistedState, regenerateAgentAssistantMessage, removeTask, retryTask, reuseConfig, submitAgentMessage, submitTask, updateTaskInStore, useStore } from './store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const imageB = { id: 'image-b', dataUrl: 'data:image/png;base64,b' }
+
+function supportTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
+  return {
+    id: 'support-task',
+    prompt: 'test',
+    params: { ...DEFAULT_PARAMS },
+    inputImageIds: [],
+    outputImages: [],
+    status: 'running',
+    error: null,
+    createdAt: 1,
+    finishedAt: null,
+    elapsed: null,
+    ...overrides,
+  }
+}
+
+describe('support prompt integration', () => {
+  beforeEach(() => {
+    useStore.setState({
+      tasks: [],
+      supportPromptOpen: false,
+      supportPromptDismissed: false,
+    })
+  })
+
+  it('opens after the next successful image task', () => {
+    useStore.setState({ tasks: [supportTask()] })
+
+    updateTaskInStore('support-task', { status: 'done', outputImages: ['image-a'] })
+
+    expect(useStore.getState().supportPromptOpen).toBe(true)
+  })
+
+  it('does not open after permanent dismissal', () => {
+    useStore.setState({
+      tasks: [supportTask()],
+      supportPromptDismissed: true,
+    })
+
+    updateTaskInStore('support-task', { status: 'done', outputImages: ['image-a'] })
+
+    expect(useStore.getState().supportPromptOpen).toBe(false)
+  })
+
+  it('persists dismissal but not open modal state', () => {
+    const persisted = getPersistedState({
+      ...useStore.getState(),
+      supportPromptOpen: true,
+      supportPromptDismissed: true,
+    })
+
+    expect(persisted.supportPromptDismissed).toBe(true)
+    expect(persisted).not.toHaveProperty('supportPromptOpen')
+  })
+
+  it('ignores a legacy persisted open modal', () => {
+    const merged = mergePersistedState({ supportPromptOpen: true }, useStore.getState())
+
+    expect(merged.supportPromptOpen).toBe(false)
+  })
+})
 
 describe('error toast messages', () => {
   it('drops long error detail after the failure title', () => {
