@@ -14,6 +14,7 @@ amazon_cookies*.txt
 .amazon-playwright-state*.json
 
 # Local dev/runtime state
+.worktrees/
 .amazon-image-studio-dev.pid
 .amazon-image-studio-deps.hash
 *.pid
