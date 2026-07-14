@@ -16,11 +16,11 @@
 
 下载最新安装包：
 
-[ImageStudioRemasteredVersion-Setup-V1.4.4-2026-07-08-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.4.4/ImageStudioRemasteredVersion-Setup-V1.4.4-2026-07-08-x64.exe)
+[ImageStudioRemasteredVersion-Setup-V1.5.1-2026-07-14-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.1/ImageStudioRemasteredVersion-Setup-V1.5.1-2026-07-14-x64.exe)
 
 最新发布页：
 
-[V1.4.4 - 2026-07-08](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.4.4)
+[V1.5.1 - 2026-07-14](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.1)
 
 ### 基本流程
 
@@ -45,6 +45,7 @@
 - 根据商品标题、五点描述或产品资料生成逐张图片方案。
 - 输出适合图片模型使用的英文提示词。
 - 支持 Amazon / TikTok Shop 不同平台的图片表达逻辑。
+- 策划模型支持 `gpt-5.5` 和 `gpt-5.6-sol`。
 
 ### 拆图反推
 
@@ -70,6 +71,7 @@
 - 支持 OpenRouter 图片模型。
 - 支持 fal.ai。
 - 支持自定义 OpenAI 兼容图片接口。
+- 本地浏览器运行时支持动态 API 代理，可直接修改 API URL 并解决接口跨域限制。
 
 ## 赞助
 
