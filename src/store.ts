@@ -595,7 +595,6 @@ export function getPersistedState(state: AppState) {
     agentSidebarCollapsed: state.agentSidebarCollapsed,
     agentAssetTab: state.agentAssetTab,
     agentAssetPanelCollapsed: state.agentAssetPanelCollapsed,
-    supportPromptDismissed: state.supportPromptDismissed,
   }
 }
 
@@ -615,7 +614,11 @@ function normalizePersistedParams(value: unknown): TaskParams {
 export function mergePersistedState(persistedState: unknown, currentState: AppState): AppState {
   if (!persistedState || typeof persistedState !== 'object') return currentState
 
-  const persisted = persistedState as Partial<AppState>
+  const {
+    supportPromptOpen: _legacySupportPromptOpen,
+    supportPromptDismissed: _legacySupportPromptDismissed,
+    ...persisted
+  } = persistedState as Partial<AppState> & { supportPromptDismissed?: unknown }
   const settings = normalizeSettings(persisted.settings ?? currentState.settings)
   const params = normalizePersistedParams(persisted.params)
   const agentConversations = normalizeAgentConversations(persisted.agentConversations)
@@ -649,7 +652,6 @@ export function mergePersistedState(persistedState: unknown, currentState: AppSt
     agentSidebarCollapsed: Boolean(persisted.agentSidebarCollapsed),
     agentAssetTab: persisted.agentAssetTab === 'references' ? 'references' : 'outputs',
     agentAssetPanelCollapsed: Boolean(persisted.agentAssetPanelCollapsed),
-    supportPromptDismissed: Boolean(persisted.supportPromptDismissed),
     supportPromptOpen: false,
     prompt: galleryInputDraft?.prompt ?? '',
     inputImages: galleryInputDraft?.inputImages ?? [],
@@ -758,7 +760,6 @@ interface AppState {
   settingsTabRequest: SettingsTab | null
   setShowSettings: (v: boolean, tab?: SettingsTab) => void
   supportPromptOpen: boolean
-  supportPromptDismissed: boolean
   setSupportPromptOpen: (v: boolean) => void
   dismissSupportPrompt: () => void
 
@@ -1355,9 +1356,8 @@ export const useStore = create<AppState>()(
         })
       },
       supportPromptOpen: false,
-      supportPromptDismissed: false,
       setSupportPromptOpen: (supportPromptOpen) => set({ supportPromptOpen }),
-      dismissSupportPrompt: () => set({ supportPromptOpen: false, supportPromptDismissed: true }),
+      dismissSupportPrompt: () => set({ supportPromptOpen: false }),
 
       // Toast
       toast: null,
@@ -3745,7 +3745,7 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   setTasks(updated)
   if (shouldOpenSupportPrompt) {
     const state = useStore.getState()
-    if (!state.supportPromptDismissed && !state.supportPromptOpen) {
+    if (!state.supportPromptOpen) {
       useStore.setState({ supportPromptOpen: true })
     }
   }
@@ -4036,7 +4036,7 @@ export async function clearData(options: ClearOptions = { clearConfig: true, cle
   }
 
   if (options.clearConfig) {
-    useStore.setState({ dismissedCodexCliPrompts: [], supportPromptDismissed: false })
+    useStore.setState({ dismissedCodexCliPrompts: [] })
     setSettings({ ...DEFAULT_SETTINGS })
     setParams({ ...DEFAULT_PARAMS })
   }

@@ -1,6 +1,6 @@
 import type { TaskRecord } from '../types'
 
-export const SUPPORT_PROMPT_IMAGE_THRESHOLD = 1
+export const SUPPORT_PROMPT_IMAGE_THRESHOLD = 10
 
 export function isSupportPromptAgentTask(task: TaskRecord) {
   return task.sourceMode === 'agent' || Boolean(task.agentConversationId || task.agentRoundId)
@@ -27,6 +27,7 @@ export function shouldOpenSupportPromptForTaskCompletion(
   const nextTask = nextTasks.find((task) => task.id === taskId)
 
   if (
+    threshold <= 0 ||
     !nextTask ||
     previousTask?.status === 'done' ||
     nextTask.status !== 'done' ||
@@ -34,5 +35,7 @@ export function shouldOpenSupportPromptForTaskCompletion(
     isSupportPromptAgentTask(nextTask)
   ) return false
 
-  return countSuccessfulOutputImages(nextTasks) >= threshold
+  const previousCount = countSuccessfulOutputImages(previousTasks)
+  const nextCount = countSuccessfulOutputImages(nextTasks)
+  return Math.floor(nextCount / threshold) > Math.floor(previousCount / threshold)
 }

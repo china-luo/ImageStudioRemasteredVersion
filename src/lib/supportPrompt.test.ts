@@ -28,19 +28,43 @@ function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   }
 }
 
-describe('support prompt trigger policy', () => {
-  it('opens when the first successful output reaches the test threshold', () => {
-    const previous = [task()]
-    const next = [task({ status: 'done', outputImages: ['image-a'] })]
+function images(count: number) {
+  return Array.from({ length: count }, (_, index) => `image-${index + 1}`)
+}
 
-    expect(SUPPORT_PROMPT_IMAGE_THRESHOLD).toBe(1)
+describe('support prompt trigger policy', () => {
+  it('uses a production milestone of ten successful images', () => {
+    expect(SUPPORT_PROMPT_IMAGE_THRESHOLD).toBe(10)
+  })
+
+  it('does not open before reaching the next ten-image milestone', () => {
+    const history = task({ id: 'history', status: 'done', outputImages: images(8) })
+    const previous = [history, task()]
+    const next = [history, task({ status: 'done', outputImages: ['image-9'] })]
+
+    expect(shouldOpenSupportPromptForTaskCompletion(previous, next, 'task-a')).toBe(false)
+  })
+
+  it('opens when the total reaches ten successful images', () => {
+    const history = task({ id: 'history', status: 'done', outputImages: images(9) })
+    const previous = [history, task()]
+    const next = [history, task({ status: 'done', outputImages: ['image-10'] })]
+
     expect(shouldOpenSupportPromptForTaskCompletion(previous, next, 'task-a')).toBe(true)
   })
 
-  it('opens on the next success when existing history already meets the threshold', () => {
-    const history = task({ id: 'history', status: 'done', outputImages: ['old-image'] })
+  it('waits for the next milestone after the total has passed ten', () => {
+    const history = task({ id: 'history', status: 'done', outputImages: images(10) })
     const previous = [history, task()]
-    const next = [history, task({ status: 'done', outputImages: ['new-image'] })]
+    const next = [history, task({ status: 'done', outputImages: ['image-11'] })]
+
+    expect(shouldOpenSupportPromptForTaskCompletion(previous, next, 'task-a')).toBe(false)
+  })
+
+  it('opens again when the total reaches twenty successful images', () => {
+    const history = task({ id: 'history', status: 'done', outputImages: images(19) })
+    const previous = [history, task()]
+    const next = [history, task({ status: 'done', outputImages: ['image-20'] })]
 
     expect(shouldOpenSupportPromptForTaskCompletion(previous, next, 'task-a')).toBe(true)
   })
@@ -59,9 +83,10 @@ describe('support prompt trigger policy', () => {
     expect(shouldOpenSupportPromptForTaskCompletion([done], [done], 'task-a')).toBe(false)
   })
 
-  it('opens once when a batch result crosses the threshold', () => {
-    const previous = [task()]
-    const next = [task({ status: 'done', outputImages: ['image-a', 'image-b'] })]
+  it('opens once when a batch result crosses a milestone', () => {
+    const history = task({ id: 'history', status: 'done', outputImages: images(8) })
+    const previous = [history, task()]
+    const next = [history, task({ status: 'done', outputImages: ['image-9', 'image-10', 'image-11'] })]
 
     expect(shouldOpenSupportPromptForTaskCompletion(previous, next, 'task-a')).toBe(true)
   })

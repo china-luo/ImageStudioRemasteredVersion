@@ -120,44 +120,56 @@ describe('support prompt integration', () => {
     useStore.setState({
       tasks: [],
       supportPromptOpen: false,
-      supportPromptDismissed: false,
     })
   })
 
-  it('opens after the next successful image task', () => {
-    useStore.setState({ tasks: [supportTask()] })
+  it('opens when a task completion reaches ten successful images', () => {
+    useStore.setState({
+      tasks: [
+        supportTask({ id: 'history', status: 'done', outputImages: Array.from({ length: 9 }, (_, index) => `image-${index + 1}`) }),
+        supportTask(),
+      ],
+    })
 
-    updateTaskInStore('support-task', { status: 'done', outputImages: ['image-a'] })
+    updateTaskInStore('support-task', { status: 'done', outputImages: ['image-10'] })
 
     expect(useStore.getState().supportPromptOpen).toBe(true)
   })
 
-  it('does not open after permanent dismissal', () => {
+  it('opens again at the next ten-image milestone after closing', () => {
     useStore.setState({
-      tasks: [supportTask()],
-      supportPromptDismissed: true,
+      supportPromptOpen: true,
+    })
+    useStore.getState().dismissSupportPrompt()
+    expect(useStore.getState().supportPromptOpen).toBe(false)
+
+    useStore.setState({
+      tasks: [
+        supportTask({ id: 'history', status: 'done', outputImages: Array.from({ length: 19 }, (_, index) => `image-${index + 1}`) }),
+        supportTask(),
+      ],
     })
 
-    updateTaskInStore('support-task', { status: 'done', outputImages: ['image-a'] })
+    updateTaskInStore('support-task', { status: 'done', outputImages: ['image-20'] })
 
-    expect(useStore.getState().supportPromptOpen).toBe(false)
+    expect(useStore.getState().supportPromptOpen).toBe(true)
   })
 
-  it('persists dismissal but not open modal state', () => {
+  it('does not persist support prompt modal state', () => {
     const persisted = getPersistedState({
       ...useStore.getState(),
       supportPromptOpen: true,
-      supportPromptDismissed: true,
     })
 
-    expect(persisted.supportPromptDismissed).toBe(true)
     expect(persisted).not.toHaveProperty('supportPromptOpen')
+    expect(persisted).not.toHaveProperty('supportPromptDismissed')
   })
 
-  it('ignores a legacy persisted open modal', () => {
-    const merged = mergePersistedState({ supportPromptOpen: true }, useStore.getState())
+  it('ignores legacy persisted open and permanent-dismissal state', () => {
+    const merged = mergePersistedState({ supportPromptOpen: true, supportPromptDismissed: true }, useStore.getState())
 
     expect(merged.supportPromptOpen).toBe(false)
+    expect(merged).not.toHaveProperty('supportPromptDismissed')
   })
 })
 

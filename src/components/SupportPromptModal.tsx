@@ -62,9 +62,7 @@ export default function SupportPromptModal() {
         </div>
 
         <h3 id="support-prompt-title" className="mt-4 text-center text-xl font-bold text-gray-900 dark:text-gray-100">
-          {SUPPORT_PROMPT_IMAGE_THRESHOLD === 1
-            ? '第一张图片生成成功'
-            : `已成功生成 ${SUPPORT_PROMPT_IMAGE_THRESHOLD} 张图片`}
+          又成功生成 {SUPPORT_PROMPT_IMAGE_THRESHOLD} 张图片
         </h3>
 
         <p className="mt-2 px-2 text-center text-sm leading-6 text-gray-500 dark:text-gray-400">
