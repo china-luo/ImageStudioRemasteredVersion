@@ -25,6 +25,7 @@ import {
   normalizeCustomProviderDefinition,
   normalizeSettings,
   normalizeStreamPartialImages,
+  OPENAI_PLANNER_MODELS,
   switchApiProfileProvider,
 } from '../lib/apiProfiles'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
@@ -347,9 +348,11 @@ export default function SettingsModal() {
   const apiProxyConfig = readClientDevProxyConfig()
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
   const apiProxyLocked = isApiProxyLocked(apiProxyConfig)
+  const apiProxyUsesDynamicTarget = Boolean(apiProxyConfig?.enabled)
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
   const apiProxyChecked = activeProfile.provider === 'openai' && (apiProxyLocked || activeProfile.apiProxy)
   const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && apiProxyChecked
+  const apiProxyUrlLocked = apiProxyEnabled && !apiProxyUsesDynamicTarget
   const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, activeProfile.provider)
   const activeProviderUsesApiUrl = activeProviderIsOpenAICompatible || activeProfile.provider === 'fal'
   const activeCustomProvider = draft.customProviders.find((provider) => provider.id === activeProfile.provider)
@@ -395,12 +398,22 @@ export default function SettingsModal() {
   const getApiModeLabel = (apiMode: AppSettings['apiMode']) =>
     apiMode === 'responses' ? 'Responses API' : apiMode === 'chat' ? 'Chat Completions' : 'Images API'
   const amazonPlannerProfiles = draft.profiles.filter(isAmazonPlannerProfile)
+  const amazonPlannerProfile = amazonPlannerProfiles.find((profile) => profile.id === draft.amazonPlannerProfileId)
   const amazonPlannerProfileOptions = amazonPlannerProfiles.length
     ? amazonPlannerProfiles.map((profile) => ({
         label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
         value: profile.id,
       }))
     : [{ label: '暂无 Chat/Responses 策划配置', value: '' }]
+  const amazonPlannerModelOptions = [
+    ...(amazonPlannerProfile?.model && !OPENAI_PLANNER_MODELS.includes(amazonPlannerProfile.model as typeof OPENAI_PLANNER_MODELS[number])
+      ? [{ label: `${amazonPlannerProfile.model}（当前自定义）`, value: amazonPlannerProfile.model }]
+      : []),
+    ...OPENAI_PLANNER_MODELS.map((model) => ({
+      label: model === DEFAULT_RESPONSES_MODEL ? `${model}（默认）` : model,
+      value: model,
+    })),
+  ]
   const sopReverseProfileOptions = amazonPlannerProfiles.length
     ? amazonPlannerProfiles.map((profile) => ({
         label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
@@ -561,6 +574,18 @@ export default function SettingsModal() {
     })
     setDraft(normalizedDraft)
     setSettings(normalizedDraft)
+  }
+
+  const updateAmazonPlannerModel = (model: string) => {
+    if (!amazonPlannerProfile) return
+    const nextDraft = {
+      ...draft,
+      profiles: draft.profiles.map((profile) =>
+        profile.id === amazonPlannerProfile.id ? { ...profile, model } : profile,
+      ),
+    }
+    setDraft(nextDraft)
+    commitSettings(nextDraft)
   }
 
   const updateCopyImportUrlOptions = (patch: Partial<CopyImportUrlOptions>) => {
@@ -1487,8 +1512,18 @@ export default function SettingsModal() {
                   options={amazonPlannerProfileOptions}
                   className="w-full rounded-xl border border-blue-200/70 bg-white/80 px-3 py-2.5 text-sm text-blue-900 outline-none transition focus:border-blue-300 dark:border-blue-400/20 dark:bg-gray-950/40 dark:text-blue-100 dark:focus:border-blue-500/50"
                 />
+                <div className="mt-3">
+                  <div className="mb-1.5 text-xs font-medium text-blue-800 dark:text-blue-200">策划模型</div>
+                  <Select
+                    value={amazonPlannerProfile?.model ?? ''}
+                    onChange={(value) => updateAmazonPlannerModel(String(value))}
+                    disabled={!amazonPlannerProfile}
+                    options={amazonPlannerModelOptions}
+                    className="w-full rounded-xl border border-blue-200/70 bg-white/80 px-3 py-2.5 text-sm text-blue-900 outline-none transition focus:border-blue-300 dark:border-blue-400/20 dark:bg-gray-950/40 dark:text-blue-100 dark:focus:border-blue-500/50"
+                  />
+                </div>
                 <div data-selectable-text className="mt-2 text-xs leading-relaxed text-blue-800 dark:text-blue-200">
-                  只用于首页 Amazon 面板的 AI 策划；普通生图只接受当前配置为 Images API。默认分为「生图」和「AI策划」两套配置：生图使用 Images API + gpt-image-2，AI 策划使用 Responses API + gpt-5.5。
+                  只用于首页 Amazon 面板的 AI 策划；普通生图只接受当前配置为 Images API。生图默认使用 gpt-image-2；AI 策划可选择 gpt-5.5 或 gpt-5.6-sol。
                 </div>
               </div>
 
@@ -1572,13 +1607,17 @@ export default function SettingsModal() {
                     onChange={(e) => updateActiveProfile({ baseUrl: e.target.value })}
                     onBlur={(e) => commitActiveProfilePatch({ baseUrl: e.target.value })}
                     type="text"
-                    disabled={apiProxyEnabled}
+                    disabled={apiProxyUrlLocked}
                     placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_BASE_URL : DEFAULT_SETTINGS.baseUrl}
-                    className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${apiProxyEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${apiProxyUrlLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
                   <div data-selectable-text className="mt-1.5 min-h-[22px] flex items-center text-xs text-gray-500 dark:text-gray-500">
                     {apiProxyEnabled ? (
-                      <span className="text-yellow-600 dark:text-yellow-500">已开启代理，实际请求目标由部署端决定，此处设置被忽略。</span>
+                      apiProxyUsesDynamicTarget ? (
+                        <span className="text-blue-600 dark:text-blue-400">已开启代理，请求会通过本地服务转发到此 API URL。</span>
+                      ) : (
+                        <span className="text-yellow-600 dark:text-yellow-500">已开启代理，实际请求目标由部署端决定，此处设置被忽略。</span>
+                      )
                     ) : activeProfile.provider === 'fal' ? (
                       <span>默认使用 <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">{DEFAULT_FAL_BASE_URL}</code>；填写自定义地址时将作为 fal.ai 代理 URL。</span>
                     ) : (
@@ -1608,7 +1647,13 @@ export default function SettingsModal() {
                     </button>
                   </div>
                   <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    {apiProxyLocked ? '当前部署已锁定 API 代理为开启，API URL 设置会被忽略。' : '当前部署提供同源代理时默认开启，可手动关闭。开启后用于解决浏览器跨域限制，API URL 设置会被忽略。'}
+                    {apiProxyUsesDynamicTarget
+                      ? apiProxyLocked
+                        ? '当前部署已锁定 API 代理为开启；API URL 仍可修改，代理会按该地址转发。'
+                        : '开启后通过同源代理访问上方 API URL，用于解决浏览器跨域限制。'
+                      : apiProxyLocked
+                        ? '当前部署已锁定 API 代理为开启，API URL 设置会被忽略。'
+                        : '当前部署提供同源代理时默认开启，可手动关闭。开启后用于解决浏览器跨域限制，API URL 设置会被忽略。'}
                   </div>
                 </div>
               )}

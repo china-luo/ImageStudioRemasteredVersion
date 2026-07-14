@@ -2,7 +2,13 @@ import type { Plugin, ViteDevServer } from 'vite'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
-import { normalizeDevProxyConfig } from './src/lib/devProxy'
+import http from 'node:http'
+import https from 'node:https'
+import {
+  type DevProxyConfig,
+  normalizeDevProxyConfig,
+  resolveDevProxyRequestTarget,
+} from './src/lib/devProxy'
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 process.env.VITE_APP_VERSION = process.env.VITE_APP_VERSION || pkg.version
@@ -64,11 +70,59 @@ function localShutdownPlugin(): Plugin {
   }
 }
 
-export default defineConfig(({ command }) => {
-  const devProxyConfig = command === 'serve' ? loadDevProxyConfig() : null
+function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
+  return {
+    name: 'amazon-image-studio-dynamic-api-proxy',
+    configureServer(viteServer) {
+      viteServer.middlewares.use((req, res, next) => {
+        const target = resolveDevProxyRequestTarget(req.url ?? '/', proxyConfig)
+        if (!target) {
+          next()
+          return
+        }
+
+        const headers = { ...req.headers }
+        if (proxyConfig.changeOrigin) headers.host = target.url.host
+
+        const transport = target.url.protocol === 'https:' ? https : http
+        const proxyRequest = transport.request(
+          target.url,
+          {
+            method: req.method,
+            headers,
+            ...(target.url.protocol === 'https:' ? { rejectUnauthorized: proxyConfig.secure } : {}),
+          },
+          (proxyResponse) => {
+            res.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers)
+            proxyResponse.pipe(res)
+          },
+        )
+
+        proxyRequest.on('error', (error) => {
+          if (res.headersSent) {
+            res.destroy(error)
+            return
+          }
+          res.statusCode = 502
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ error: { message: `API proxy request failed: ${error.message}` } }))
+        })
+        req.on('aborted', () => proxyRequest.destroy())
+        req.pipe(proxyRequest)
+      })
+    },
+  }
+}
+
+export default defineConfig(({ command, mode }) => {
+  const devProxyConfig = command === 'serve' && mode !== 'test' ? loadDevProxyConfig() : null
 
   return {
-    plugins: [react(), ...(command === 'serve' ? [localShutdownPlugin()] : [])],
+    plugins: [
+      react(),
+      ...(command === 'serve' ? [localShutdownPlugin()] : []),
+      ...(devProxyConfig?.enabled ? [dynamicApiProxyPlugin(devProxyConfig)] : []),
+    ],
     base: './',
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
@@ -77,21 +131,6 @@ export default defineConfig(({ command }) => {
     },
     server: {
       host: true,
-      proxy:
-        devProxyConfig?.enabled
-          ? {
-              [devProxyConfig.prefix]: {
-                target: devProxyConfig.target,
-                changeOrigin: devProxyConfig.changeOrigin,
-                secure: devProxyConfig.secure,
-                rewrite: (path) =>
-                  path.replace(
-                    new RegExp(`^${devProxyConfig.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
-                    '',
-                  ),
-              },
-            }
-          : undefined,
     },
   }
 })

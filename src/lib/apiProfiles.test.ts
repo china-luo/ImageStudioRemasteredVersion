@@ -8,6 +8,7 @@ import {
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_RESPONSES_MODEL,
   DEFAULT_SETTINGS,
+  OPENAI_PLANNER_MODELS,
   createDefaultOpenAIProfile,
   createDefaultFalProfile,
   findEquivalentApiProfile,
@@ -23,6 +24,11 @@ import {
 } from './apiProfiles'
 
 describe('mergeImportedSettings', () => {
+  it('offers gpt-5.6-sol as an AI planner model without changing the default', () => {
+    expect(DEFAULT_RESPONSES_MODEL).toBe('gpt-5.5')
+    expect(OPENAI_PLANNER_MODELS).toContain('gpt-5.6-sol')
+  })
+
   it('creates separate default profiles for image generation and AI planning', () => {
     const settings = normalizeSettings({})
 

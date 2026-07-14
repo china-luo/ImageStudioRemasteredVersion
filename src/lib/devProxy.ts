@@ -8,6 +8,11 @@ export interface DevProxyConfig {
   secure: boolean
 }
 
+export interface DevProxyRequestTarget {
+  url: URL
+  dynamic: boolean
+}
+
 const DEFAULT_PROXY_PREFIX = '/api-proxy'
 interface BuildApiUrlOptions {
   prefixV1?: boolean
@@ -91,10 +96,49 @@ export function buildApiUrl(
       : endpointPath
 
   if (useApiProxy) {
-    return `${proxyConfig?.prefix ?? DEFAULT_PROXY_PREFIX}/${apiPath}`
+    const proxyPrefix = proxyConfig?.prefix ?? DEFAULT_PROXY_PREFIX
+    if (proxyConfig?.enabled && normalizedBaseUrl) {
+      return `${proxyPrefix}/${encodeURIComponent(normalizedBaseUrl)}/${apiPath}`
+    }
+    return `${proxyPrefix}/${apiPath}`
   }
 
   return normalizedBaseUrl ? `${normalizedBaseUrl}/${apiPath}` : `/${apiPath}`
+}
+
+export function resolveDevProxyRequestTarget(
+  requestUrl: string,
+  proxyConfig: DevProxyConfig,
+): DevProxyRequestTarget | null {
+  const queryIndex = requestUrl.indexOf('?')
+  const pathname = queryIndex >= 0 ? requestUrl.slice(0, queryIndex) : requestUrl
+  const search = queryIndex >= 0 ? requestUrl.slice(queryIndex) : ''
+  const prefix = proxyConfig.prefix
+
+  if (pathname !== prefix && !pathname.startsWith(`${prefix}/`)) return null
+
+  const remainder = pathname.slice(prefix.length).replace(/^\/+/, '')
+  const [encodedTarget = '', ...pathSegments] = remainder.split('/')
+  let target = proxyConfig.target
+  let apiPath = remainder
+  let dynamic = false
+
+  try {
+    const candidate = new URL(decodeURIComponent(encodedTarget))
+    if (candidate.protocol === 'http:' || candidate.protocol === 'https:') {
+      target = candidate.toString().replace(/\/+$/, '')
+      apiPath = pathSegments.join('/')
+      dynamic = true
+    }
+  } catch {
+    // Previous proxy URLs continue to use the configured fallback target.
+  }
+
+  const baseUrl = new URL(target.endsWith('/') ? target : `${target}/`)
+  return {
+    url: new URL(`${apiPath}${search}`, baseUrl),
+    dynamic,
+  }
 }
 
 export function resolveDevProxyConfig(input: unknown, isDev: boolean): DevProxyConfig | null {
