@@ -16,11 +16,11 @@
 
 下载最新安装包：
 
-[ImageStudioRemasteredVersion-Setup-V1.5.2-2026-07-15-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.2/ImageStudioRemasteredVersion-Setup-V1.5.2-2026-07-15-x64.exe)
+[ImageStudioRemasteredVersion-Setup-V1.5.3-2026-07-15-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.3/ImageStudioRemasteredVersion-Setup-V1.5.3-2026-07-15-x64.exe)
 
 最新发布页：
 
-[V1.5.2 - 2026-07-15](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.2)
+[V1.5.3 - 2026-07-15](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.3)
 
 ### 基本流程
 
@@ -46,6 +46,8 @@
 - 输出适合图片模型使用的英文提示词。
 - 支持 Amazon / TikTok Shop 不同平台的图片表达逻辑。
 - AI 策划面板可直接选择 `gpt-5.5` 或 `gpt-5.6-sol`，也兼容已有的自定义模型。
+- Amazon MAIN 主图不附加风格板；附图、A+ 和 TikTok 图片提交前必须选择风格板。
+- 最多可上传 16 张产品参考图，策划生成的隐藏风格板单独附加，不占上传数量。
 
 ### 拆图反推
 

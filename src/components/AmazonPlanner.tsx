@@ -46,6 +46,7 @@ import { callImageApi } from '../lib/api'
 import { deleteAmazonPlannerSession, getAllAmazonPlannerSessions, putAmazonPlannerSession, storeImage } from '../lib/db'
 import { summarizeGenerationError } from '../lib/generationError'
 import { normalizeParamsForSettings } from '../lib/paramCompatibility'
+import { resolvePlannerStyleReference } from '../lib/plannerActionPolicy'
 import { prepareReferenceImagePayload, type PlannerReferenceImagePayload } from '../lib/referenceImagePayload'
 import { DEFAULT_PARAMS, type ApiMode, type ApiProfile } from '../types'
 import type { AmazonPlannerSession } from '../types'
@@ -301,7 +302,7 @@ function getAmazonAPlusComplianceChecks(
     {
       label: '风格板',
       status: hasStyleReference ? 'ready' : 'warning',
-      detail: hasStyleReference ? '已选择隐藏风格参考' : '正式生成前请选择风格',
+      detail: hasStyleReference ? '已选择隐藏风格参考' : '提交前必须选择风格板',
     },
   ]
 }
@@ -311,7 +312,7 @@ function getAmazonListingPlannerChecks(
   size: string,
   referenceImageCount: number,
   hasStyleReference: boolean,
-  styleReferenceRequired: boolean,
+  styleReferenceAppliesToPlan: boolean,
 ): Array<{ label: string; status: ComplianceStatus; detail: string }> {
   return [
     {
@@ -331,10 +332,10 @@ function getAmazonListingPlannerChecks(
     },
     {
       label: '风格板',
-      status: !styleReferenceRequired || hasStyleReference ? 'ready' : 'warning',
-      detail: !styleReferenceRequired
+      status: !styleReferenceAppliesToPlan || hasStyleReference ? 'ready' : 'warning',
+      detail: !styleReferenceAppliesToPlan
         ? 'MAIN 主图不使用隐藏风格参考'
-        : hasStyleReference ? '已选择隐藏风格参考' : '正式生成前请选择风格',
+        : hasStyleReference ? '已选择隐藏风格参考' : '附图提交前必须选择风格板',
     },
   ]
 }
@@ -359,6 +360,7 @@ export default function AmazonPlanner() {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const plannerAbortControllerRef = useRef<AbortController | null>(null)
   const styleAbortControllerRef = useRef<AbortController | null>(null)
+  const styleSectionRef = useRef<HTMLDivElement | null>(null)
   const [draft, setDraft] = useState<AmazonPromptDraft>(DEFAULT_AMAZON_PROMPT_DRAFT)
   const [resolution, setResolution] = useState<'2k' | '4k'>('2k')
   const [plannerPlatform, setPlannerPlatform] = useState<CommercePlannerPlatform>('amazon')
@@ -409,11 +411,16 @@ export default function AmazonPlanner() {
   const selectedStyleCandidate = selectedStyleIndex == null ? null : activeStyleCandidates[selectedStyleIndex] ?? null
   const styleLightboxImageIds = useMemo(() => styleImages.flatMap((image) => image.status === 'done' && image.imageId ? [image.imageId] : []), [styleImages])
   const isMainListingPlan = plannerMode === 'listing' && isCommerceMainSlot(plannerPlatform, selectedPlan?.slot)
-  const styleReferenceRequired = plannerPlatform === 'tiktok' ? true : !isMainListingPlan
+  const styleReferenceAppliesToPlan = plannerPlatform === 'tiktok' ? true : !isMainListingPlan
   const hasStyleReference = Boolean(selectedStyleImage?.imageId)
-  const usesStyleReferenceForActivePlan = styleReferenceRequired && hasStyleReference
-  const effectiveReferenceCount = inputImages.length + (usesStyleReferenceForActivePlan && selectedStyleImage?.imageId && !inputImages.some((image) => image.id === selectedStyleImage.imageId) ? 1 : 0)
-  const styleReferenceLimitExceeded = usesStyleReferenceForActivePlan && effectiveReferenceCount > API_MAX_IMAGES
+  const plannerStyleReference = resolvePlannerStyleReference({
+    requiredForSubmit: styleReferenceAppliesToPlan,
+    hasStyleReference,
+    uploadedReferenceCount: inputImages.length,
+    maxUploadedReferences: API_MAX_IMAGES,
+  })
+  const usesStyleReferenceForActivePlan = plannerStyleReference.attach
+  const uploadedReferenceLimitExceeded = plannerStyleReference.issue === 'uploaded-limit'
   const activePrompt = plannerMode === 'aplus'
     ? selectedAPlusPlan ? buildAmazonAPlusPlanPrompt({ ...selectedAPlusPlan, seriesStyleGuide: activeSeriesStyleGuide, styleReferenceAttached: usesStyleReferenceForActivePlan, styleDensityMode, marketplaceId }) : ''
     : selectedPlan
@@ -461,7 +468,7 @@ export default function AmazonPlanner() {
   const actionLabel = plannerMode === 'aplus' ? selectedAPlusPlan?.label : selectedPlan?.label
   const showStickyActions = plannerMode === 'aplus' ? aPlusPlansWithSizes.length > 0 : imagePlans.length > 0
   const actionDisabled = plannerMode === 'aplus' ? !selectedAPlusPlan : !activePrompt.trim()
-  const submitDisabled = actionDisabled || (styleReferenceRequired && !hasStyleReference) || styleReferenceLimitExceeded
+  const submitDisabled = actionDisabled
   const hasPlanOptions = visiblePlanCount > 0
   const hasSelectedPlan = plannerMode === 'aplus' ? Boolean(selectedAPlusPlan) : Boolean(selectedPlan)
   const canGoPrev = visiblePlanCount > 0 && visiblePlanIndex != null && visiblePlanIndex > 0
@@ -480,6 +487,10 @@ export default function AmazonPlanner() {
     ? plannerMode === 'aplus' ? '先选择一个 A+ 模块' : '先选择一个图片位'
     : currentActionSubmitted
       ? `已提交 ${actionSlot ?? '当前'} ${actionKindLabel}，${canGoNext ? '点击下一张继续' : '已是最后一张'}`
+    : plannerStyleReference.issue === 'missing'
+      ? `当前 ${actionSlot ?? ''} ${actionKindLabel}提交前必须先选择风格板`
+      : plannerStyleReference.issue === 'uploaded-limit'
+        ? `上传参考图超过 ${API_MAX_IMAGES} 张上限，请先删除多余参考图`
     : currentActionFilled
         ? '已准备好隐藏生图提示词，下一步提交生成'
         : `先准备当前 ${actionSlot ?? '当前'} ${actionKindLabel}生图提示词`
@@ -496,7 +507,7 @@ export default function AmazonPlanner() {
     },
     {
       label: '2 提交生成',
-      detail: currentActionSubmitted ? '已提交' : currentActionFilled ? '下一步' : '待提交',
+      detail: currentActionSubmitted ? '已提交' : plannerStyleReference.issue === 'missing' ? '需风格板' : plannerStyleReference.issue === 'uploaded-limit' ? '参考图超限' : currentActionFilled ? '下一步' : '待提交',
       status: currentActionSubmitted ? 'done' : currentActionFilled ? 'current' : 'todo',
     },
     {
@@ -529,19 +540,19 @@ export default function AmazonPlanner() {
             target: 'planner-action',
             message: plannerMode === 'aplus' ? '下一步：点击 AI策划A+ 生成模块方案' : '下一步：点击 AI策划生成逐张方案',
           }
-        : seriesStyleReferenceNeeded && !hasStyleReference
+        : !hasSelectedPlan
           ? {
-              target: hasGeneratedStyleImages ? 'style-choice' : 'style',
-              message: hasGeneratedStyleImages
-                ? '下一步：选择一张风格板作为附图和 A+ 的隐藏参考'
-                : hasRunningStyleImages
-                  ? '正在生成风格板，完成后选择一张作为隐藏参考'
-                  : '下一步：生成 3 张低清风格板，统一附图和 A+ 视觉',
+              target: 'plan-list',
+              message: plannerMode === 'aplus' ? '下一步：选择要生成的 A+ 模块' : '下一步：选择要生成的图片位',
             }
-          : !hasSelectedPlan
+          : seriesStyleReferenceNeeded && !hasStyleReference
             ? {
-                target: 'plan-list',
-                message: plannerMode === 'aplus' ? '下一步：选择要生成的 A+ 模块' : '下一步：选择要生成的图片位',
+                target: hasGeneratedStyleImages ? 'style-choice' : 'style',
+                message: hasGeneratedStyleImages
+                  ? '下一步：选择一张风格板后再提交当前图片'
+                  : hasRunningStyleImages
+                    ? '风格板正在生成，完成后选择一张再提交'
+                    : '下一步：生成并选择一张风格板，统一附图视觉',
               }
             : {
                 target: 'action-bar',
@@ -556,8 +567,8 @@ export default function AmazonPlanner() {
   const planListGuideActive = guideState.target === 'plan-list'
   const actionBarGuideActive = guideState.target === 'action-bar'
   const checks = plannerMode === 'aplus'
-    ? getAmazonAPlusComplianceChecks(draft, selectedAPlusPlan, aPlusType, inputImages.length, hasStyleReference)
-    : getAmazonListingPlannerChecks(draft, targetSize, inputImages.length, hasStyleReference, styleReferenceRequired)
+    ? getAmazonAPlusComplianceChecks(draft, selectedAPlusPlan, aPlusType, inputImages.length, usesStyleReferenceForActivePlan)
+    : getAmazonListingPlannerChecks(draft, targetSize, inputImages.length, usesStyleReferenceForActivePlan, styleReferenceAppliesToPlan)
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
 
   useEffect(() => {
@@ -706,16 +717,16 @@ export default function AmazonPlanner() {
       showToast(plannerMode === 'aplus' ? '请先 AI 策划并选择一个 A+ 模块' : '请先 AI 策划并选择一个图片位', 'error')
       return false
     }
-    const shouldRequireStyle = options.requireStyle && styleReferenceRequired
-    if (shouldRequireStyle && !selectedStyleImage?.imageId) {
-      showToast('请先生成并选择一张风格参考板', 'error')
+    if (options.requireStyle && plannerStyleReference.issue === 'missing') {
+      showToast('当前图片必须先生成并选择一张风格板，选择后才能提交生成。', 'error')
+      styleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return false
     }
-    if (shouldRequireStyle && styleReferenceLimitExceeded) {
-      showToast(`已选择隐藏风格参考板，实际参考图数量不能超过 ${API_MAX_IMAGES} 张；请删除一张产品参考图后再提交。`, 'error')
+    if (options.requireStyle && plannerStyleReference.issue === 'uploaded-limit') {
+      showToast(`上传参考图不能超过 ${API_MAX_IMAGES} 张，请删除多余参考图后再提交。`, 'error')
+      styleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return false
     }
-
     const hiddenSubmitPrompt = getCurrentSubmitPrompt()
     setPrompt('')
     setPendingTaskCategory({
@@ -1910,7 +1921,7 @@ export default function AmazonPlanner() {
                 <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">参考图</div>
                 <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                   {inputImages.length > 0
-                    ? `${inputImages.length}/${API_MAX_IMAGES} 张产品参考图${usesStyleReferenceForActivePlan ? `；正式生成时另附 1 张隐藏风格板（实际 ${effectiveReferenceCount}/${API_MAX_IMAGES}）` : '，将随生成请求一起发送'}`
+                    ? `${inputImages.length}/${API_MAX_IMAGES} 张产品参考图${usesStyleReferenceForActivePlan ? '；正式生成时另附 1 张隐藏风格板（不计入上述数量）' : '，将随生成请求一起发送'}`
                     : usesStyleReferenceForActivePlan
                       ? `未上传产品参考图；正式生成时会附 1 张隐藏风格板`
                       : '建议上传产品实拍、包装或结构参考图'}
@@ -2212,7 +2223,7 @@ export default function AmazonPlanner() {
             </>
           )}
           {hasPlanOptions && (
-            <div className={`mb-4 rounded-xl border p-3 transition ${getGuidePanelClass(styleGuideActive, 'muted')}`}>
+            <div ref={styleSectionRef} className={`mb-4 rounded-xl border p-3 transition ${getGuidePanelClass(styleGuideActive, 'muted')}`}>
               {styleGuideActive && (
                 <div className={GUIDE_HINT_CLASS}>
                   {guideState.message}
@@ -2376,12 +2387,12 @@ export default function AmazonPlanner() {
                 <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs leading-relaxed text-violet-800 dark:border-violet-300/20 dark:bg-violet-400/10 dark:text-violet-200">
                   {isMainListingPlan
                     ? `已选择「${selectedStyleCandidate.label}」，但当前 MAIN 主图不会附加这张风格板；切换到附图或 A+ 时才会作为隐藏参考。`
-                    : `已选择「${selectedStyleCandidate.label}」。正式生成时会隐藏附加这张风格参考板作为最后一张参考图，用于统一字体感觉、色板、光影、材质和标注样式，不复制其中占位文字、固定版式或产品摆放。`}
+                    : `已选择「${selectedStyleCandidate.label}」。正式生成时会隐藏附加这张风格参考板作为最后一张参考图，用于统一字体感觉、色板、光影、材质和标注样式，不复制其中占位文字、固定版式或产品摆放；风格板不占上传参考图数量。`}
                 </div>
               )}
-              {styleReferenceLimitExceeded && (
+              {uploadedReferenceLimitExceeded && (
                 <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
-                  当前产品参考图加隐藏风格板共 {effectiveReferenceCount} 张，超过上限 {API_MAX_IMAGES} 张，请删除一张产品参考图后再提交。
+                  上传参考图不能超过 {API_MAX_IMAGES} 张；风格板单独使用，不计入这个数量。
                 </div>
               )}
             </div>

@@ -640,7 +640,7 @@ describe('mask draft lifecycle in store actions', () => {
     expect(task?.category).not.toHaveProperty('styleReferenceImageId')
   })
 
-  it('blocks submit when visible references plus hidden style reference exceed the API image limit', async () => {
+  it('does not count the hidden style reference toward the 16 uploaded-reference limit', async () => {
     const styleImage = { id: 'style-reference-image', dataUrl: 'data:image/png;base64,style' }
     await putImage(styleImage)
     const inputImages = Array.from({ length: 16 }, (_, index) => ({
@@ -664,8 +664,26 @@ describe('mask draft lifecycle in store actions', () => {
 
     await submitTask()
 
+    const task = useStore.getState().tasks[0]
+    expect(task?.inputImageIds).toHaveLength(17)
+    expect(task?.inputImageIds.at(-1)).toBe(styleImage.id)
+  })
+
+  it('blocks submit when uploaded product references alone exceed the limit', async () => {
+    const inputImages = Array.from({ length: 17 }, (_, index) => ({
+      id: `product-reference-${index + 1}`,
+      dataUrl: `data:image/png;base64,product-${index + 1}`,
+    }))
+    useStore.setState({
+      prompt: 'listing prompt',
+      inputImages,
+      pendingTaskCategory: null,
+    })
+
+    await submitTask()
+
     expect(useStore.getState().tasks).toHaveLength(0)
-    expect(useStore.getState().showToast).toHaveBeenCalledWith(expect.stringContaining('实际参考图数量不能超过 16 张'), 'error')
+    expect(useStore.getState().showToast).toHaveBeenCalledWith(expect.stringContaining('上传参考图不能超过 16 张'), 'error')
   })
 
   it('does not apply stale pending category after the prompt changes', async () => {

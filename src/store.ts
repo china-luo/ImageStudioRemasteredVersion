@@ -1953,6 +1953,10 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   const category = resolvePendingTaskCategory(pendingTaskCategory, trimmedPrompt)
 
   let orderedInputImages = inputImages
+  if (orderedInputImages.length > API_MAX_INPUT_IMAGES) {
+    showToast(`上传参考图不能超过 ${API_MAX_INPUT_IMAGES} 张，请删除多余参考图后再提交。`, 'error')
+    return false
+  }
   let maskImageId: string | null = null
   let maskTargetImageId: string | null = null
 
@@ -1986,10 +1990,6 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
 
   const styleReferenceImageId = category.styleReferenceImageId?.trim()
   if (styleReferenceImageId && !orderedInputImages.some((img) => img.id === styleReferenceImageId)) {
-    if (orderedInputImages.length + 1 > API_MAX_INPUT_IMAGES) {
-      showToast(`已选择隐藏风格参考板，实际参考图数量不能超过 ${API_MAX_INPUT_IMAGES} 张；请删除一张产品参考图后再提交。`, 'error')
-      return false
-    }
     const dataUrl = await ensureImageCached(styleReferenceImageId)
     if (!dataUrl) {
       showToast('已选择的风格参考板不存在，请重新生成并选择风格板。', 'error')
