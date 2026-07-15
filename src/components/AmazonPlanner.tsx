@@ -1836,29 +1836,20 @@ export default function AmazonPlanner() {
                   : 'Title: ...\n\nAbout this item\n- Bullet 1...\n- Bullet 2...\n- Bullet 3...\n- Bullet 4...\n- Bullet 5...'}
               />
             </label>
-            <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-              <div className={`rounded-xl border px-3 py-2 transition ${guideState.target === 'planner-api' ? 'border-blue-300 bg-blue-50 text-blue-800 ring-2 ring-blue-500/15 dark:border-blue-400/60 dark:bg-blue-500/10 dark:text-blue-100' : plannerProfile && !plannerProfileValidation ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200'}`}>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold">AI 策划配置</div>
-                    <div className="mt-1 text-xs leading-relaxed">
-                      {plannerProfile ? `${plannerProfile.name} · ${plannerApiLabel}` : '未配置，请在设置中选择一个 Chat Completions 策划配置'}
-                      {plannerProfileValidation ? `（${plannerProfileValidation}）` : ''}
-                    </div>
-                  </div>
-                  <div className="w-full shrink-0 sm:w-48">
-                    <div className="mb-1 text-[11px] font-medium">策划模型</div>
-                    <Select
-                      value={plannerProfile?.model ?? ''}
-                      onChange={(value) => changePlannerModel(String(value))}
-                      disabled={!plannerProfile}
-                      options={plannerModelOptions}
-                      className="rounded-lg border border-current/20 bg-white/80 px-2.5 py-2 text-xs text-gray-800 outline-none dark:bg-gray-950/50 dark:text-gray-100"
-                    />
-                  </div>
-                </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div
+                aria-label="AI 策划模型"
+                className={`min-w-[10rem] flex-1 rounded-xl transition sm:max-w-52 ${getGuideFocusClass(guideState.target === 'planner-api')}`}
+              >
+                <Select
+                  value={plannerProfile?.model ?? ''}
+                  onChange={(value) => changePlannerModel(String(value))}
+                  disabled={!plannerProfile}
+                  options={plannerModelOptions}
+                  className={`h-10 rounded-xl border bg-white px-3 text-sm text-gray-800 outline-none dark:bg-gray-950 dark:text-gray-100 ${plannerProfileValidation ? 'border-amber-300 dark:border-amber-400/40' : 'border-gray-200 dark:border-white/[0.08]'}`}
+                />
               </div>
-              <div className={`flex flex-wrap items-center gap-2 rounded-xl transition sm:justify-end ${getGuideFocusClass(guideState.target === 'planner-action')}`}>
+              <div className={`ml-auto flex flex-wrap items-center justify-end gap-2 rounded-xl transition ${getGuideFocusClass(guideState.target === 'planner-action')}`}>
                 <button
                   type="button"
                   onClick={confirmCreateAiPlan}
@@ -1894,9 +1885,6 @@ export default function AmazonPlanner() {
                   设置
                 </button>
               </div>
-            </div>
-            <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-relaxed text-blue-800 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200">
-              AI策划使用设置中的策划配置，生图配置保持不变。
             </div>
             {plannerError && (
               <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">

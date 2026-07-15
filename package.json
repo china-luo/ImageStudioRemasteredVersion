@@ -1,7 +1,7 @@
 {
   "name": "amazon-image-studio",
   "private": true,
-  "version": "1.5.3",
+  "version": "1.5.2",
   "description": "跨境Image工作台 Windows desktop installer",
   "author": "JackLuo",
   "type": "module",
