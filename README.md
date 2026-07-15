@@ -16,11 +16,11 @@
 
 下载最新安装包：
 
-[ImageStudioRemasteredVersion-Setup-V1.5.1-2026-07-14-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.1/ImageStudioRemasteredVersion-Setup-V1.5.1-2026-07-14-x64.exe)
+[ImageStudioRemasteredVersion-Setup-V1.5.2-2026-07-15-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.2/ImageStudioRemasteredVersion-Setup-V1.5.2-2026-07-15-x64.exe)
 
 最新发布页：
 
-[V1.5.1 - 2026-07-14](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.1)
+[V1.5.2 - 2026-07-15](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.2)
 
 ### 基本流程
 
@@ -45,7 +45,7 @@
 - 根据商品标题、五点描述或产品资料生成逐张图片方案。
 - 输出适合图片模型使用的英文提示词。
 - 支持 Amazon / TikTok Shop 不同平台的图片表达逻辑。
-- 策划模型支持 `gpt-5.5` 和 `gpt-5.6-sol`。
+- AI 策划面板可直接选择 `gpt-5.5` 或 `gpt-5.6-sol`，也兼容已有的自定义模型。
 
 ### 拆图反推
 

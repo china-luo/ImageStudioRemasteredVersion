@@ -1,6 +1,15 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { addImageFromFile, ensureImageCached, submitTask, useStore } from '../store'
-import { canApiProfileGenerateImages, createSettingsForApiProfile, getAmazonPlannerProfile, getImageGenerationProfile, normalizeSettings, validateApiProfile } from '../lib/apiProfiles'
+import {
+  DEFAULT_RESPONSES_MODEL,
+  OPENAI_PLANNER_MODELS,
+  canApiProfileGenerateImages,
+  createSettingsForApiProfile,
+  getAmazonPlannerProfile,
+  getImageGenerationProfile,
+  normalizeSettings,
+  validateApiProfile,
+} from '../lib/apiProfiles'
 import {
   DEFAULT_AMAZON_PROMPT_DRAFT,
   type AmazonPromptDraft,
@@ -42,6 +51,7 @@ import { DEFAULT_PARAMS, type ApiMode, type ApiProfile } from '../types'
 import type { AmazonPlannerSession } from '../types'
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, EyeIcon, HistoryIcon, PhotoIcon, PlusIcon, TrashIcon } from './icons'
 import MarketplaceControls from './planner/MarketplaceControls'
+import Select from './Select'
 
 const FIELD_CLASS = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
 const LABEL_CLASS = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400'
@@ -334,6 +344,7 @@ export default function AmazonPlanner() {
   const params = useStore((s) => s.params)
   const inputImages = useStore((s) => s.inputImages)
   const settings = useStore((s) => s.settings)
+  const setSettings = useStore((s) => s.setSettings)
   const setPrompt = useStore((s) => s.setPrompt)
   const setParams = useStore((s) => s.setParams)
   const setPendingTaskCategory = useStore((s) => s.setPendingTaskCategory)
@@ -428,6 +439,15 @@ export default function AmazonPlanner() {
   const plannerProfile = getAmazonPlannerProfile(settings)
   const plannerProfileValidation = plannerProfile ? validateApiProfile(plannerProfile) : '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置'
   const plannerApiLabel = plannerProfile ? getApiModeLabel(plannerProfile.apiMode) : 'Responses API'
+  const plannerModelOptions = [
+    ...(plannerProfile?.model && !OPENAI_PLANNER_MODELS.includes(plannerProfile.model as typeof OPENAI_PLANNER_MODELS[number])
+      ? [{ label: `${plannerProfile.model}（当前自定义）`, value: plannerProfile.model }]
+      : []),
+    ...OPENAI_PLANNER_MODELS.map((model) => ({
+      label: model === DEFAULT_RESPONSES_MODEL ? `${model}（默认）` : model,
+      value: model,
+    })),
+  ]
   const imageGenerationProfile = getImageGenerationProfile(settings)
   const imageGenerationProfileValidation = imageGenerationProfile ? validateApiProfile(imageGenerationProfile) : '未找到支持 Images API 或 OpenRouter 图片模型的生图配置'
   const listingTargetSize = resolution === '4k' ? '4096x4096' : '2048x2048'
@@ -1315,6 +1335,16 @@ export default function AmazonPlanner() {
     setLightboxImageId(imageId, styleLightboxImageIds.length ? styleLightboxImageIds : [imageId])
   }
 
+  const changePlannerModel = (model: string) => {
+    if (!plannerProfile || plannerProfile.model === model) return
+    setSettings({
+      profiles: settings.profiles.map((profile) =>
+        profile.id === plannerProfile.id ? { ...profile, model } : profile,
+      ),
+    })
+    showToast(`AI 策划模型已切换为 ${model}`, 'success')
+  }
+
   const updateStylePreview = (
     candidate: AmazonStyleCandidate,
     imageState: StyleImageState | undefined,
@@ -1797,10 +1827,24 @@ export default function AmazonPlanner() {
             </label>
             <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
               <div className={`rounded-xl border px-3 py-2 transition ${guideState.target === 'planner-api' ? 'border-blue-300 bg-blue-50 text-blue-800 ring-2 ring-blue-500/15 dark:border-blue-400/60 dark:bg-blue-500/10 dark:text-blue-100' : plannerProfile && !plannerProfileValidation ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200'}`}>
-                <div className="text-xs font-semibold">AI 策划配置</div>
-                <div className="mt-1 text-xs leading-relaxed">
-                  {plannerProfile ? `${plannerProfile.name} · ${plannerProfile.model} · ${plannerApiLabel}` : '未配置，请在设置中选择一个 Chat Completions 策划配置'}
-                  {plannerProfileValidation ? `（${plannerProfileValidation}）` : ''}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold">AI 策划配置</div>
+                    <div className="mt-1 text-xs leading-relaxed">
+                      {plannerProfile ? `${plannerProfile.name} · ${plannerApiLabel}` : '未配置，请在设置中选择一个 Chat Completions 策划配置'}
+                      {plannerProfileValidation ? `（${plannerProfileValidation}）` : ''}
+                    </div>
+                  </div>
+                  <div className="w-full shrink-0 sm:w-48">
+                    <div className="mb-1 text-[11px] font-medium">策划模型</div>
+                    <Select
+                      value={plannerProfile?.model ?? ''}
+                      onChange={(value) => changePlannerModel(String(value))}
+                      disabled={!plannerProfile}
+                      options={plannerModelOptions}
+                      className="rounded-lg border border-current/20 bg-white/80 px-2.5 py-2 text-xs text-gray-800 outline-none dark:bg-gray-950/50 dark:text-gray-100"
+                    />
+                  </div>
                 </div>
               </div>
               <div className={`flex flex-wrap items-center gap-2 rounded-xl transition sm:justify-end ${getGuideFocusClass(guideState.target === 'planner-action')}`}>
