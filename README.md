@@ -16,11 +16,11 @@
 
 下载最新安装包：
 
-[ImageStudioRemasteredVersion-Setup-V1.5.2-2026-07-15-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.2/ImageStudioRemasteredVersion-Setup-V1.5.2-2026-07-15-x64.exe)
+[ImageStudioRemasteredVersion-Setup-V1.5.4-2026-07-16-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.4/ImageStudioRemasteredVersion-Setup-V1.5.4-2026-07-16-x64.exe)
 
 最新发布页：
 
-[V1.5.2 - 2026-07-15](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.2)
+[V1.5.4 - 2026-07-16](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.4)
 
 ### 基本流程
 

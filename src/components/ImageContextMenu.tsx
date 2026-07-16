@@ -147,6 +147,7 @@ export default function ImageContextMenu() {
       }
 
       const result = await downloadImageIds(outputImageIds, fileNameBase)
+      if (result.canceled) return
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
       } else if (result.failCount > 0) {

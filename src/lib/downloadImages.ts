@@ -10,6 +10,7 @@ const MIME_EXTENSIONS: Record<string, string> = {
 export interface DownloadImagesResult {
   successCount: number
   failCount: number
+  canceled: boolean
 }
 
 export function formatExportFileTime(date: Date): string {
@@ -18,11 +19,12 @@ export function formatExportFileTime(date: Date): string {
 }
 
 export async function downloadImageIds(imageIds: string[], fileNameBase = 'images'): Promise<DownloadImagesResult> {
-  if (imageIds.length === 0) return { successCount: 0, failCount: 0 }
+  if (imageIds.length === 0) return { successCount: 0, failCount: 0, canceled: false }
 
   let successCount = 0
   let failCount = 0
   const multiple = imageIds.length > 1
+  const preparedFiles: Array<{ fileName: string; blob: Blob }> = []
 
   for (let index = 0; index < imageIds.length; index++) {
     try {
@@ -31,16 +33,47 @@ export async function downloadImageIds(imageIds: string[], fileNameBase = 'image
       const fileName = multiple
         ? `${fileNameBase}-${order}.${getBlobExtension(blob)}`
         : `${fileNameBase}.${getBlobExtension(blob)}`
-      triggerDownload(blob, fileName)
-      successCount++
-      if (multiple) await delay(100)
+      preparedFiles.push({ fileName, blob })
     } catch (err) {
       console.error(err)
       failCount++
     }
   }
 
-  return { successCount, failCount }
+  const desktop = multiple ? window.imageStudioDesktop : undefined
+  if (
+    desktop?.selectImageSaveDirectory &&
+    desktop.saveImageFile &&
+    desktop.finishImageSave &&
+    preparedFiles.length > 0
+  ) {
+    const selected = await desktop.selectImageSaveDirectory()
+    if (!selected) return { canceled: true, successCount: 0, failCount }
+
+    try {
+      for (const { fileName, blob } of preparedFiles) {
+        try {
+          const data = new Uint8Array(await blob.arrayBuffer())
+          await desktop.saveImageFile({ fileName, data })
+          successCount++
+        } catch (err) {
+          console.error(err)
+          failCount++
+        }
+      }
+    } finally {
+      await desktop.finishImageSave()
+    }
+    return { canceled: false, successCount, failCount }
+  }
+
+  for (const { blob, fileName } of preparedFiles) {
+    triggerDownload(blob, fileName)
+    successCount++
+    if (multiple) await delay(100)
+  }
+
+  return { successCount, failCount, canceled: false }
 }
 
 async function getImageBlob(imageIdOrUrl: string): Promise<Blob> {

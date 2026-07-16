@@ -460,7 +460,8 @@ export default function InputBar() {
 
     try {
       const timeStr = formatExportFileTime(new Date())
-      const { successCount, failCount } = await downloadImageIds(imageIds, `batch-${timeStr}`)
+      const { successCount, failCount, canceled } = await downloadImageIds(imageIds, `batch-${timeStr}`)
+      if (canceled) return
 
       if (successCount === 0) {
         showToast('下载失败', 'error')

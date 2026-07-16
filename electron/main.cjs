@@ -1,10 +1,60 @@
 const path = require('node:path')
 const fs = require('node:fs')
-const { app, BrowserWindow, dialog, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 
 const APP_TITLE = '跨境Image工作台'
 const APP_ID = 'com.chinaluo.imagestudio'
 const APP_ICON_PATH = path.join(__dirname, '..', 'build', 'icon.ico')
+const selectedImageSaveDirectories = new Map()
+
+function sanitizeDownloadFileName(fileName) {
+  const baseName = path.basename(typeof fileName === 'string' ? fileName : '')
+  const sanitized = baseName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/g, '').slice(0, 180)
+  return sanitized || 'image.png'
+}
+
+function getAvailableDownloadPath(directory, fileName) {
+  const parsed = path.parse(fileName)
+  let candidate = path.join(directory, fileName)
+  let suffix = 2
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(directory, `${parsed.name} (${suffix})${parsed.ext}`)
+    suffix++
+  }
+  return candidate
+}
+
+ipcMain.handle('image-studio:select-image-save-directory', async (event) => {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender)
+  const options = {
+    title: '选择图片保存文件夹',
+    buttonLabel: '保存到此文件夹',
+    properties: ['openDirectory', 'createDirectory'],
+  }
+  const result = ownerWindow
+    ? await dialog.showOpenDialog(ownerWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || !result.filePaths[0]) return false
+  selectedImageSaveDirectories.set(event.sender.id, result.filePaths[0])
+  return true
+})
+
+ipcMain.handle('image-studio:save-image-file', async (event, payload) => {
+  const directory = selectedImageSaveDirectories.get(event.sender.id)
+  if (!directory) throw new Error('尚未选择图片保存文件夹')
+  const fileName = sanitizeDownloadFileName(payload?.fileName)
+  const targetPath = getAvailableDownloadPath(directory, fileName)
+  const bytes = payload?.data
+  if (!(bytes instanceof Uint8Array) && !(bytes instanceof ArrayBuffer)) {
+    throw new Error('图片文件数据无效')
+  }
+  await fs.promises.writeFile(targetPath, Buffer.from(bytes))
+  return path.basename(targetPath)
+})
+
+ipcMain.handle('image-studio:finish-image-save', (event) => {
+  selectedImageSaveDirectories.delete(event.sender.id)
+})
 
 function getAppIconPath() {
   return fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined

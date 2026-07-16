@@ -365,6 +365,7 @@ export default function DetailModal() {
 
     try {
       const result = await downloadImageIds(task.outputImages, `task-${task.id}`)
+      if (result.canceled) return
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
       } else if (result.failCount > 0) {
@@ -383,6 +384,7 @@ export default function DetailModal() {
 
     try {
       const result = await downloadImageIds(streamPartialImageIds, `task-${task.id}-partial`)
+      if (result.canceled) return
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
       } else if (result.failCount > 0) {

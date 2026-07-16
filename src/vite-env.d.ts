@@ -7,6 +7,9 @@ interface Window {
   readonly imageStudioDesktop?: {
     readonly isDesktop: boolean
     readonly platform: string
+    readonly selectImageSaveDirectory?: () => Promise<boolean>
+    readonly saveImageFile?: (file: { fileName: string; data: Uint8Array }) => Promise<string>
+    readonly finishImageSave?: () => Promise<void>
   }
 }
 
