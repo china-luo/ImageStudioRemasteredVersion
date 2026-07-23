@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { APP_BRAND_NAME, APP_REPOSITORY_URL } from '../lib/appBrand'
+import { getPublicAssetUrl } from '../lib/publicAsset'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import ViewportTooltip from './ViewportTooltip'
@@ -331,7 +332,7 @@ export default function Header() {
             </div>
             <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950 sm:p-4">
               <img
-                src="/support-wechat-pay-qr.png"
+                src={getPublicAssetUrl('support-wechat-pay-qr.png')}
                 alt="打赏收款码"
                 className="mx-auto aspect-square w-full max-w-[480px] rounded-xl bg-white object-contain"
                 draggable={false}
