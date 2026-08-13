@@ -1,5 +1,5 @@
 // Legacy experimental Agent API. Main image generation should use api.ts instead.
-import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
+import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { appendOutputResolutionToPrompt, getApiErrorMessage, getPromptOutputResolution, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
 import { prepareReferenceImageAndMaskPayload, prepareReferenceImagePayload } from './referenceImagePayload'
@@ -107,10 +107,6 @@ function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: 
     tool.output_compression = params.output_compression
   }
 
-  if (profile.streamImages) {
-    tool.partial_images = profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
-  }
-
   if (maskDataUrl) {
     tool.input_image_mask = {
       image_url: maskDataUrl,
@@ -198,10 +194,6 @@ function createAgentTools(params: TaskParams, profile: ApiProfile, settings: App
   return tools
 }
 
-function isEventStreamResponse(response: Response): boolean {
-  return response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream') ?? false
-}
-
 function isRecordValue(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -239,16 +231,6 @@ function replaceResponsesInputImageDataUrls(value: unknown, replacements: string
     next[key] = replaceResponsesInputImageDataUrls(child, replacements, cursor)
   }
   return next
-}
-
-function getStringValue(source: Record<string, unknown>, key: string): string | undefined {
-  const value = source[key]
-  return typeof value === 'string' && value ? value : undefined
-}
-
-function getNumberValue(source: Record<string, unknown>, key: string): number | undefined {
-  const value = source[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function escapeMarkdownLinkLabel(text: string) {
@@ -289,32 +271,6 @@ function applyUrlCitations(text: string, annotations: ResponseTextAnnotation[] |
   return output
 }
 
-function getStreamEventErrorMessage(event: Record<string, unknown>): string | null {
-  const error = event.error
-  if (isRecordValue(error)) {
-    const message = getStringValue(error, 'message')
-    if (message) return message
-  }
-  if (typeof error === 'string' && error.trim()) return error
-
-  const type = getStringValue(event, 'type')
-  if (type?.endsWith('.failed')) return getStringValue(event, 'message') ?? 'Agent 流式请求失败'
-  return null
-}
-
-function parseServerSentEventBlock(block: string): string | null {
-  const dataLines: string[] = []
-  for (const line of block.split(/\r?\n/)) {
-    if (!line || line.startsWith(':')) continue
-    if (!line.startsWith('data:')) continue
-    dataLines.push(line.slice(5).replace(/^ /, ''))
-  }
-
-  const data = dataLines.join('\n').trim()
-  if (!data || data === '[DONE]') return null
-  return data
-}
-
 function getAbortedSignal(signals: Array<AbortSignal | undefined>) {
   return signals.find((signal) => signal?.aborted)
 }
@@ -323,65 +279,6 @@ function throwIfAborted(...signals: Array<AbortSignal | undefined>) {
   const signal = getAbortedSignal(signals)
   if (!signal) return
   throw signal.reason instanceof Error ? signal.reason : new DOMException('请求已停止', 'AbortError')
-}
-
-async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>, signals: Array<AbortSignal | undefined> = []): Promise<void> {
-  if (!response.body) throw new Error('接口未返回可读取的流式响应')
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  const cancelReader = () => {
-    void reader.cancel().catch(() => undefined)
-  }
-  throwIfAborted(...signals)
-  for (const signal of signals) signal?.addEventListener('abort', cancelReader, { once: true })
-
-  const processBlock = async (block: string) => {
-    const data = parseServerSentEventBlock(block)
-    if (!data) return
-
-    let event: unknown
-    try {
-      event = JSON.parse(data)
-    } catch {
-      throw new Error('Agent 流式响应包含无法解析的 JSON 事件')
-    }
-    if (!isRecordValue(event)) return
-
-    const errorMessage = getStreamEventErrorMessage(event)
-    if (errorMessage) throw new Error(errorMessage)
-
-    throwIfAborted(...signals)
-    await onEvent(event)
-    await Promise.resolve()
-    throwIfAborted(...signals)
-  }
-
-  try {
-    while (true) {
-      throwIfAborted(...signals)
-      const { value, done } = await reader.read()
-      throwIfAborted(...signals)
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
-      let separatorIndex = buffer.search(/\r?\n\r?\n/)
-      while (separatorIndex >= 0) {
-        const block = buffer.slice(0, separatorIndex)
-        const separator = buffer.match(/\r?\n\r?\n/)?.[0] ?? '\n\n'
-        buffer = buffer.slice(separatorIndex + separator.length)
-        await processBlock(block)
-        separatorIndex = buffer.search(/\r?\n\r?\n/)
-      }
-    }
-
-    buffer += decoder.decode()
-    throwIfAborted(...signals)
-    if (buffer.trim()) await processBlock(buffer)
-  } finally {
-    for (const signal of signals) signal?.removeEventListener('abort', cancelReader)
-  }
 }
 
 function createInput(messages: AgentApiMessage[]) {
@@ -508,145 +405,6 @@ function extractImageFromOutputItem(item: ResponsesOutputItem, fallbackMime: str
   }
 }
 
-function getStreamResponsePayload(event: Record<string, unknown>): ResponsesApiResponse | null {
-  const response = event.response
-  if (isRecordValue(response)) return response as ResponsesApiResponse
-
-  const item = event.item
-  if (isRecordValue(item)) return { output: [item as ResponsesOutputItem] }
-
-  return null
-}
-
-async function parseAgentStreamResponse(
-  response: Response,
-  mime: string,
-  signal?: AbortSignal,
-  callerSignal?: AbortSignal,
-  onTextDelta?: (delta: string) => void,
-  onOutputItems?: (outputItems: ResponsesOutputItem[]) => void,
-  onImageToolStarted?: (event: { toolCallId: string; outputIndex?: number }) => void | Promise<void>,
-  onImagePartialImage?: (event: { toolCallId: string; image: string; partialImageIndex?: number; outputIndex?: number }) => void | Promise<void>,
-  onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>,
-): Promise<AgentApiResult> {
-  let completedPayload: ResponsesApiResponse | null = null
-  const outputItems: ResponsesOutputItem[] = []
-  let streamedText = ''
-
-  const publishOutputItems = (items: ResponsesOutputItem[]) => {
-    for (const item of items) {
-      const index = item.id ? outputItems.findIndex((existing) => existing.id === item.id) : -1
-      if (index >= 0) outputItems[index] = item
-      else outputItems.push(item)
-    }
-    onOutputItems?.([...outputItems])
-  }
-
-  const publishWebSearchStatus = (event: Record<string, unknown>, status: string, actionType?: string) => {
-    const id = getStringValue(event, 'item_id')
-    if (!id) return
-
-    const index = outputItems.findIndex((item) => item.id === id)
-    const current = index >= 0 ? outputItems[index] : { id, type: 'web_search_call' }
-    const next: ResponsesOutputItem = {
-      ...current,
-      id,
-      type: 'web_search_call',
-      status,
-      ...(actionType ? { action: { type: actionType } } : {}),
-    }
-    if (index >= 0) outputItems[index] = next
-    else outputItems.push(next)
-    onOutputItems?.([...outputItems])
-  }
-
-  await readJsonServerSentEvents(response, async (event) => {
-    const type = getStringValue(event, 'type')
-
-    if (type === 'response.image_generation_call.partial_image') {
-      const toolCallId = getStringValue(event, 'item_id')
-      const b64 = getStringValue(event, 'partial_image_b64')
-      if (toolCallId && b64) {
-        await onImagePartialImage?.({
-          toolCallId,
-          image: normalizeBase64Image(b64, mime),
-          partialImageIndex: getNumberValue(event, 'partial_image_index'),
-          outputIndex: getNumberValue(event, 'output_index'),
-        })
-      }
-      return
-    }
-
-    if (type === 'response.web_search_call.searching') {
-      publishWebSearchStatus(event, 'in_progress', 'search')
-      return
-    }
-    if (type === 'response.web_search_call.completed') {
-      publishWebSearchStatus(event, 'completed')
-      return
-    }
-    if (type === 'response.web_search_call.failed') {
-      publishWebSearchStatus(event, 'failed')
-      return
-    }
-    if (type === 'response.web_search_call.in_progress') {
-      publishWebSearchStatus(event, 'in_progress')
-      return
-    }
-
-    if (type === 'response.output_text.delta') {
-      const delta = getStringValue(event, 'delta')
-      if (delta) {
-        streamedText += delta
-        onTextDelta?.(delta)
-      }
-      return
-    }
-
-    const payload = getStreamResponsePayload(event)
-    if (!payload) return
-
-    if (Array.isArray(payload.output)) {
-      publishOutputItems(payload.output)
-    }
-
-    if (type === 'response.output_item.added') {
-      const item = payload.output?.[0]
-      if (item?.type === 'image_generation_call' && typeof item.id === 'string' && item.id) {
-        await onImageToolStarted?.({
-          toolCallId: item.id,
-          outputIndex: getNumberValue(event, 'output_index'),
-        })
-      }
-      return
-    }
-
-    if (type === 'response.output_item.done') {
-      const item = payload.output?.[0]
-      const image = item ? extractImageFromOutputItem(item, mime) : null
-      if (image) await onImageToolCompleted?.(image)
-      return
-    }
-
-    if (type === 'response.completed' || isRecordValue(event.response)) {
-      completedPayload = payload
-    }
-  }, [signal, callerSignal])
-
-  throwIfAborted(signal, callerSignal)
-  const payload: ResponsesApiResponse | null = completedPayload ?? (outputItems.length ? { output: outputItems } : null)
-  if (!payload) throw new Error('Agent 流式接口未返回最终响应数据')
-
-  const text = extractText(payload) || streamedText.trim()
-  return {
-    responseId: payload.id,
-    text,
-    images: extractImages(payload, mime),
-    outputItems: payload.output ?? [],
-    rawResponsePayload: JSON.stringify(payload, null, 2),
-  }
-}
-
 export async function callAgentResponsesApi(opts: {
   settings: AppSettings
   profile: ApiProfile
@@ -657,13 +415,12 @@ export async function callAgentResponsesApi(opts: {
   onTextDelta?: (delta: string) => void
   onOutputItems?: (outputItems: ResponsesOutputItem[]) => void
   onImageToolStarted?: (event: { toolCallId: string; outputIndex?: number }) => void | Promise<void>
-  onImagePartialImage?: (event: { toolCallId: string; image: string; partialImageIndex?: number; outputIndex?: number }) => void | Promise<void>
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<AgentApiResult> {
-  const { settings, profile, params, input, maskDataUrl, signal, onTextDelta, onOutputItems, onImageToolStarted, onImagePartialImage, onImageToolCompleted } = opts
+  const { settings, profile, params, input, maskDataUrl, signal, onTextDelta, onOutputItems, onImageToolStarted, onImageToolCompleted } = opts
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
   const abortFromCaller = () => controller.abort()
@@ -683,9 +440,6 @@ export async function callAgentResponsesApi(opts: {
       input: preparedInput,
       tools: createAgentTools(params, profile, settings, preparedPayload.maskDataUrl),
     }
-    if (profile.streamImages) {
-      body.stream = true
-    }
 
     const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
@@ -697,10 +451,6 @@ export async function callAgentResponsesApi(opts: {
 
     if (!response.ok) {
       throw new Error(await getApiErrorMessage(response))
-    }
-
-    if (profile.streamImages && isEventStreamResponse(response)) {
-      return parseAgentStreamResponse(response, mime, controller.signal, signal, onTextDelta, onOutputItems, onImageToolStarted, onImagePartialImage, onImageToolCompleted)
     }
 
     const payload = await response.json() as ResponsesApiResponse
@@ -727,7 +477,7 @@ export async function callAgentConversationTitleApi(opts: {
 }): Promise<string> {
   const { settings, profile, prompt, imageDataUrls, signal } = opts
   const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
   const abortFromCaller = () => controller.abort()
@@ -799,14 +549,13 @@ export async function callBatchImageSingle(opts: {
   referenceIds?: string[]
   signal?: AbortSignal
   onImageToolStarted?: () => void | Promise<void>
-  onPartialImage?: (event: { image: string; partialImageIndex?: number }) => void | Promise<void>
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<BatchImageCallResult> {
-  const { profile, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
+  const { profile, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onImageToolCompleted } = opts
   const promptWithOutputResolution = appendOutputResolutionToPrompt(prompt, params.size)
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
   const abortFromCaller = () => controller.abort()
@@ -849,18 +598,12 @@ export async function callBatchImageSingle(opts: {
     if (params.output_format !== 'png' && params.output_compression != null) {
       tool.output_compression = params.output_compression
     }
-    if (profile.streamImages) {
-      tool.partial_images = profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
-    }
 
     const body: Record<string, unknown> = {
       model: profile.model,
       input,
       tools: [tool],
       tool_choice: 'required',
-    }
-    if (profile.streamImages) {
-      body.stream = true
     }
 
     const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
@@ -876,61 +619,6 @@ export async function callBatchImageSingle(opts: {
       return { batchItemId, image: null, error: errorMsg }
     }
 
-    // Handle streaming
-    if (profile.streamImages && isEventStreamResponse(response)) {
-      await onImageToolStarted?.()
-      let completedImage: AgentApiResultImage | null = null
-      let rawPayload: string | undefined
-
-      await readJsonServerSentEvents(response, async (event) => {
-        const type = getStringValue(event, 'type')
-
-        if (type === 'response.image_generation_call.partial_image') {
-          const b64 = getStringValue(event, 'partial_image_b64')
-          if (b64) {
-            await onPartialImage?.({
-              image: normalizeBase64Image(b64, mime),
-              partialImageIndex: getNumberValue(event, 'partial_image_index'),
-            })
-          }
-          return
-        }
-
-        if (type === 'response.output_item.done') {
-          const payload = getStreamResponsePayload(event)
-          const item = payload?.output?.[0]
-          if (item) {
-            const img = extractImageFromOutputItem(item, mime)
-            if (img) {
-              completedImage = img
-              await onImageToolCompleted?.(img)
-            }
-          }
-          return
-        }
-
-        if (type === 'response.completed' || isRecordValue(event.response)) {
-          const payload = getStreamResponsePayload(event)
-          if (payload) rawPayload = JSON.stringify(payload, null, 2)
-          if (!completedImage && payload) {
-            const images = extractImages(payload, mime)
-            if (images.length > 0) {
-              completedImage = images[0]
-              await onImageToolCompleted?.(completedImage)
-            }
-          }
-        }
-      }, [controller.signal, signal])
-
-      return {
-        batchItemId,
-        image: completedImage,
-        error: completedImage ? null : '流式响应未返回图片',
-        rawResponsePayload: rawPayload,
-      }
-    }
-
-    // Non-streaming
     const payload = await response.json() as ResponsesApiResponse
     const images = extractImages(payload, mime)
     const image = images[0] ?? null

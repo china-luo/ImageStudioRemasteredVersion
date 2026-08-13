@@ -13,6 +13,7 @@ import {
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_RESPONSES_MODEL,
+  DEFAULT_VOLCENGINE_BASE_URL,
   DEFAULT_SETTINGS,
   findEquivalentApiProfile,
   getApiProviderLabel,
@@ -24,12 +25,11 @@ import {
   mergeImportedSettings,
   normalizeCustomProviderDefinition,
   normalizeSettings,
-  normalizeStreamPartialImages,
   OPENAI_PLANNER_MODELS,
   switchApiProfileProvider,
 } from '../lib/apiProfiles'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
-import { DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type CustomProviderDefinition } from '../types'
+import { type ApiProfile, type AppSettings, type CustomProviderDefinition } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
@@ -172,9 +172,7 @@ function isPristineNewOpenAIProfile(profile: ApiProfile) {
     profile.timeout === DEFAULT_SETTINGS.timeout &&
     profile.apiMode === 'images' &&
     profile.codexCli === false &&
-    profile.apiProxy === defaultProfile.apiProxy &&
-    profile.streamImages === defaultProfile.streamImages &&
-    profile.streamPartialImages === defaultProfile.streamPartialImages
+    profile.apiProxy === defaultProfile.apiProxy
 }
 
 function getImportedProfileFromMergedSettings(
@@ -320,6 +318,7 @@ export default function SettingsModal() {
   const [llmPromptTooltipVisible, setLlmPromptTooltipVisible] = useState(false)
   const [aboutDescriptionExpanded, setAboutDescriptionExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('api')
+  const [apiConfigView, setApiConfigView] = useState<'generation' | 'analysis'>('generation')
   const [exportConfig, setExportConfig] = useState(true)
   const [exportTasks, setExportTasks] = useState(true)
   const [importConfig, setImportConfig] = useState(true)
@@ -350,18 +349,20 @@ export default function SettingsModal() {
   const apiProxyLocked = isApiProxyLocked(apiProxyConfig)
   const apiProxyUsesDynamicTarget = Boolean(apiProxyConfig?.enabled)
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
-  const apiProxyChecked = activeProfile.provider === 'openai' && (apiProxyLocked || activeProfile.apiProxy)
-  const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && apiProxyChecked
+  const activeProviderSupportsApiProxy = activeProfile.provider === 'openai' || activeProfile.provider === 'volcengine'
+  const apiProxyChecked = activeProviderSupportsApiProxy && (apiProxyLocked || activeProfile.apiProxy)
+  const apiProxyEnabled = apiProxyAvailable && activeProviderSupportsApiProxy && apiProxyChecked
   const apiProxyUrlLocked = apiProxyEnabled && !apiProxyUsesDynamicTarget
   const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, activeProfile.provider)
-  const activeProviderUsesApiUrl = activeProviderIsOpenAICompatible || activeProfile.provider === 'fal'
+  const activeProviderUsesApiUrl = activeProviderIsOpenAICompatible || activeProfile.provider === 'fal' || activeProfile.provider === 'volcengine'
   const activeCustomProvider = draft.customProviders.find((provider) => provider.id === activeProfile.provider)
-  const defaultProviderOrder = ['openai', 'fal', ...draft.customProviders.map(p => p.id)]
+  const defaultProviderOrder = ['openai', 'fal', 'volcengine', ...draft.customProviders.map(p => p.id)]
   const providerOrder = draft.providerOrder || defaultProviderOrder
 
   const unorderedProviderOptions = [
     { label: 'OpenAI 兼容接口', value: 'openai', draggable: true },
     { label: 'fal.ai', value: 'fal', draggable: true },
+    { label: '火山方舟 Seedream', value: 'volcengine', draggable: true },
     ...draft.customProviders.map((provider) => ({
       label: provider.name,
       value: provider.id,
@@ -445,7 +446,7 @@ export default function SettingsModal() {
       ...displaySettings,
       profiles: displaySettings.profiles.map((profile) => ({
         ...profile,
-        apiProxy: profile.provider === 'openai' && apiProxyAvailable
+        apiProxy: (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable
           ? (apiProxyLocked || profile.apiProxy)
           : false,
       })),
@@ -547,10 +548,8 @@ export default function SettingsModal() {
         baseUrl: normalizedBaseUrl,
         model: profile.model.trim() || defaultModel,
         timeout: Number(profile.timeout) || DEFAULT_SETTINGS.timeout,
-        apiProxy: profile.provider === 'openai' && apiProxyAvailable ? (apiProxyLocked || profile.apiProxy) : false,
+        apiProxy: (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable ? (apiProxyLocked || profile.apiProxy) : false,
         codexCli: profile.provider === 'openai' ? profile.codexCli : false,
-        streamImages: profile.provider === 'openai' ? profile.streamImages : false,
-        streamPartialImages: profile.provider === 'openai' ? normalizeStreamPartialImages(profile.streamPartialImages) : DEFAULT_STREAM_PARTIAL_IMAGES,
       }
     })
     const fallbackProfile = createDefaultOpenAIProfile({ id: newId('openai') })
@@ -567,8 +566,6 @@ export default function SettingsModal() {
       apiMode: nextActiveProfile.apiMode,
       codexCli: nextActiveProfile.codexCli,
       apiProxy: nextActiveProfile.apiProxy,
-      streamImages: nextActiveProfile.streamImages,
-      streamPartialImages: nextActiveProfile.streamPartialImages,
       profiles: normalizedProfiles.length ? normalizedProfiles : [fallbackProfile],
       activeProfileId: nextActiveProfileId,
     })
@@ -613,8 +610,6 @@ export default function SettingsModal() {
       const model = profile.model.trim() || getDefaultModelForMode(profile.apiMode)
       url.searchParams.set('model', !options.includeApiKey && options.useNewApiModel ? '{model}' : model)
       if (profile.codexCli) url.searchParams.set('codexCli', 'true')
-      if (profile.streamImages !== DEFAULT_SETTINGS.streamImages) url.searchParams.set('streamImages', String(Boolean(profile.streamImages)))
-      if (profile.streamPartialImages !== DEFAULT_STREAM_PARTIAL_IMAGES) url.searchParams.set('streamPartialImages', String(normalizeStreamPartialImages(profile.streamPartialImages)))
 
       let result = url.toString()
       if (!options.includeApiKey) {
@@ -944,7 +939,7 @@ export default function SettingsModal() {
   }
 
   const handleProviderReorder = (sourceValue: string | number, targetValue: string | number, position: 'before' | 'after' | null) => {
-    const currentOrder = draft.providerOrder || ['openai', 'fal', ...draft.customProviders.map(p => p.id)]
+    const currentOrder = draft.providerOrder || ['openai', 'fal', 'volcengine', ...draft.customProviders.map(p => p.id)]
     const sourceIndex = currentOrder.indexOf(String(sourceValue))
     const targetIndex = currentOrder.indexOf(String(targetValue))
     if (sourceIndex < 0 || targetIndex < 0) return
@@ -1130,7 +1125,7 @@ export default function SettingsModal() {
       />
       <div
         ref={settingsScrollBoundaryRef}
-        className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 flex h-[85vh] sm:h-[600px] flex-col overflow-hidden"
+        className="relative z-10 flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 sm:h-[720px]"
       >
         {/* Header */}
         <div className="flex items-center justify-between shrink-0 p-5 border-b border-gray-100 dark:border-white/[0.08]">
@@ -1200,7 +1195,7 @@ export default function SettingsModal() {
           <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-transparent relative overflow-hidden">
             <div className="flex-1 overflow-y-auto overscroll-contain custom-scrollbar p-5 sm:p-6">
             {activeTab === 'general' && (
-              <div className="space-y-4">
+              <div className="space-y-4 rounded-2xl border border-gray-200/80 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.025]">
                 <div className="hidden sm:block">
                   <div className="mb-1 flex items-center justify-between">
                     <span className="block text-sm text-gray-600 dark:text-gray-300">任务提交方式</span>
@@ -1316,8 +1311,33 @@ export default function SettingsModal() {
             )}
             
             {activeTab === 'api' && (
-              <div className="space-y-4">
-                <div>
+              <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+                <section className="space-y-4 rounded-2xl border border-gray-200/80 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.025]">
+                  <div className="border-b border-gray-100 pb-4 dark:border-white/[0.07]">
+                    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">API 配置</h4>
+                    <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">按用途切换并维护图片生成或 AI 分析连接。</p>
+                    <div className="mt-4 grid grid-cols-2 rounded-xl bg-gray-100 p-1 dark:bg-white/[0.06]" role="tablist" aria-label="API 配置类型">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={apiConfigView === 'generation'}
+                        onClick={() => setApiConfigView('generation')}
+                        className={`h-9 rounded-lg px-3 text-sm font-medium transition ${apiConfigView === 'generation' ? 'bg-white text-gray-900 shadow-sm dark:bg-white/[0.12] dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`}
+                      >
+                        图片生成
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={apiConfigView === 'analysis'}
+                        onClick={() => setApiConfigView('analysis')}
+                        className={`h-9 rounded-lg px-3 text-sm font-medium transition ${apiConfigView === 'analysis' ? 'bg-white text-gray-900 shadow-sm dark:bg-white/[0.12] dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`}
+                      >
+                        AI 分析
+                      </button>
+                    </div>
+                  </div>
+                <div className={apiConfigView === 'generation' ? 'block' : 'hidden'}>
                   <div className="mb-1.5 flex items-center gap-1.5">
                     <span className="block text-sm text-gray-600 dark:text-gray-300">当前配置</span>
                     <span className="relative inline-flex">
@@ -1498,7 +1518,7 @@ export default function SettingsModal() {
                   </div>
                 </div>
 
-              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3 dark:border-blue-400/20 dark:bg-blue-400/10">
+              <div className={`${apiConfigView === 'analysis' ? 'block' : 'hidden'} rounded-2xl border border-blue-100 bg-blue-50/70 p-3 dark:border-blue-400/20 dark:bg-blue-400/10`}>
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-blue-900 dark:text-blue-100">AI 策划配置</span>
                   <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-500/20 dark:text-blue-200">
@@ -1527,7 +1547,7 @@ export default function SettingsModal() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 dark:border-emerald-400/20 dark:bg-emerald-400/10">
+              <div className={`${apiConfigView === 'analysis' ? 'block' : 'hidden'} rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 dark:border-emerald-400/20 dark:bg-emerald-400/10`}>
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">拆图反推 AI 配置</span>
                   <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
@@ -1546,7 +1566,7 @@ export default function SettingsModal() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-3 dark:border-amber-400/20 dark:bg-amber-400/10">
+              <div className={`${apiConfigView === 'analysis' ? 'block' : 'hidden'} rounded-2xl border border-amber-100 bg-amber-50/70 p-3 dark:border-amber-400/20 dark:bg-amber-400/10`}>
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-amber-900 dark:text-amber-100">VOC 评论分析配置</span>
                   <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-200">
@@ -1572,6 +1592,7 @@ export default function SettingsModal() {
                 </div>
               </div>
 
+              <div className={apiConfigView === 'generation' ? 'contents' : 'hidden'}>
               {/* 1. 配置名称 */}
               <label className="block">
                 <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">配置名称</span>
@@ -1608,7 +1629,7 @@ export default function SettingsModal() {
                     onBlur={(e) => commitActiveProfilePatch({ baseUrl: e.target.value })}
                     type="text"
                     disabled={apiProxyUrlLocked}
-                    placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_BASE_URL : DEFAULT_SETTINGS.baseUrl}
+                    placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_BASE_URL : activeProfile.provider === 'volcengine' ? DEFAULT_VOLCENGINE_BASE_URL : DEFAULT_SETTINGS.baseUrl}
                     className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${apiProxyUrlLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
                   <div data-selectable-text className="mt-1.5 min-h-[22px] flex items-center text-xs text-gray-500 dark:text-gray-500">
@@ -1628,7 +1649,7 @@ export default function SettingsModal() {
               )}
 
               {/* 4. API 代理（紧跟 URL） */}
-              {apiProxyAvailable && activeProfile.provider === 'openai' && (
+              {apiProxyAvailable && activeProviderSupportsApiProxy && (
                 <div className="block">
                   <div className="mb-1.5 flex items-center justify-between">
                     <span className="block text-sm text-gray-600 dark:text-gray-300">API 代理</span>
@@ -1758,48 +1779,6 @@ export default function SettingsModal() {
                 </div>
               </label>
 
-              {/* 8. 流式传输 + 中间步骤图像数 */}
-              {activeProfile.provider === 'openai' && (
-                <div className="block space-y-3">
-                  <div>
-                    <div className="mb-1.5 flex items-center justify-between gap-3">
-                      <span className="block text-sm text-gray-600 dark:text-gray-300">流式传输</span>
-                      <button
-                        type="button"
-                        onClick={() => updateActiveProfile({ streamImages: !activeProfile.streamImages }, true)}
-                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${activeProfile.streamImages ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                        role="switch"
-                        aria-checked={!!activeProfile.streamImages}
-                        aria-label="流式传输"
-                      >
-                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${activeProfile.streamImages ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                      </button>
-                    </div>
-                    <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                      开启后请求以流式传输，并非所有服务商和网关都支持此功能。官方接口在流式模式下不发送心跳，需要配合请求中间步骤图像来维持连接，避免超时断开。官方接口仅支持单图流式传输，因此数量大于 1 时会将多图生成拆分为并发单图。
-                    </div>
-                  </div>
-                  <label className={`block ${activeProfile.streamImages ? '' : 'opacity-60'}`}>
-                    <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">请求中间步骤图像数</span>
-                    <Select
-                      value={normalizeStreamPartialImages(activeProfile.streamPartialImages)}
-                      onChange={(value) => updateActiveProfile({ streamPartialImages: normalizeStreamPartialImages(value) }, true)}
-                      disabled={!activeProfile.streamImages}
-                      options={[
-                        { label: '0，不请求', value: 0 },
-                        { label: '1 张', value: 1 },
-                        { label: '2 张', value: 2 },
-                        { label: '3 张', value: 3 },
-                      ]}
-                      className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                    />
-                    <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                      对应 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">partial_images</code> 参数（0-3）。建议设为 2 或 3 以避免长时间生成时连接超时断开。实际返回的每张中间图像会产生少量额外计费。设为 0 时不请求中间步骤图像，连接可能因无数据传输而被断开。
-                    </div>
-                  </label>
-                </div>
-              )}
-
               {/* 9. 返回 Base64 图片数据 */}
               {activeProviderIsOpenAICompatible && (
                 <div className="block">
@@ -1860,7 +1839,7 @@ export default function SettingsModal() {
                 </label>
               )}
 
-              <div className="sticky bottom-0 -mx-5 -mb-5 border-t border-gray-200/70 bg-white/85 px-5 py-4 backdrop-blur-md dark:border-white/[0.08] dark:bg-gray-900/85 sm:-mx-6 sm:-mb-6 sm:px-6">
+              <div className="-mx-5 -mb-5 border-t border-gray-200/70 bg-gray-50/80 px-5 py-4 dark:border-white/[0.08] dark:bg-white/[0.02]">
                 <button
                   type="button"
                   onClick={saveApiSettings}
@@ -1874,6 +1853,34 @@ export default function SettingsModal() {
                   保存 API 配置
                 </button>
               </div>
+              </div>
+                </section>
+                <section className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.025]">
+                  <div className="border-b border-gray-100 p-5 dark:border-white/[0.07]">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">图片编辑</h4>
+                      <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-medium text-gray-500 dark:bg-white/[0.07] dark:text-gray-400">可选</span>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">仅供独立图片编辑器使用，不改变首页图片生成配置。</p>
+                  </div>
+                  <div className="space-y-4 p-5">
+                    <label className="block">
+                      <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">编辑器 API 配置</span>
+                      <Select
+                        value={draft.seedreamEditorProfileId || ''}
+                        onChange={(value) => commitSettings({ ...draft, seedreamEditorProfileId: String(value) })}
+                        options={[
+                          { label: '跟随当前图片生成配置', value: '' },
+                          ...draft.profiles.filter((profile) => profile.apiMode === 'images').map((profile) => ({ label: `${profile.name} · ${profile.model || '未配置模型'}`, value: profile.id })),
+                        ]}
+                        className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
+                      />
+                    </label>
+                    <div className="rounded-xl border border-dashed border-gray-300 px-4 py-5 text-center text-xs leading-5 text-gray-500 dark:border-white/[0.14] dark:text-gray-400">
+                      需要 Seedream 5.0 Pro 时，可先在左侧图片生成卡片中新建对应配置，再在这里选用。
+                    </div>
+                  </div>
+                </section>
             </div>
             )}
             

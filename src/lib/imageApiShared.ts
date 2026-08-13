@@ -19,7 +19,6 @@ export interface CallApiOptions {
   signal?: AbortSignal
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
   onCustomTaskEnqueued?: (task: { taskId: string }) => void
-  onPartialImage?: (partial: { image: string; partialImageIndex?: number; requestIndex?: number }) => void
 }
 
 export interface CallApiResult {
@@ -156,6 +155,11 @@ async function blobToDataUrl(blob: Blob, fallbackMime: string): Promise<string> 
 
 export const IMAGE_FETCH_CORS_HINT = ' 可点链接按钮复制结果链接，或尝试开启「返回 Base64 图片数据」避免此问题。'
 
+export interface ImageProxyFetchOptions {
+  proxyUrl: string
+  headers?: Record<string, string>
+}
+
 async function probeNoCorsReachability(url: string, timeoutMs = 8000): Promise<'opaque' | 'reachable' | 'failed'> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -174,7 +178,19 @@ async function probeNoCorsReachability(url: string, timeoutMs = 8000): Promise<'
   }
 }
 
-export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, signal?: AbortSignal): Promise<string> {
+async function fetchImageViaProxy(proxy: ImageProxyFetchOptions, fallbackMime: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(proxy.proxyUrl, { cache: 'no-store', headers: proxy.headers, signal })
+  if (!response.ok) throw new Error(`图片代理下载失败：HTTP ${response.status}`)
+  if (response.headers.get('X-Image-Proxy') !== '1') throw new Error('当前部署未启用图片代理')
+  return blobToDataUrl(await response.blob(), fallbackMime)
+}
+
+export async function fetchImageUrlAsDataUrl(
+  url: string,
+  fallbackMime: string,
+  signal?: AbortSignal,
+  proxy?: ImageProxyFetchOptions,
+): Promise<string> {
   if (isDataUrl(url)) return url
 
   let response: Response
@@ -185,6 +201,13 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
     })
   } catch (err) {
     if (err instanceof TypeError) {
+      if (proxy) {
+        try {
+          return await fetchImageViaProxy(proxy, fallbackMime, signal)
+        } catch {
+          // Preserve the existing URL-download diagnostic when the deployment has no proxy.
+        }
+      }
       const probe = await probeNoCorsReachability(url)
       if (probe === 'opaque') {
         throw new Error(`图片已生成，但因服务商未允许跨域，图片链接下载失败。${IMAGE_FETCH_CORS_HINT}`)

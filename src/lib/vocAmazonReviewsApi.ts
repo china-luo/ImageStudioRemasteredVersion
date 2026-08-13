@@ -700,7 +700,7 @@ async function readVocAiResponseText(response: Response, useChat: boolean): Prom
 
 export async function callVocAnalysisApi(profile: ApiProfile, prompt: string, signal?: AbortSignal): Promise<string> {
   const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
   const useChat = profile.apiMode === 'chat'
   const model = profile.model.trim() || (useChat ? DEFAULT_CHAT_MODEL : DEFAULT_RESPONSES_MODEL)
   const response = await fetch(

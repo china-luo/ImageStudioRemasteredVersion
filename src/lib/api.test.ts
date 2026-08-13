@@ -340,44 +340,34 @@ describe('callImageApi', () => {
     }])
   })
 
-  it('keeps Images API requests non-streaming when legacy stream settings are present', async () => {
+  it('sends the standard Images API request payload', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       data: [{ b64_json: 'ZmluYWw=', size: '1024x1024', quality: 'auto', output_format: 'jpeg', output_compression: 70 }],
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
-    const partialImages: string[] = []
-
     const result = await callImageApi({
       settings: {
         ...DEFAULT_SETTINGS,
         apiKey: 'test-key',
-        streamImages: true,
-        streamPartialImages: 3,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
-          streamImages: true,
-          streamPartialImages: 3,
         })),
       },
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
-      onPartialImage: (partial: { image: string }) => partialImages.push(partial.image),
     } as any)
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
-    expect(body.stream).toBeUndefined()
-    expect(body.partial_images).toBeUndefined()
     expect(body).toMatchObject({
       output_format: 'jpeg',
       output_compression: 70,
       quality: 'auto',
     })
-    expect(partialImages).toEqual([])
     expect(result).toMatchObject({
       images: ['data:image/jpeg;base64,ZmluYWw='],
       actualParamsList: [undefined],
@@ -385,7 +375,7 @@ describe('callImageApi', () => {
     expect(result.actualParams).toBeUndefined()
   })
 
-  it('does not expect revised prompts on official Images API non-stream completed responses', async () => {
+  it('does not expect revised prompts on official Images API responses', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       data: [{ b64_json: 'ZmluYWw=', output_format: 'jpeg', quality: 'medium', size: '1448x1086' }],
     }), {
@@ -397,11 +387,9 @@ describe('callImageApi', () => {
       settings: {
         ...DEFAULT_SETTINGS,
         apiKey: 'test-key',
-        streamImages: true,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
-          streamImages: true,
         })),
       },
       prompt: 'prompt',
@@ -416,7 +404,7 @@ describe('callImageApi', () => {
     expect(result.actualParams).toBeUndefined()
   })
 
-  it('keeps multi-image Images API requests batched when legacy streaming settings are present', async () => {
+  it('keeps multi-image Images API requests batched', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       data: [
         { b64_json: 'b25l', size: '1024x1024', quality: 'auto', output_format: 'jpeg', output_compression: 70 },
@@ -426,82 +414,62 @@ describe('callImageApi', () => {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
-    const partials: Array<{ image: string; requestIndex?: number }> = []
-
     const result = await callImageApi({
       settings: {
         ...DEFAULT_SETTINGS,
         apiKey: 'test-key',
-        streamImages: true,
-        streamPartialImages: 1,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
-          streamImages: true,
-          streamPartialImages: 1,
         })),
       },
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS, n: 2 },
       inputImageDataUrls: [],
-      onPartialImage: (partial: { image: string; requestIndex?: number }) => partials.push(partial),
     } as any)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     for (const [, init] of fetchMock.mock.calls) {
       const body = JSON.parse(String((init as RequestInit).body))
       expect(body.n).toBe(2)
-      expect(body.stream).toBeUndefined()
-      expect(body.partial_images).toBeUndefined()
     }
     expect(result.images).toHaveLength(2)
     expect(result.images).toEqual([
       'data:image/jpeg;base64,b25l',
       'data:image/jpeg;base64,dHdv',
     ])
-    expect(partials).toEqual([])
   })
 
-  it('keeps Responses API image requests non-streaming when legacy stream settings are present', async () => {
+  it('sends the standard Responses API image request payload', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       output: [{ type: 'image_generation_call', result: 'ZmluYWw=', revised_prompt: 'rewritten', size: '1024x1024' }],
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
-    const partialImages: string[] = []
-
     const result = await callImageApi({
       settings: {
         ...DEFAULT_SETTINGS,
         apiKey: 'test-key',
         apiMode: 'responses',
-        streamImages: true,
-        streamPartialImages: 1,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
           apiMode: 'responses',
-          streamImages: true,
-          streamPartialImages: 1,
         })),
       },
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
-      onPartialImage: (partial: { image: string }) => partialImages.push(partial.image),
     } as any)
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
-    expect(body.stream).toBeUndefined()
-    expect(body.tools[0].partial_images).toBeUndefined()
     expect(body.tools[0]).toMatchObject({
       output_format: 'jpeg',
       output_compression: 70,
       quality: 'auto',
     })
-    expect(partialImages).toEqual([])
     expect(result).toMatchObject({
       images: ['data:image/jpeg;base64,ZmluYWw='],
       actualParams: { size: '1024x1024' },

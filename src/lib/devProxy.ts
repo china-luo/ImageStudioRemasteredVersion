@@ -14,6 +14,7 @@ export interface DevProxyRequestTarget {
 }
 
 const DEFAULT_PROXY_PREFIX = '/api-proxy'
+export const LOCAL_DYNAMIC_PROXY_TARGET = 'http://127.0.0.1/__dynamic-api-proxy__/v1'
 interface BuildApiUrlOptions {
   prefixV1?: boolean
 }
@@ -161,6 +162,13 @@ export function isApiProxyLocked(proxyConfig: DevProxyConfig | null = readClient
   return readRuntimeEnv(import.meta.env.VITE_API_PROXY_LOCKED) === 'true' && isApiProxyAvailable(proxyConfig)
 }
 
-export function shouldUseApiProxy(apiProxy: boolean, proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return isApiProxyAvailable(proxyConfig) && (apiProxy || isApiProxyLocked(proxyConfig))
+export function shouldUseApiProxy(
+  apiProxy: boolean,
+  proxyConfig: DevProxyConfig | null = readClientDevProxyConfig(),
+  baseUrl = '',
+): boolean {
+  if (!isApiProxyAvailable(proxyConfig)) return false
+  if (apiProxy || isApiProxyLocked(proxyConfig)) return true
+  if (proxyConfig?.enabled && proxyConfig.target === LOCAL_DYNAMIC_PROXY_TARGET && baseUrl) return true
+  return Boolean(proxyConfig?.enabled && baseUrl && normalizeBaseUrl(baseUrl) === proxyConfig.target)
 }

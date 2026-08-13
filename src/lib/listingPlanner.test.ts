@@ -11,7 +11,10 @@ import {
   getAPlusModuleDisplayName,
   getAPlusModuleEnglishName,
   getAPlusModuleSpecs,
+  insertAPlusModuleSpecAfter,
   isAmazonListingMainSlot,
+  MAX_A_PLUS_MODULE_COUNT,
+  removeAPlusModuleSpecAt,
 } from './listingPlanner'
 import { callAmazonPlannerApi } from './listingPlannerApi'
 
@@ -227,7 +230,52 @@ describe('A+ module helpers', () => {
     expect(getAPlusModuleEnglishName(highlightSpec)).toBe('Highlight Tile 1')
     expect(getAPlusModuleDisplayName(premiumSpec)).toBe('高级首屏横幅')
     expect(getAPlusModuleEnglishName(premiumSpec)).toBe('Hero Banner')
-    expect(getAPlusContentTypeLabel('standard-large')).toBe('大图版')
+    expect(getAPlusContentTypeLabel('standard-large')).toBe('普通A+')
+    expect(getAPlusContentTypeLabel('standard')).toBe('标准A+')
+    expect(getAPlusContentTypeLabel('premium')).toBe('高级A+')
+    expect(getAPlusContentTypeLabel('mobile')).toBe('手机A+')
+  })
+
+  it('returns the mobile A+ module set with mobile-first dimensions', () => {
+    const mobileSpecs = getAPlusModuleSpecs('mobile')
+
+    expect(mobileSpecs).toHaveLength(5)
+    expect(mobileSpecs.map((spec) => spec.slot)).toEqual(['A+M01', 'A+M02', 'A+M03', 'A+M04', 'A+M05'])
+    expect(mobileSpecs.every((spec) => spec.uploadWidth === 600 && spec.uploadHeight === 450)).toBe(true)
+    expect(getAPlusModuleDisplayName(mobileSpecs[0]!)).toBe('手机首屏')
+    expect(getAPlusModuleEnglishName(mobileSpecs[1]!)).toBe('Mobile Feature 1')
+  })
+
+  it('adds and removes A+ modules inline while reindexing slots and labels', () => {
+    const addedSpecs = insertAPlusModuleSpecAfter('standard-large', getAPlusModuleSpecs('standard-large'), 4)
+
+    expect(addedSpecs).toHaveLength(6)
+    expect(addedSpecs.map((spec) => spec.slot)).toEqual(['A+L01', 'A+L02', 'A+L03', 'A+L04', 'A+L05', 'A+L06'])
+    expect(addedSpecs[5]).toMatchObject({
+      label: 'Single Image 5',
+      displayLabel: '大图模块 5',
+      moduleType: 'single-image',
+      uploadWidth: 970,
+      uploadHeight: 600,
+    })
+
+    const removedSpecs = removeAPlusModuleSpecAt('standard-large', addedSpecs, 0)
+    expect(removedSpecs.map((spec) => spec.slot)).toEqual(['A+L01', 'A+L02', 'A+L03', 'A+L04', 'A+L05'])
+    expect(removedSpecs[0]).toMatchObject({ label: 'Single Image 1', displayLabel: '大图模块 1' })
+
+    const insertedHeader = insertAPlusModuleSpecAfter('standard-large', getAPlusModuleSpecs('standard-large'), 0)[1]!
+    expect(getAPlusModuleDisplayName(insertedHeader)).toBe('顶部横幅 2')
+    expect(getAPlusModuleEnglishName(insertedHeader)).toBe('Header Banner 2')
+  })
+
+  it('keeps A+ module counts between 1 and 12', () => {
+    let specs = getAPlusModuleSpecs('mobile')
+    for (let index = 0; index < 20; index += 1) specs = insertAPlusModuleSpecAfter('mobile', specs, specs.length - 1)
+    expect(specs).toHaveLength(MAX_A_PLUS_MODULE_COUNT)
+
+    for (let index = 0; index < 20; index += 1) specs = removeAPlusModuleSpecAt('mobile', specs, specs.length - 1)
+    expect(specs).toHaveLength(1)
+    expect(specs[0]?.slot).toBe('A+M01')
   })
 
   it('formats external A+ module copy from the LLM', () => {
@@ -307,12 +355,14 @@ function createTiktokPayload(prefix: 'TTM' | 'TTD', title = 'TikTok planned tumb
   }
 }
 
-function createAPlusPlans(prefix: 'A+S' | 'A+L' | 'A+P', brand = '') {
+function createAPlusPlans(prefix: 'A+S' | 'A+L' | 'A+P' | 'A+M', brand = '') {
   const slots = prefix === 'A+S'
     ? ['A+S01', 'A+S02', 'A+S03', 'A+S04', 'A+S05', 'A+S06', 'A+S07', 'A+S08']
     : prefix === 'A+L'
       ? ['A+L01', 'A+L02', 'A+L03', 'A+L04', 'A+L05']
-      : ['A+P01', 'A+P02', 'A+P03', 'A+P04', 'A+P05', 'A+P06']
+      : prefix === 'A+M'
+        ? ['A+M01', 'A+M02', 'A+M03', 'A+M04', 'A+M05']
+        : ['A+P01', 'A+P02', 'A+P03', 'A+P04', 'A+P05', 'A+P06']
 
   return slots.map((slot, index) => ({
     slot,
@@ -321,7 +371,9 @@ function createAPlusPlans(prefix: 'A+S' | 'A+L' | 'A+P', brand = '') {
       ? index === 0 ? 'header-banner' : index < 4 ? 'single-image' : 'highlight-tile'
       : prefix === 'A+L'
         ? index === 0 ? 'header-banner' : 'single-image'
-        : index === 0 ? 'hero-banner' : index < 4 ? 'feature-image' : 'brand-story',
+        : prefix === 'A+M'
+          ? index === 0 ? 'hero-banner' : 'feature-image'
+          : index === 0 ? 'hero-banner' : index < 4 ? 'feature-image' : 'brand-story',
     planMarkdown: `## ${slot} 模块方案\n\n中文 A+ 策划说明。`,
     textTitle: prefix === 'A+S' && index >= 4 ? `Benefit ${slot}` : '',
     textBody: prefix === 'A+S' && index >= 4 ? `External A+ copy for ${slot}.` : '',
@@ -332,7 +384,7 @@ function createAPlusPlans(prefix: 'A+S' | 'A+L' | 'A+P', brand = '') {
   }))
 }
 
-function createAPlusPayload(prefix: 'A+S' | 'A+L' | 'A+P', title = 'AI planned A+ tumbler', brand = '') {
+function createAPlusPayload(prefix: 'A+S' | 'A+L' | 'A+P' | 'A+M', title = 'AI planned A+ tumbler', brand = '') {
   return {
     product: {
       title,
@@ -531,6 +583,71 @@ describe('callAmazonPlannerApi', () => {
       textTitle: 'Benefit A+S05',
       textBody: 'External A+ copy for A+S05.',
     })
+  })
+
+  it('plans Mobile A+ with five compact-screen 600x450 modules', async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      output_text: JSON.stringify(createAPlusPayload('A+M', 'Mobile A+ tumbler')),
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await callAmazonPlannerApi({
+      listingText: SAMPLE_LISTING,
+      baseDraft: DEFAULT_AMAZON_PROMPT_DRAFT,
+      profile: createDefaultOpenAIProfile({
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'user-api-key',
+        apiMode: 'responses',
+        model: 'gpt-planner-profile',
+      }),
+      mode: 'aplus',
+      aPlusType: 'mobile',
+      aPlusGenerationTier: '2K',
+    })
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.instructions).toContain('Mobile A+ Content 600x450 module set')
+    expect(body.instructions).toContain('compact mobile screens')
+    expect(body.instructions).toContain('A+M01 Mobile Hero 600x450px')
+    expect(body.input[0].content[0].text).toContain('A+M01, A+M02, A+M03, A+M04, A+M05')
+    expect(result.aPlusType).toBe('mobile')
+    expect(result.aPlusPlans).toHaveLength(5)
+    expect(result.aPlusPlans[0]).toMatchObject({ slot: 'A+M01', uploadSize: '600x450' })
+  })
+
+  it('uses the customized A+ module count in schema, instructions, and response normalization', async () => {
+    const customSpecs = insertAPlusModuleSpecAfter('standard-large', getAPlusModuleSpecs('standard-large'), 4)
+    const payload = createAPlusPayload('A+L', 'Customized A+ tumbler')
+    payload.aPlusPlans.push({ ...payload.aPlusPlans[4]!, slot: 'A+L06' })
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      output_text: JSON.stringify(payload),
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await callAmazonPlannerApi({
+      listingText: SAMPLE_LISTING,
+      baseDraft: DEFAULT_AMAZON_PROMPT_DRAFT,
+      profile: createDefaultOpenAIProfile({
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'user-api-key',
+        apiMode: 'responses',
+        model: 'gpt-planner-profile',
+      }),
+      mode: 'aplus',
+      aPlusType: 'standard-large',
+      aPlusModuleSpecs: customSpecs,
+      aPlusGenerationTier: '2K',
+    })
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.text.format.schema.properties.aPlusPlans.minItems).toBe(6)
+    expect(body.instructions).toContain('Return exactly 6 modules')
+    expect(body.input[0].content[0].text).toContain('A+L01, A+L02, A+L03, A+L04, A+L05, A+L06')
+    expect(result.aPlusPlans).toHaveLength(6)
+    expect(result.aPlusPlans[5]).toMatchObject({ slot: 'A+L06', uploadSize: '970x600' })
   })
 
   it('uses TikTok main-image slot strategy without Amazon reference material', async () => {

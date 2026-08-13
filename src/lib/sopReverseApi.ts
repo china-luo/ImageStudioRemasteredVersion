@@ -223,7 +223,7 @@ export async function callSopReverseApi(options: CallSopReverseApiOptions): Prom
   const model = options.profile.model.trim() || (options.profile.apiMode === 'chat' ? DEFAULT_CHAT_MODEL : DEFAULT_RESPONSES_MODEL)
   const images = options.images ?? []
   const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(options.profile.apiProxy, proxyConfig)
+  const useApiProxy = shouldUseApiProxy(options.profile.apiProxy, proxyConfig, options.profile.baseUrl)
   const useChatCompletions = options.profile.apiMode === 'chat'
 
   const response = await fetch(

@@ -81,37 +81,6 @@ describe('URL settings params', () => {
     expect(next.activeProfileId).toBe(existingProfile.id)
   })
 
-  it('keeps legacy URL streamImages disabled while preserving partial image compatibility value', () => {
-    const existingProfile = createDefaultOpenAIProfile({
-      id: 'existing-openai',
-      name: 'Existing OpenAI',
-      baseUrl: 'https://api.example.com/v1',
-      apiKey: 'test-key',
-      streamImages: true,
-      streamPartialImages: 0,
-    })
-    const current = normalizeSettings({
-      ...DEFAULT_SETTINGS,
-      profiles: [createDefaultOpenAIProfile(), existingProfile],
-      activeProfileId: DEFAULT_SETTINGS.activeProfileId,
-    })
-    const next = normalizeSettings({
-      ...current,
-      ...buildSettingsFromUrlParams(current, new URLSearchParams('apiUrl=https://api.example.com/v1/&apiKey=test-key&streamImages=true&streamPartialImages=3')),
-    })
-    const activeProfile = next.profiles.find((profile) => profile.id === next.activeProfileId)
-
-    expect(next.profiles).toHaveLength(3)
-    expect(next.activeProfileId).not.toBe(existingProfile.id)
-    expect(activeProfile).toMatchObject({
-      provider: 'openai',
-      baseUrl: 'https://api.example.com/v1',
-      apiKey: 'test-key',
-      streamImages: false,
-      streamPartialImages: 3,
-    })
-  })
-
   it('creates an OpenAI profile from legacy params even when fal is active', () => {
     const falProfile = createDefaultFalProfile({ id: 'fal-active', apiKey: 'fal-key' })
     const current = normalizeSettings({
@@ -133,7 +102,7 @@ describe('URL settings params', () => {
   })
 
   it('clears known URL setting params without touching unrelated params', () => {
-    const params = new URLSearchParams('apiUrl=https://api.example.com/v1&apiKey=test-key&model=test-model&streamImages=false&streamPartialImages=3&foo=bar')
+    const params = new URLSearchParams('apiUrl=https://api.example.com/v1&apiKey=test-key&model=test-model&foo=bar')
 
     expect(hasUrlSettingParams(params)).toBe(true)
     clearUrlSettingParams(params)

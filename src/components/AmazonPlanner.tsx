@@ -19,6 +19,8 @@ import {
   buildAmazonPlanPrompt,
   buildAmazonStyleCandidatePrompt,
   buildTiktokPlanPrompt,
+  A_PLUS_CONTENT_TYPES,
+  areAPlusModuleSpecsEquivalent,
   formatAPlusModuleText,
   getAPlusContentTypeLabel,
   getAPlusModuleDisplayName,
@@ -26,11 +28,17 @@ import {
   getAPlusModuleGenerationSize,
   getAPlusModuleSpecs,
   getAPlusModuleUploadSize,
+  insertAPlusModuleSpecAfter,
   isCommerceMainSlot,
   isAmazonListingMainSlot,
   isAPlusTextModule,
+  MAX_A_PLUS_MODULE_COUNT,
+  MIN_A_PLUS_MODULE_COUNT,
+  normalizeAPlusModuleSpecs,
+  removeAPlusModuleSpecAt,
   withAPlusGenerationSizes,
   type APlusContentType,
+  type AmazonAPlusModuleSpec,
   type AmazonAPlusPlan,
   type AmazonImagePlan,
   type AmazonPlannerMode,
@@ -50,7 +58,7 @@ import { resolvePlannerStyleReference } from '../lib/plannerActionPolicy'
 import { prepareReferenceImagePayload, type PlannerReferenceImagePayload } from '../lib/referenceImagePayload'
 import { DEFAULT_PARAMS, type ApiMode, type ApiProfile } from '../types'
 import type { AmazonPlannerSession } from '../types'
-import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, EyeIcon, HistoryIcon, PhotoIcon, PlusIcon, TrashIcon } from './icons'
+import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, EyeIcon, HistoryIcon, PhotoIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons'
 import MarketplaceControls from './planner/MarketplaceControls'
 import Select from './Select'
 
@@ -62,6 +70,7 @@ const API_MAX_IMAGES = 16
 const STYLE_PREVIEW_WIDTH = 420
 const STYLE_PREVIEW_HEIGHT = 500
 const STYLE_PREVIEW_OFFSET = 16
+type APlusModuleSpecsByType = Partial<Record<APlusContentType, AmazonAPlusModuleSpec[]>>
 const STYLE_DENSITY_OPTIONS: Array<{ value: AmazonStyleDensityMode; label: string }> = [
   { value: 'rich', label: '信息丰富' },
   { value: 'minimal', label: '简约' },
@@ -121,6 +130,26 @@ function normalizeHistoryTitle(value: string) {
 
 function getPlannerSessionTitle(draft: AmazonPromptDraft, listingText: string) {
   return normalizeHistoryTitle(draft.productTitle) || normalizeHistoryTitle(listingText) || '未命名策划'
+}
+
+function getSessionAPlusModuleSpecsByType(session: AmazonPlannerSession): APlusModuleSpecsByType {
+  const sessionSpecs = session.aPlusModuleSpecs ?? {}
+  return A_PLUS_CONTENT_TYPES.reduce<APlusModuleSpecsByType>((result, type) => {
+    const specs = sessionSpecs[type]
+    if (Array.isArray(specs) && specs.length) {
+      const normalized = normalizeAPlusModuleSpecs(type, specs as Array<Partial<AmazonAPlusModuleSpec>>)
+      if (!areAPlusModuleSpecsEquivalent(normalized, getAPlusModuleSpecs(type))) result[type] = normalized
+    }
+    return result
+  }, {})
+}
+
+function getAPlusModuleSpecsForSession(specsByType: APlusModuleSpecsByType): AmazonPlannerSession['aPlusModuleSpecs'] {
+  const entries = A_PLUS_CONTENT_TYPES.flatMap((type) => {
+    const specs = specsByType[type]
+    return specs?.length && !areAPlusModuleSpecsEquivalent(specs, getAPlusModuleSpecs(type)) ? [[type, specs] as const] : []
+  })
+  return entries.length ? Object.fromEntries(entries) : undefined
 }
 
 function formatPlannerSessionTime(value: number) {
@@ -287,7 +316,7 @@ function getAmazonAPlusComplianceChecks(
     {
       label: 'A+ 类型',
       status: 'ready',
-      detail: `${getAPlusContentTypeLabel(aPlusType)} A+ 编排`,
+      detail: `${getAPlusContentTypeLabel(aPlusType)} 编排`,
     },
     {
       label: 'A+ 尺寸',
@@ -368,6 +397,7 @@ export default function AmazonPlanner() {
   const [plannerMode, setPlannerMode] = useState<AmazonPlannerMode>('listing')
   const [tiktokDesignType, setTiktokDesignType] = useState<TiktokDesignType>('main')
   const [aPlusType, setAPlusType] = useState<APlusContentType>('standard-large')
+  const [aPlusModuleSpecsByType, setAPlusModuleSpecsByType] = useState<APlusModuleSpecsByType>({})
   const [listingText, setListingText] = useState('')
   const [imagePlans, setImagePlans] = useState<AmazonImagePlan[]>([])
   const [aPlusPlans, setAPlusPlans] = useState<AmazonAPlusPlan[]>([])
@@ -398,7 +428,8 @@ export default function AmazonPlanner() {
   const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>({})
   const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(null)
   const resolutionTier = resolution === '4k' ? '4K' : '2K'
-  const aPlusSpecs = useMemo(() => getAPlusModuleSpecs(aPlusType), [aPlusType])
+  const aPlusSpecs = useMemo(() => normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecsByType[aPlusType]), [aPlusModuleSpecsByType, aPlusType])
+  const aPlusSpecsAreDefault = areAPlusModuleSpecsEquivalent(aPlusSpecs, getAPlusModuleSpecs(aPlusType))
   const aPlusPlansWithSizes = useMemo(() => withAPlusGenerationSizes(aPlusPlans, resolutionTier), [aPlusPlans, resolutionTier])
   const selectedPlan = selectedPlanIndex == null ? null : imagePlans[selectedPlanIndex] ?? null
   const selectedAPlusPlan = selectedAPlusPlanIndex == null ? null : aPlusPlansWithSizes[selectedAPlusPlanIndex] ?? null
@@ -622,6 +653,9 @@ export default function AmazonPlanner() {
       tiktokDesignType: overrides.tiktokDesignType ?? tiktokDesignType,
       mode: overrides.mode ?? plannerMode,
       aPlusType: overrides.aPlusType ?? aPlusType,
+      aPlusModuleSpecs: Object.prototype.hasOwnProperty.call(overrides, 'aPlusModuleSpecs')
+        ? overrides.aPlusModuleSpecs
+        : getAPlusModuleSpecsForSession(aPlusModuleSpecsByType),
       resolution: overrides.resolution ?? resolution,
       listingText: snapshotListingText,
       referenceImageIds: overrides.referenceImageIds ?? inputImages.map((image) => image.id),
@@ -1239,6 +1273,7 @@ export default function AmazonPlanner() {
         marketplaceId,
         tiktokDesignType,
         aPlusType,
+        aPlusModuleSpecs: aPlusSpecs,
         aPlusGenerationTier: resolutionTier,
         signal: controller.signal,
       })
@@ -1476,6 +1511,37 @@ export default function AmazonPlanner() {
     }
   }
 
+  const saveAPlusModuleSpecsByType = (next: APlusModuleSpecsByType) => {
+    updateCurrentPlannerSession({ aPlusModuleSpecs: getAPlusModuleSpecsForSession(next) })
+  }
+
+  const updateCurrentAPlusModuleSpecs = (nextSpecs: AmazonAPlusModuleSpec[]) => {
+    const normalized = normalizeAPlusModuleSpecs(aPlusType, nextSpecs)
+    const next = { ...aPlusModuleSpecsByType }
+    if (areAPlusModuleSpecsEquivalent(normalized, getAPlusModuleSpecs(aPlusType))) delete next[aPlusType]
+    else next[aPlusType] = normalized
+    setAPlusModuleSpecsByType(next)
+    saveAPlusModuleSpecsByType(next)
+  }
+
+  const addAPlusModuleAfter = (index: number) => {
+    if (isPlanning || aPlusPlans.length > 0 || aPlusSpecs.length >= MAX_A_PLUS_MODULE_COUNT) return
+    updateCurrentAPlusModuleSpecs(insertAPlusModuleSpecAfter(aPlusType, aPlusSpecs, index))
+  }
+
+  const removeAPlusModuleAt = (index: number) => {
+    if (isPlanning || aPlusPlans.length > 0 || aPlusSpecs.length <= MIN_A_PLUS_MODULE_COUNT) return
+    updateCurrentAPlusModuleSpecs(removeAPlusModuleSpecAt(aPlusType, aPlusSpecs, index))
+  }
+
+  const restoreDefaultAPlusModules = () => {
+    if (isPlanning || aPlusPlans.length > 0 || aPlusSpecsAreDefault) return
+    const next = { ...aPlusModuleSpecsByType }
+    delete next[aPlusType]
+    setAPlusModuleSpecsByType(next)
+    saveAPlusModuleSpecsByType(next)
+  }
+
   const clearListingPlan = () => {
     setListingText('')
     setSeriesStyleGuides({ listing: '', aplus: '', tiktokMain: '', tiktokDetail: '' })
@@ -1511,6 +1577,7 @@ export default function AmazonPlanner() {
     setTiktokDesignType(session.tiktokDesignType ?? 'main')
     setPlannerMode(session.mode)
     setAPlusType(session.aPlusType)
+    setAPlusModuleSpecsByType(getSessionAPlusModuleSpecsByType(session))
     setResolution(session.resolution)
     setListingText(session.listingText)
     setInputImages(restoredReferences)
@@ -1730,7 +1797,7 @@ export default function AmazonPlanner() {
                           <span>·</span>
                           <span>{session.platform === 'tiktok' ? 'TikTok' : getAmazonMarketplaceLabel(session.marketplaceId)}</span>
                           <span>·</span>
-                          <span>{session.mode === 'aplus' ? session.aPlusType : `${session.imagePlans.length} 张`}</span>
+                          <span>{session.mode === 'aplus' ? getAPlusContentTypeLabel(session.aPlusType) : `${session.imagePlans.length} 张`}</span>
                           <span>·</span>
                           <span>{formatPlannerSessionTime(session.updatedAt)}</span>
                         </div>
@@ -1784,7 +1851,7 @@ export default function AmazonPlanner() {
                 </div>
                 <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                   {plannerMode === 'aplus'
-                    ? '粘贴标题、五点描述或品牌说明，生成 Standard / 大图版 / Premium A+ 模块编排和英文提示词。'
+                    ? '粘贴标题、五点描述或品牌说明，生成普通A+ / 标准A+ / 高级A+ / 手机A+模块编排和英文提示词。'
                     : '粘贴标题、五点描述或产品说明，生成 Main + PT01-PT06 的逐张方案和英文提示词。'}
                 </div>
               </div>
@@ -1809,18 +1876,14 @@ export default function AmazonPlanner() {
             )}
             {plannerMode === 'aplus' && (
               <div className="mt-3 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
-                {([
-                  ['standard-large', '大图版'],
-                  ['standard', 'Standard'],
-                  ['premium', 'Premium'],
-                ] as const).map(([type, label]) => (
+                {A_PLUS_CONTENT_TYPES.map((type) => (
                   <button
                     key={type}
                     type="button"
                     onClick={() => changeAPlusType(type)}
                     className={`h-8 rounded-lg px-3 text-sm font-medium transition ${aPlusType === type ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
                   >
-                    {label}
+                    {getAPlusContentTypeLabel(type)}
                   </button>
                 ))}
               </div>
@@ -2509,26 +2572,62 @@ export default function AmazonPlanner() {
                 <div>
                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">A+ 模块编排</div>
                   <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    当前选择 {getAPlusContentTypeLabel(aPlusType)}，点击 AI策划A+ 后生成逐模块方案。
+                    当前选择 {getAPlusContentTypeLabel(aPlusType)}，可先调整模块数量，再点击 AI策划A+。
                   </div>
                 </div>
-                <span className="shrink-0 rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
-                  {aPlusSpecs.length} 张
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={restoreDefaultAPlusModules}
+                    disabled={isPlanning || aPlusSpecsAreDefault}
+                    title="恢复当前 A+ 类型默认模块"
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${!isPlanning && !aPlusSpecsAreDefault ? 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                  >
+                    <RefreshIcon className="h-3.5 w-3.5" />
+                    恢复默认
+                  </button>
+                  <span className="rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
+                    {aPlusSpecs.length} 张
+                  </span>
+                </div>
               </div>
               <div className={PLAN_LIST_CLASS}>
-                {aPlusSpecs.map((spec) => (
+                {aPlusSpecs.map((spec, index) => (
                   <div key={spec.slot} className="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-2 dark:border-white/[0.08] dark:bg-gray-900">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">
-                        {spec.slot}
-                      </span>
-                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{getAPlusModuleDisplayName(spec)}</span>
-                      <span className="text-xs text-gray-400">{getAPlusModuleEnglishName(spec)}</span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                      上传 {getAPlusModuleUploadSize(spec)} · 生成 {getAPlusModuleGenerationSize(spec, resolutionTier)}
-                      {isAPlusTextModule(spec) ? ' · 含标题/正文' : ''}
+                    <div className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">{spec.slot}</span>
+                          <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{getAPlusModuleDisplayName(spec)}</span>
+                          <span className="text-xs text-gray-400">{getAPlusModuleEnglishName(spec)}</span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                          上传 {getAPlusModuleUploadSize(spec)} · 生成 {getAPlusModuleGenerationSize(spec, resolutionTier)}
+                          {isAPlusTextModule(spec) ? ' · 含标题/正文' : ''}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => addAPlusModuleAfter(index)}
+                          disabled={isPlanning || aPlusSpecs.length >= MAX_A_PLUS_MODULE_COUNT}
+                          aria-label={`在 ${spec.slot} 后添加同尺寸 A+ 模块`}
+                          title={aPlusSpecs.length >= MAX_A_PLUS_MODULE_COUNT ? `最多 ${MAX_A_PLUS_MODULE_COUNT} 张` : '添加同尺寸模块'}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${!isPlanning && aPlusSpecs.length < MAX_A_PLUS_MODULE_COUNT ? 'border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200 dark:hover:bg-blue-400/20' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                        >
+                          <PlusIcon className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeAPlusModuleAt(index)}
+                          disabled={isPlanning || aPlusSpecs.length <= MIN_A_PLUS_MODULE_COUNT}
+                          aria-label={`删除 ${spec.slot} A+ 模块`}
+                          title={aPlusSpecs.length <= MIN_A_PLUS_MODULE_COUNT ? `至少保留 ${MIN_A_PLUS_MODULE_COUNT} 张` : '删除模块'}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${!isPlanning && aPlusSpecs.length > MIN_A_PLUS_MODULE_COUNT ? 'border-red-100 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200 dark:hover:bg-red-400/20' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                        >
+                          <TrashIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

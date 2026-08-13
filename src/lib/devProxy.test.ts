@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildApiUrl, resolveDevProxyRequestTarget } from './devProxy'
+import { buildApiUrl, LOCAL_DYNAMIC_PROXY_TARGET, resolveDevProxyRequestTarget, shouldUseApiProxy } from './devProxy'
 
 describe('buildApiUrl', () => {
   it('uses the same-origin proxy prefix when API proxy is enabled', () => {
@@ -72,5 +72,27 @@ describe('resolveDevProxyRequestTarget', () => {
 
   it('ignores requests outside the configured proxy prefix', () => {
     expect(resolveDevProxyRequestTarget('/other/responses', proxyConfig)).toBeNull()
+  })
+})
+
+describe('shouldUseApiProxy', () => {
+  const proxyConfig = {
+    enabled: true,
+    prefix: '/api-proxy',
+    target: 'https://api.example.com/v1',
+    changeOrigin: true,
+    secure: false,
+  }
+
+  it('uses the local proxy for a matching profile URL without requiring a stored toggle', () => {
+    expect(shouldUseApiProxy(false, proxyConfig, 'https://api.example.com/v1/')).toBe(true)
+  })
+
+  it('does not route a different provider through the fixed proxy target', () => {
+    expect(shouldUseApiProxy(false, proxyConfig, 'https://other.example.com/v1')).toBe(false)
+  })
+
+  it('routes every configured profile through the default local dynamic proxy', () => {
+    expect(shouldUseApiProxy(false, { ...proxyConfig, target: LOCAL_DYNAMIC_PROXY_TARGET }, 'https://other.example.com/v1')).toBe(true)
   })
 })

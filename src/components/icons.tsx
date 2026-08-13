@@ -1,4 +1,4 @@
-import type { SVGProps } from 'react'
+import type { ReactNode, SVGProps } from 'react'
 
 export function CopyIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -250,3 +250,19 @@ export function WrenchIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+function ToolIcon({ children, ...props }: SVGProps<SVGSVGElement> & { children?: ReactNode }) {
+  return <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>{children}</svg>
+}
+export const ArrowIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M5 12h14M13 6l6 6-6 6" /></ToolIcon>
+export const BrushIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M14 4l6 6-9 9H5v-6zM5 19c-2 0-3 1-3 3 2 0 4-1 4-3" /></ToolIcon>
+export const EllipseIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><ellipse cx="12" cy="12" rx="8" ry="5" /></ToolIcon>
+export const EraserIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M7 21h10M5 15l8-10 6 5-8 10H7z" /></ToolIcon>
+export const HandIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-6a1.5 1.5 0 0 1 3 0v8-3a1.5 1.5 0 0 1 3 0v4c0 5-3 7-7 7-3 0-5-2-6-4l-2-3a1.5 1.5 0 0 1 2-2z" /></ToolIcon>
+export const MoveIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" /></ToolIcon>
+export const RectangleIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><rect x="4" y="5" width="16" height="14" rx="1" /></ToolIcon>
+export const RedoIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M9 7H19v10M19 7l-4-4M19 7l-4 4M5 17c0-6 4-10 14-10" /></ToolIcon>
+export const UndoIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M15 7H5v10M5 7l4-4M5 7l4 4M19 17c0-6-4-10-14-10" /></ToolIcon>
+export const ZoomInIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><circle cx="10.5" cy="10.5" r="6.5" /><path d="M16 16l5 5M10.5 7.5v6M7.5 10.5h6" /></ToolIcon>
+export const ZoomOutIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><circle cx="10.5" cy="10.5" r="6.5" /><path d="M16 16l5 5M7.5 10.5h6" /></ToolIcon>
+export const TagIcon = (props: SVGProps<SVGSVGElement>) => <ToolIcon {...props}><path d="M20 13l-7 7-9-9V4h7zM8 8h.01" /></ToolIcon>

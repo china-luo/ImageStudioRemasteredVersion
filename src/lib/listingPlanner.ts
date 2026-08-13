@@ -7,7 +7,7 @@ export type AmazonPlannerMode = 'listing' | 'aplus'
 export type CommercePlannerPlatform = 'amazon' | 'tiktok'
 export type TiktokDesignType = 'main' | 'detail'
 export type { AmazonStyleDensityMode } from '../types'
-export type APlusContentType = 'standard' | 'standard-large' | 'premium'
+export type APlusContentType = 'standard' | 'standard-large' | 'premium' | 'mobile'
 export type APlusModuleKind =
   | 'header-banner'
   | 'single-image'
@@ -17,6 +17,15 @@ export type APlusModuleKind =
   | 'brand-story'
   | 'logo'
   | 'comparison-thumbnail'
+
+export const A_PLUS_CONTENT_TYPES: APlusContentType[] = ['standard-large', 'standard', 'premium', 'mobile']
+export const MIN_A_PLUS_MODULE_COUNT = 1
+export const MAX_A_PLUS_MODULE_COUNT = 12
+
+const A_PLUS_MODULE_KINDS: APlusModuleKind[] = [
+  'header-banner', 'single-image', 'highlight-tile', 'hero-banner',
+  'feature-image', 'brand-story', 'logo', 'comparison-thumbnail',
+]
 
 export interface ListingParseResult {
   title: string
@@ -150,6 +159,29 @@ export const PREMIUM_A_PLUS_MODULE_SPECS: AmazonAPlusModuleSpec[] = [
     uploadWidth: 463,
     uploadHeight: 625,
     objective: '用竖版品牌故事模块强化信任和使用想象。',
+  })),
+]
+
+export const MOBILE_A_PLUS_MODULE_SPECS: AmazonAPlusModuleSpec[] = [
+  {
+    contentType: 'mobile',
+    slot: 'A+M01',
+    label: 'Mobile Hero',
+    displayLabel: '手机首屏',
+    moduleType: 'hero-banner',
+    uploadWidth: 600,
+    uploadHeight: 450,
+    objective: '用移动端首屏图建立产品核心卖点和清晰视觉吸引力。',
+  },
+  ...Array.from({ length: 4 }, (_, index) => ({
+    contentType: 'mobile' as const,
+    slot: `A+M0${index + 2}`,
+    label: `Mobile Feature ${index + 1}`,
+    displayLabel: `手机卖点图 ${index + 1}`,
+    moduleType: 'feature-image' as const,
+    uploadWidth: 600,
+    uploadHeight: 450,
+    objective: '用移动端友好的 4:3 图片讲清一个关键卖点、细节证据或使用场景。',
   })),
 ]
 
@@ -359,10 +391,92 @@ function getAPlusGenerationSizeFromDimensions(width: number, height: number, tie
   return calculateImageSize(tier, getSafeAPlusRatio(width, height)) ?? (tier === '4K' ? '2880x2880' : '2048x2048')
 }
 
+function getAPlusModuleSlotPrefix(type: APlusContentType): string {
+  if (type === 'premium') return 'A+P'
+  if (type === 'mobile') return 'A+M'
+  if (type === 'standard-large') return 'A+L'
+  return 'A+S'
+}
+
+function isAPlusModuleKind(value: unknown): value is APlusModuleKind {
+  return typeof value === 'string' && A_PLUS_MODULE_KINDS.includes(value as APlusModuleKind)
+}
+
+function getAPlusModuleTypeText(type: APlusContentType, moduleType: APlusModuleKind, ordinal: number) {
+  const suffix = ordinal > 1 || !['header-banner', 'hero-banner', 'logo', 'comparison-thumbnail'].includes(moduleType) ? ` ${ordinal}` : ''
+  switch (moduleType) {
+    case 'header-banner': return { label: `Header Banner${suffix}`, displayLabel: `顶部横幅${suffix}` }
+    case 'single-image': return { label: `Single Image${suffix}`, displayLabel: `大图模块${suffix}` }
+    case 'highlight-tile': return { label: `Highlight Tile${suffix}`, displayLabel: `卖点方块${suffix}` }
+    case 'hero-banner': return type === 'mobile'
+      ? { label: `Mobile Hero${suffix}`, displayLabel: `手机首屏${suffix}` }
+      : { label: `Hero Banner${suffix}`, displayLabel: `高级首屏横幅${suffix}` }
+    case 'feature-image': return type === 'mobile'
+      ? { label: `Mobile Feature${suffix}`, displayLabel: `手机卖点图${suffix}` }
+      : { label: `Feature Image${suffix}`, displayLabel: `高级大图模块${suffix}` }
+    case 'brand-story': return { label: `Brand Story${suffix}`, displayLabel: `品牌故事${suffix}` }
+    case 'logo': return { label: `Logo Image${suffix}`, displayLabel: `品牌 Logo${suffix}` }
+    case 'comparison-thumbnail': return { label: `Comparison Thumbnail${suffix}`, displayLabel: `对比缩略图${suffix}` }
+  }
+}
+
+export function normalizeAPlusModuleSpecs(type: APlusContentType, specs?: Array<Partial<AmazonAPlusModuleSpec>> | null): AmazonAPlusModuleSpec[] {
+  const fallbackSpecs = getAPlusModuleSpecs(type)
+  const sourceSpecs = Array.isArray(specs) && specs.length ? specs : fallbackSpecs
+  const fallbackByModuleType = new Map(fallbackSpecs.map((spec) => [spec.moduleType, spec]))
+  const moduleTypeCounts = new Map<APlusModuleKind, number>()
+  const filtered = sourceSpecs.slice(0, MAX_A_PLUS_MODULE_COUNT).filter((spec) => isAPlusModuleKind(spec.moduleType))
+  const safeSource = filtered.length ? filtered : fallbackSpecs
+
+  return safeSource.map((spec, index) => {
+    const fallback = fallbackByModuleType.get(spec.moduleType as APlusModuleKind) ?? fallbackSpecs[index] ?? fallbackSpecs[0]!
+    const moduleType = isAPlusModuleKind(spec.moduleType) ? spec.moduleType : fallback.moduleType
+    const ordinal = (moduleTypeCounts.get(moduleType) ?? 0) + 1
+    moduleTypeCounts.set(moduleType, ordinal)
+    const text = getAPlusModuleTypeText(type, moduleType, ordinal)
+    const width = Number(spec.uploadWidth)
+    const height = Number(spec.uploadHeight)
+    return {
+      contentType: type,
+      slot: `${getAPlusModuleSlotPrefix(type)}${String(index + 1).padStart(2, '0')}`,
+      label: text.label,
+      displayLabel: text.displayLabel,
+      moduleType,
+      uploadWidth: Number.isFinite(width) && width > 0 ? Math.trunc(width) : fallback.uploadWidth,
+      uploadHeight: Number.isFinite(height) && height > 0 ? Math.trunc(height) : fallback.uploadHeight,
+      objective: typeof spec.objective === 'string' && spec.objective.trim() ? spec.objective : fallback.objective,
+    }
+  })
+}
+
+export function insertAPlusModuleSpecAfter(type: APlusContentType, specs: Array<Partial<AmazonAPlusModuleSpec>>, index: number) {
+  const normalized = normalizeAPlusModuleSpecs(type, specs)
+  if (normalized.length >= MAX_A_PLUS_MODULE_COUNT) return normalized
+  const insertIndex = Math.min(Math.max(index, 0), normalized.length - 1)
+  return normalizeAPlusModuleSpecs(type, [...normalized.slice(0, insertIndex + 1), { ...normalized[insertIndex] }, ...normalized.slice(insertIndex + 1)])
+}
+
+export function removeAPlusModuleSpecAt(type: APlusContentType, specs: Array<Partial<AmazonAPlusModuleSpec>>, index: number) {
+  const normalized = normalizeAPlusModuleSpecs(type, specs)
+  if (normalized.length <= MIN_A_PLUS_MODULE_COUNT) return normalized
+  const removeIndex = Math.min(Math.max(index, 0), normalized.length - 1)
+  return normalizeAPlusModuleSpecs(type, normalized.filter((_, itemIndex) => itemIndex !== removeIndex))
+}
+
+export function areAPlusModuleSpecsEquivalent(left: Array<Partial<AmazonAPlusModuleSpec>>, right: Array<Partial<AmazonAPlusModuleSpec>>) {
+  if (left.length !== right.length) return false
+  return left.every((spec, index) => {
+    const other = right[index]
+    return spec.moduleType === other?.moduleType && spec.uploadWidth === other.uploadWidth && spec.uploadHeight === other.uploadHeight
+  })
+}
+
 export function getAPlusModuleSpecs(type: APlusContentType): AmazonAPlusModuleSpec[] {
   switch (type) {
     case 'premium':
       return PREMIUM_A_PLUS_MODULE_SPECS
+    case 'mobile':
+      return MOBILE_A_PLUS_MODULE_SPECS
     case 'standard-large':
       return STANDARD_LARGE_A_PLUS_MODULE_SPECS
     default:
@@ -371,24 +485,27 @@ export function getAPlusModuleSpecs(type: APlusContentType): AmazonAPlusModuleSp
 }
 
 export function findAPlusModuleSpec(slot: string): AmazonAPlusModuleSpec | undefined {
-  return [...STANDARD_A_PLUS_MODULE_SPECS, ...STANDARD_LARGE_A_PLUS_MODULE_SPECS, ...PREMIUM_A_PLUS_MODULE_SPECS, ...OPTIONAL_A_PLUS_MODULE_SPECS]
+  return [...STANDARD_A_PLUS_MODULE_SPECS, ...STANDARD_LARGE_A_PLUS_MODULE_SPECS, ...PREMIUM_A_PLUS_MODULE_SPECS, ...MOBILE_A_PLUS_MODULE_SPECS, ...OPTIONAL_A_PLUS_MODULE_SPECS]
     .find((spec) => spec.slot === slot)
 }
 
 export function getAPlusContentTypeLabel(type: APlusContentType): string {
   switch (type) {
     case 'premium':
-      return 'Premium'
+      return '高级A+'
+    case 'mobile':
+      return '手机A+'
     case 'standard-large':
-      return '大图版'
+      return '普通A+'
     default:
-      return 'Standard'
+      return '标准A+'
   }
 }
 
-export function getAPlusModuleDisplayName(module: Pick<AmazonAPlusPlan, 'slot' | 'moduleType'> | Pick<AmazonAPlusModuleSpec, 'slot' | 'moduleType'>): string {
+export function getAPlusModuleDisplayName(module: (Pick<AmazonAPlusPlan, 'slot' | 'moduleType'> | Pick<AmazonAPlusModuleSpec, 'slot' | 'moduleType'>) & { displayLabel?: string }): string {
+  if (module.displayLabel) return module.displayLabel
   const spec = findAPlusModuleSpec(module.slot)
-  if (spec) return spec.displayLabel
+  if (spec && spec.moduleType === module.moduleType) return spec.displayLabel
 
   switch (module.moduleType) {
     case 'header-banner':
@@ -413,7 +530,9 @@ export function getAPlusModuleDisplayName(module: Pick<AmazonAPlusPlan, 'slot' |
 }
 
 export function getAPlusModuleEnglishName(module: Pick<AmazonAPlusPlan, 'slot' | 'label' | 'moduleType'> | Pick<AmazonAPlusModuleSpec, 'slot' | 'label' | 'moduleType'>): string {
-  return findAPlusModuleSpec(module.slot)?.label ?? module.label ?? module.moduleType
+  const spec = findAPlusModuleSpec(module.slot)
+  if (spec && spec.moduleType === module.moduleType) return spec.label
+  return module.label ?? module.moduleType
 }
 
 export function isAPlusTextModule(module: Pick<AmazonAPlusPlan, 'moduleType'> | Pick<AmazonAPlusModuleSpec, 'moduleType'>): boolean {

@@ -18,12 +18,11 @@ describe('summarizeGenerationError', () => {
     expect(message).not.toContain('help.openai.com')
   })
 
-  it('summarizes stream internal errors in Chinese', () => {
+  it('summarizes upstream connection errors in Chinese', () => {
     const message = summarizeGenerationError('stream error: stream ID 1; INTERNAL_ERROR; received from peer')
 
-    expect(message).toContain('生成失败：流式连接在生成过程中中断。')
-    expect(message).toContain('流式任务：1')
-    expect(message).toContain('关闭流式图片')
+    expect(message).toContain('生成失败：上游连接在生成过程中中断。')
+    expect(message).toContain('检查 API 代理和网关超时设置')
     expect(message).not.toContain('received from peer')
   })
 })

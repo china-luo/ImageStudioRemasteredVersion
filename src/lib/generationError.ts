@@ -40,11 +40,6 @@ function extractRequestId(text: string): string | undefined {
   return match?.[1]
 }
 
-function extractStreamId(text: string): string | undefined {
-  const match = text.match(/\bstream\s+ID\s+([^;,\s]+)/i)
-  return match?.[1]
-}
-
 function uniqueLines(lines: string[]) {
   const seen = new Set<string>()
   return lines.filter((line) => {
@@ -67,10 +62,8 @@ export function summarizeGenerationError(error: unknown): string {
     lines.push('生成失败：生图服务商处理请求时发生临时错误。')
     lines.push('建议：请先重试；如果连续失败，可以稍后再试，或降低提示词/参考图复杂度。')
   } else if (/internal_error|received from peer|stream error/.test(lower)) {
-    const streamId = extractStreamId(raw)
-    lines.push('生成失败：流式连接在生成过程中中断。')
-    lines.push('建议：请重试；如果频繁出现，可以关闭流式图片、开启 API 代理，或稍后再试。')
-    if (streamId) lines.push(`流式任务：${streamId}`)
+    lines.push('生成失败：上游连接在生成过程中中断。')
+    lines.push('建议：请重试；如果频繁出现，请检查 API 代理和网关超时设置，或稍后再试。')
   } else if (/timeout|timed out|超时/.test(lower)) {
     lines.push('生成失败：接口等待时间过长。')
     lines.push('建议：提高超时时间、减少并发或稍后重试。')

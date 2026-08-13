@@ -5,15 +5,14 @@ import type { AmazonMarketplaceId } from './lib/amazonMarketplaces'
 export type ApiMode = 'images' | 'responses' | 'chat'
 // `agent` is retained only for legacy persisted data and old import/export payloads.
 export type AppMode = 'gallery' | 'agent' | 'sop' | 'voc'
-export type TaskWorkflow = 'amazon-listing' | 'amazon-aplus' | 'tiktok-main' | 'tiktok-detail' | 'gallery' | 'agent' | 'unknown'
+export type TaskWorkflow = 'amazon-listing' | 'amazon-aplus' | 'tiktok-main' | 'tiktok-detail' | 'seedream-edit' | 'gallery' | 'agent' | 'unknown'
 export type TaskAspect = 'square' | 'landscape' | 'portrait'
 export type HistoryWorkflowFilter = 'all' | TaskWorkflow
 export type HistoryAspectFilter = 'all' | TaskAspect
 export type ReferenceImageEditAction = 'ask' | 'replace-reference' | 'add-mask'
-export type BuiltInApiProvider = 'openai' | 'fal'
+export type BuiltInApiProvider = 'openai' | 'fal' | 'volcengine'
 export type ApiProvider = BuiltInApiProvider | string
 export type CustomProviderTemplate = 'http-image'
-export const DEFAULT_STREAM_PARTIAL_IMAGES = 1
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 15
 
 export type CustomProviderRequestMethod = 'GET' | 'POST'
@@ -74,9 +73,7 @@ export interface ApiProfile {
   codexCli: boolean
   apiProxy: boolean
   responseFormatB64Json?: boolean
-  streamImages?: boolean
-  streamPartialImages?: number
-  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json' | 'streamImages' | 'streamPartialImages'>>>>
+  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json'>>>>
 }
 
 export interface AppSettings {
@@ -88,8 +85,6 @@ export interface AppSettings {
   apiMode: ApiMode
   codexCli: boolean
   apiProxy: boolean
-  streamImages?: boolean
-  streamPartialImages?: number
   customProviders: CustomProviderDefinition[]
   providerOrder?: string[]
   clearInputAfterSubmit: boolean
@@ -107,6 +102,7 @@ export interface AppSettings {
   sopReverseProfileId: string
   vocProfileId: string
   vocApiKey: string
+  seedreamEditorProfileId?: string
 }
 
 // ===== 任务参数 =====
@@ -186,8 +182,7 @@ export interface TaskRecord {
   maskImageId?: string | null
   /** 输出图片的 image store id 列表 */
   outputImages: string[]
-  /** 流式生成的中间步骤图片 id 列表，仅失败时保留供排查/下载 */
-  streamPartialImageIds?: string[]
+  imageEditContext?: TaskImageEditContext
   /** API 返回的原始图片 HTTP URL（非 base64 时记录） */
   rawImageUrls?: string[]
   /** 发生解析错误时的原始响应 JSON */
@@ -219,7 +214,7 @@ export interface TaskRecord {
     productTitle?: string
     workflow?: TaskWorkflow
     amazonSlot?: string
-    aPlusType?: 'standard' | 'standard-large' | 'premium'
+    aPlusType?: 'standard' | 'standard-large' | 'premium' | 'mobile'
     platform?: 'amazon' | 'tiktok'
     tiktokDesignType?: 'main' | 'detail'
     marketplaceId?: AmazonMarketplaceId
@@ -280,6 +275,17 @@ export interface AmazonPlannerSessionAPlusPlan {
   negativePrompt: string
 }
 
+export interface AmazonPlannerSessionAPlusModuleSpec {
+  contentType: 'standard' | 'standard-large' | 'premium' | 'mobile' | 'optional'
+  slot: string
+  label: string
+  displayLabel: string
+  moduleType: string
+  uploadWidth: number
+  uploadHeight: number
+  objective: string
+}
+
 export interface AmazonPlannerSessionStyleImage {
   candidateIndex: number
   imageId: string
@@ -294,7 +300,8 @@ export interface AmazonPlannerSession {
   marketplaceId?: AmazonMarketplaceId
   tiktokDesignType?: 'main' | 'detail'
   mode: 'listing' | 'aplus'
-  aPlusType: 'standard' | 'standard-large' | 'premium'
+  aPlusType: 'standard' | 'standard-large' | 'premium' | 'mobile'
+  aPlusModuleSpecs?: Partial<Record<'standard' | 'standard-large' | 'premium' | 'mobile', AmazonPlannerSessionAPlusModuleSpec[]>>
   resolution: '2k' | '4k'
   listingText: string
   referenceImageIds: string[]
@@ -528,3 +535,11 @@ export interface ExportData {
     thumbnailVersion?: number
   }>
 }
+
+export type SeedreamEditorResolution = '2k' | '4k'
+export type ImageEditorEngine = 'home' | 'seedream'
+export type SeedreamAnnotationKind = 'brush' | 'rectangle' | 'ellipse' | 'arrow'
+export interface SeedreamAnnotationPoint { x: number; y: number }
+export interface SeedreamAnnotation { id: string; kind: SeedreamAnnotationKind; color: string; width: number; points: SeedreamAnnotationPoint[] }
+export interface SeedreamEditorDraft { engine: ImageEditorEngine; sourceImageId: string | null; referenceImageIds: string[]; instruction: string; annotations: SeedreamAnnotation[]; resolution: SeedreamEditorResolution; latestTaskId: string | null; updatedAt: number }
+export interface TaskImageEditContext { engine?: ImageEditorEngine; sourceImageId: string; visualGuideImageId?: string | null; referenceImageIds: string[]; userInstruction: string }

@@ -1,6 +1,8 @@
-import { getActiveApiProfile, getCustomProviderDefinition } from './apiProfiles'
+import { getActiveApiProfile, getCustomProviderDefinition, isAliyunQwenImageProfile } from './apiProfiles'
 import { callFalAiImageApi } from './falAiImageApi'
 import { callOpenAICompatibleImageApi } from './openaiCompatibleImageApi'
+import { callVolcengineImageApi } from './volcengineImageApi'
+import { callAliyunQwenImageApi } from './aliyunQwenImageApi'
 import { appendOutputResolutionToPrompt, type CallApiOptions, type CallApiResult } from './imageApiShared'
 
 export type { CallApiOptions, CallApiResult } from './imageApiShared'
@@ -11,6 +13,8 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
   const prompt = appendOutputResolutionToPrompt(opts.prompt, opts.params.size)
   const requestOpts = prompt === opts.prompt ? opts : { ...opts, prompt }
   if (profile.provider === 'fal') return callFalAiImageApi(requestOpts, profile)
+  if (profile.provider === 'volcengine') return callVolcengineImageApi(requestOpts, profile)
+  if (isAliyunQwenImageProfile(profile)) return callAliyunQwenImageApi(requestOpts, profile)
 
   return callOpenAICompatibleImageApi(requestOpts, profile, getCustomProviderDefinition(opts.settings, profile.provider))
 }

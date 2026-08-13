@@ -14,14 +14,20 @@ import type {
   TaskParams,
   InputImage,
   MaskDraft,
+  SeedreamEditorDraft,
   TaskRecord,
+  TaskImageEditContext,
   ExportData,
   ResponsesApiResponse,
   ResponsesOutputItem,
 } from './types'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
-import { canApiProfileGenerateImages, createSettingsForApiProfile, DEFAULT_SETTINGS, getActiveApiProfile, getCustomProviderDefinition, getImageGenerationProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
+import { canApiProfileGenerateImages, createSettingsForApiProfile, DEFAULT_SETTINGS, getActiveApiProfile, getCustomProviderDefinition, getHomeApiProfile, getImageGenerationProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
+
+const DEFAULT_SEEDREAM_EDITOR_DRAFT: SeedreamEditorDraft = {
+  engine: 'home', sourceImageId: null, referenceImageIds: [], instruction: '', annotations: [], resolution: '2k', latestTaskId: null, updatedAt: Date.now(),
+}
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
 import {
   CURRENT_THUMBNAIL_VERSION,
@@ -51,9 +57,10 @@ import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi
 import { getCustomQueuedImageResult } from './lib/openaiCompatibleImageApi'
 import { validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
-import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
+import { getChangedParams, getInputImageLimitForSettings, normalizeParamsForSettings } from './lib/paramCompatibility'
 import { prepareReferenceImageAndMaskPayload } from './lib/referenceImagePayload'
 import { getTaskHistoryCategory } from './lib/taskHistory'
+import { migrateLegacyTaskStreamFields } from './lib/legacyTaskMigration'
 import { shouldOpenSupportPromptForTaskCompletion } from './lib/supportPrompt'
 import { isAmazonListingMainSlot } from './lib/listingPlanner'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
@@ -81,7 +88,6 @@ const OPENAI_INTERRUPTED_ERROR = '请求中断'
 const AGENT_STOPPED_MESSAGE = '已停止生成。'
 const AGENT_CONVERSATION_TITLE_MAX_LENGTH = 28
 const ERROR_TOAST_MAX_LENGTH = 80
-const API_MAX_INPUT_IMAGES = 16
 type ToastType = 'info' | 'success' | 'error'
 
 // Legacy experimental Agent API. Keep it off the main bundle path until an old Agent action explicitly runs.
@@ -212,22 +218,8 @@ function isErrorToastTitle(title: string): boolean {
 
 export type SettingsTab = 'general' | 'agent' | 'api' | 'data' | 'about'
 
-const TIMEOUT_STREAMING_HINT = '也可尝试打开「流式传输」，并提高「请求中间步骤图像数」来维持连接。'
-const TIMEOUT_PARTIAL_IMAGES_ZERO_HINT = '官方流式接口不发送心跳，当前「请求中间步骤图像数」为 0，连接可能因无数据传输而断开。建议提高到 2 或 3。'
-const TIMEOUT_PARTIAL_IMAGES_LOW_HINT = '也可尝试提高「请求中间步骤图像数」来维持连接，避免长时间无数据传输导致断开。'
-
-type TimeoutStreamingHintProfile = Pick<ApiProfile, 'provider' | 'streamImages' | 'streamPartialImages'>
-
-function getTimeoutStreamingHint(profile?: TimeoutStreamingHintProfile | null) {
-  if (profile?.provider !== 'openai') return ''
-  const partialImages = profile.streamPartialImages ?? DEFAULT_SETTINGS.streamPartialImages ?? 0
-  if (profile.streamImages !== true) return TIMEOUT_STREAMING_HINT
-  if (partialImages === 0) return TIMEOUT_PARTIAL_IMAGES_ZERO_HINT
-  return partialImages < 3 ? TIMEOUT_PARTIAL_IMAGES_LOW_HINT : ''
-}
-
-function createOpenAITimeoutError(timeoutSeconds: number, profile?: TimeoutStreamingHintProfile | null) {
-  return `请求超时：超过 ${timeoutSeconds} 秒仍未完成，请稍后重试或提高超时时间。${getTimeoutStreamingHint(profile)}`
+function createOpenAITimeoutError(timeoutSeconds: number) {
+  return `请求超时：超过 ${timeoutSeconds} 秒仍未完成，请稍后重试或提高超时时间。`
 }
 
 export function getCachedImage(id: string): string | undefined {
@@ -589,6 +581,7 @@ export function getPersistedState(state: AppState) {
     galleryInputDraft: settings.persistInputOnRestart && galleryInputDraft
       ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) }
       : null,
+    seedreamEditorDraft: state.seedreamEditorDraft,
     agentConversations: state.agentConversations,
     activeAgentConversationId: state.activeAgentConversationId,
     agentInputDrafts: getPersistableAgentInputDrafts(state),
@@ -646,6 +639,9 @@ export function mergePersistedState(persistedState: unknown, currentState: AppSt
     params,
     appMode,
     galleryInputDraft: galleryInputDraft && !isEmptyAgentInputDraft(galleryInputDraft) ? galleryInputDraft : null,
+    seedreamEditorDraft: persisted.seedreamEditorDraft && typeof persisted.seedreamEditorDraft === 'object'
+      ? { ...DEFAULT_SEEDREAM_EDITOR_DRAFT, ...persisted.seedreamEditorDraft }
+      : currentState.seedreamEditorDraft,
     agentConversations,
     activeAgentConversationId,
     agentInputDrafts,
@@ -689,6 +685,9 @@ interface AppState {
   maskEditorImageId: string | null
   setMaskEditorImageId: (id: string | null) => void
   galleryInputDraft: AgentInputDraft | null
+  seedreamEditorDraft: SeedreamEditorDraft
+  setSeedreamEditorDraft: (patch: Partial<SeedreamEditorDraft>) => void
+  resetSeedreamEditorDraft: () => void
 
   // 参数
   params: TaskParams
@@ -724,10 +723,6 @@ interface AppState {
   // 任务列表
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
-  streamPreviews: Record<string, string>
-  streamPreviewSlots: Record<string, Record<string, string>>
-  setTaskStreamPreview: (taskId: string, image?: string, requestIndex?: number) => void
-
   // 搜索和筛选
   searchQuery: string
   setSearchQuery: (q: string) => void
@@ -802,7 +797,6 @@ function isImageReferencedByState(state: AppState, imageId: string) {
   if (state.tasks.some((task) =>
     task.inputImageIds.includes(imageId) ||
     task.outputImages.includes(imageId) ||
-    task.streamPartialImageIds?.includes(imageId) ||
     task.maskTargetImageId === imageId ||
     task.maskImageId === imageId
   )) return true
@@ -1036,9 +1030,7 @@ export const useStore = create<AppState>()(
           incoming.timeout !== undefined ||
           incoming.apiMode !== undefined ||
           incoming.codexCli !== undefined ||
-          incoming.apiProxy !== undefined ||
-          incoming.streamImages !== undefined ||
-          incoming.streamPartialImages !== undefined
+          incoming.apiProxy !== undefined
         const merged = normalizeSettings({ ...previous, ...incoming })
         if (hasLegacyOverrides && incoming.profiles === undefined) {
           merged.profiles = merged.profiles.map((profile) =>
@@ -1052,8 +1044,6 @@ export const useStore = create<AppState>()(
                   apiMode: incoming.apiMode === 'images' || incoming.apiMode === 'responses' || incoming.apiMode === 'chat' ? incoming.apiMode : profile.apiMode,
                   codexCli: incoming.codexCli ?? profile.codexCli,
                   apiProxy: incoming.apiProxy ?? profile.apiProxy,
-                  streamImages: incoming.streamImages ?? profile.streamImages,
-                  streamPartialImages: incoming.streamPartialImages ?? profile.streamPartialImages,
                 }
               : profile,
           )
@@ -1167,6 +1157,9 @@ export const useStore = create<AppState>()(
         set((s) => syncActiveInputDraft(s, { maskEditorImageId }))
       },
       galleryInputDraft: null,
+      seedreamEditorDraft: { ...DEFAULT_SEEDREAM_EDITOR_DRAFT },
+      setSeedreamEditorDraft: (patch) => set((state) => ({ seedreamEditorDraft: { ...state.seedreamEditorDraft, ...patch, updatedAt: Date.now() } })),
+      resetSeedreamEditorDraft: () => set({ seedreamEditorDraft: { ...DEFAULT_SEEDREAM_EDITOR_DRAFT, updatedAt: Date.now() } }),
 
       // Params
       params: { ...DEFAULT_PARAMS },
@@ -1276,30 +1269,6 @@ export const useStore = create<AppState>()(
       // Tasks
       tasks: [],
       setTasks: (tasks) => set({ tasks }),
-      streamPreviews: {},
-      streamPreviewSlots: {},
-      setTaskStreamPreview: (taskId, image, requestIndex = 0) => set((s) => {
-        if (image) {
-          const slotKey = String(requestIndex)
-          const currentSlots = s.streamPreviewSlots[taskId] ?? {}
-          if (s.streamPreviews[taskId] === image && currentSlots[slotKey] === image) return s
-          return {
-            streamPreviews: { ...s.streamPreviews, [taskId]: image },
-            streamPreviewSlots: {
-              ...s.streamPreviewSlots,
-              [taskId]: { ...currentSlots, [slotKey]: image },
-            },
-          }
-        }
-
-        if (!(taskId in s.streamPreviews) && !(taskId in s.streamPreviewSlots)) return s
-        const next = { ...s.streamPreviews }
-        const nextSlots = { ...s.streamPreviewSlots }
-        delete next[taskId]
-        delete nextSlots[taskId]
-        return { streamPreviews: next, streamPreviewSlots: nextSlots }
-      }),
-
       // Search & Filter
       searchQuery: '',
       setSearchQuery: (searchQuery) => set({ searchQuery }),
@@ -1452,7 +1421,7 @@ function failOpenAITaskIfStillRunning(taskId: string, error: string, now = Date.
   return true
 }
 
-function scheduleOpenAIWatchdog(taskId: string, timeoutSeconds: number, profile?: TimeoutStreamingHintProfile | null) {
+function scheduleOpenAIWatchdog(taskId: string, timeoutSeconds: number) {
   clearOpenAIWatchdogTimer(taskId)
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !isRunningOpenAITask(task)) return
@@ -1461,7 +1430,7 @@ function scheduleOpenAIWatchdog(taskId: string, timeoutSeconds: number, profile?
   const remainingMs = Math.max(0, timeoutMs - (Date.now() - task.createdAt))
   const timer = setTimeout(() => {
     openAIWatchdogTimers.delete(taskId)
-    const failed = failOpenAITaskIfStillRunning(taskId, createOpenAITimeoutError(timeoutSeconds, profile))
+    const failed = failOpenAITaskIfStillRunning(taskId, createOpenAITimeoutError(timeoutSeconds))
     if (failed) useStore.getState().showToast('OpenAI 任务请求超时', 'error')
   }, remainingMs)
   openAIWatchdogTimers.set(taskId, timer)
@@ -1544,7 +1513,7 @@ function getApiRequestNetworkErrorHint(
   err: unknown,
   createdAt: number,
   usesApiProxy: boolean,
-  profile?: Pick<ApiProfile, 'provider' | 'apiMode' | 'streamImages' | 'streamPartialImages'> | null,
+  profile?: Pick<ApiProfile, 'provider' | 'apiMode'> | null,
 ): string | null {
   if (!isApiRequestNetworkError(err)) return null
 
@@ -1561,14 +1530,14 @@ function getApiRequestNetworkErrorHint(
   }
 
   if (elapsedSeconds >= 55 && elapsedSeconds <= 75) {
-    return `提示：请求等待约 60 秒后被断开，这通常是 Nginx 等反向代理的默认超时，而非接口本身报错。可调大代理的超时时间（如 proxy_read_timeout），或降低图片尺寸/质量后重试。${getTimeoutStreamingHint(profile)}`
+    return '提示：请求等待约 60 秒后被断开，这通常是 Nginx 等反向代理的默认超时，而非接口本身报错。可调大代理的超时时间（如 proxy_read_timeout），或降低图片尺寸/质量后重试。'
   }
 
   if (elapsedSeconds >= 110 && elapsedSeconds <= 140) {
-    return `提示：请求等待约 120 秒后被断开，这通常是 Cloudflare 等 CDN/网关的超时限制，而非接口本身报错。如果使用 Cloudflare，可考虑升级套餐或使用不经过 CDN 的直连地址。${getTimeoutStreamingHint(profile)}`
+    return '提示：请求等待约 120 秒后被断开，这通常是 Cloudflare 等 CDN/网关的超时限制，而非接口本身报错。如果使用 Cloudflare，可考虑升级套餐或使用不经过 CDN 的直连地址。'
   }
 
-  return `提示：请求等待较长时间后被断开，通常是反向代理或网关的超时限制，而非接口本身报错。可检查代理超时设置，或降低图片尺寸/质量后重试。${getTimeoutStreamingHint(profile)}`
+  return '提示：请求等待较长时间后被断开，通常是反向代理或网关的超时限制，而非接口本身报错。可检查代理超时设置，或降低图片尺寸/质量后重试。'
 }
 
 function getRawErrorPayload(err: unknown): Pick<Partial<TaskRecord>, 'rawImageUrls' | 'rawResponsePayload'> {
@@ -1733,7 +1702,9 @@ async function recoverFalTask(taskId: string) {
 /** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并清理孤立图片 */
 export async function initStore() {
   const storedTasks = await getAllTasks()
-  const { tasks, interruptedTasks } = markInterruptedOpenAIRunningTasks(storedTasks)
+  const migratedTasks = storedTasks.map(migrateLegacyTaskStreamFields)
+  await Promise.all(migratedTasks.filter((result) => result.changed).map((result) => putTask(result.task)))
+  const { tasks, interruptedTasks } = markInterruptedOpenAIRunningTasks(migratedTasks.map((result) => result.task))
   await Promise.all(interruptedTasks.map((task) => putTask(task)))
   useStore.getState().setTasks(tasks)
   for (const task of tasks) {
@@ -1953,8 +1924,9 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   const category = resolvePendingTaskCategory(pendingTaskCategory, trimmedPrompt)
 
   let orderedInputImages = inputImages
-  if (orderedInputImages.length > API_MAX_INPUT_IMAGES) {
-    showToast(`上传参考图不能超过 ${API_MAX_INPUT_IMAGES} 张，请删除多余参考图后再提交。`, 'error')
+  const inputImageLimit = getInputImageLimitForSettings(requestSettings)
+  if (orderedInputImages.length > inputImageLimit) {
+    showToast(`上传参考图不能超过 ${inputImageLimit} 张，请删除多余参考图后再提交。`, 'error')
     return false
   }
   let maskImageId: string | null = null
@@ -2299,7 +2271,6 @@ function addTaskReferencedImageIds(target: Set<string>, task: TaskRecord) {
   for (const id of task.inputImageIds || []) target.add(id)
   if (task.maskImageId) target.add(task.maskImageId)
   for (const id of task.outputImages || []) target.add(id)
-  for (const id of task.streamPartialImageIds || []) target.add(id)
 }
 
 async function deleteUnreferencedImageIds(imageIds: Iterable<string>) {
@@ -2318,25 +2289,6 @@ async function deleteUnreferencedImageIds(imageIds: Iterable<string>) {
     await deleteImage(imgId)
     imageCache.delete(imgId)
     thumbnailCache.delete(imgId)
-  }
-}
-
-async function persistTaskStreamPartialImage(taskId: string, dataUrl: string) {
-  try {
-    const imgId = await storeImage(dataUrl, 'generated')
-    cacheImage(imgId, dataUrl)
-
-    const latestTask = useStore.getState().tasks.find((task) => task.id === taskId)
-    if (!latestTask || latestTask.status === 'done') {
-      await deleteUnreferencedImageIds([imgId])
-      return
-    }
-
-    const currentIds = latestTask.streamPartialImageIds || []
-    if (currentIds.includes(imgId)) return
-    updateTaskInStore(taskId, { streamPartialImageIds: [...currentIds, imgId] })
-  } catch (err) {
-    console.error(err)
   }
 }
 
@@ -2963,7 +2915,7 @@ async function executeAgentRound(
       ? conversation.messages.find((message) => message.id === round.assistantMessageId) ?? null
       : conversation.messages.find((message) => message.roundId === roundId && message.role === 'assistant') ?? null
     const assistantMessageId = existingAssistantMessage?.id ?? genId()
-    const shouldStreamAssistantMessage = activeProfile.streamImages === true
+    const shouldStreamAssistantMessage = false
     const streamingTaskIds: string[] = []
     const taskIdByToolCallId = new Map<string, string>()
 
@@ -3060,7 +3012,6 @@ async function executeAgentRound(
         elapsed: Date.now() - (latestTask?.createdAt ?? startedAt),
         agentToolAction: image.action,
       })
-      useStore.getState().setTaskStreamPreview(taskId)
       return taskId
     }
 
@@ -3162,18 +3113,6 @@ async function executeAgentRound(
                 if (controller.signal.aborted) return
               }
             : undefined,
-          onPartialImage: shouldStreamAssistantMessage
-            ? async ({ image, partialImageIndex }) => {
-                if (controller.signal.aborted) return
-                const taskId = taskIdByToolCallId.get(batchToolCallId)
-                if (taskId) {
-                  useStore.getState().setTaskStreamPreview(taskId, image, partialImageIndex)
-                  if (partialImageIndex === 0 || partialImageIndex == null) {
-                    void persistTaskStreamPartialImage(taskId, image)
-                  }
-                }
-              }
-            : undefined,
           onImageToolCompleted: shouldStreamAssistantMessage
             ? async (image) => {
                 if (controller.signal.aborted) return
@@ -3256,17 +3195,6 @@ async function executeAgentRound(
           ? async ({ toolCallId }) => {
               if (controller.signal.aborted) return
               await ensureStreamingAgentTask(toolCallId)
-            }
-          : undefined,
-        onImagePartialImage: shouldStreamAssistantMessage
-          ? async ({ toolCallId, image, partialImageIndex }) => {
-              if (controller.signal.aborted) return
-              const taskId = await ensureStreamingAgentTask(toolCallId)
-              if (controller.signal.aborted) return
-              useStore.getState().setTaskStreamPreview(taskId, image, partialImageIndex)
-              if (partialImageIndex === 0 || partialImageIndex == null) {
-                void persistTaskStreamPartialImage(taskId, image)
-              }
             }
           : undefined,
         onImageToolCompleted: shouldStreamAssistantMessage
@@ -3547,7 +3475,7 @@ async function executeTask(taskId: string) {
     : null
 
   if (taskProvider !== 'fal' && !isAsyncCustomProviderTask(requestSettings, taskProvider, task.inputImageIds.length > 0)) {
-    scheduleOpenAIWatchdog(taskId, activeProfile.timeout, activeProfile)
+    scheduleOpenAIWatchdog(taskId, activeProfile.timeout)
   }
 
   try {
@@ -3588,15 +3516,10 @@ async function executeTask(taskId: string) {
           customRecoverable: false,
         })
       },
-      onPartialImage: (partial) => {
-        useStore.getState().setTaskStreamPreview(taskId, partial.image, partial.requestIndex)
-        void persistTaskStreamPartialImage(taskId, partial.image)
-      },
     })
 
     const latestBeforeSuccess = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestBeforeSuccess || latestBeforeSuccess.status !== 'running') {
-      useStore.getState().setTaskStreamPreview(taskId)
       return
     }
 
@@ -3640,15 +3563,11 @@ async function executeTask(taskId: string) {
     // 更新任务
     const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') {
-      useStore.getState().setTaskStreamPreview(taskId)
       return
     }
-    const partialImageIdsToClean = latestBeforeUpdate.streamPartialImageIds || []
     clearOpenAIWatchdogTimer(taskId)
-    useStore.getState().setTaskStreamPreview(taskId)
     updateTaskInStore(taskId, {
       outputImages: outputIds,
-      streamPartialImageIds: undefined,
       rawImageUrls: result.rawImageUrls?.length ? result.rawImageUrls : undefined,
       actualParams,
       actualParamsByImage,
@@ -3659,7 +3578,6 @@ async function executeTask(taskId: string) {
       falRecoverable: false,
       customRecoverable: false,
     })
-    void deleteUnreferencedImageIds(partialImageIdsToClean)
 
     useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
     const currentMask = useStore.getState().maskDraft
@@ -3675,7 +3593,6 @@ async function executeTask(taskId: string) {
     clearOpenAIWatchdogTimer(taskId)
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
     if (latestTask.status !== 'running') return
-    useStore.getState().setTaskStreamPreview(taskId)
     const latestFalRequestInfo = falRequestInfo ?? (latestTask.falRequestId && latestTask.falEndpoint
       ? { requestId: latestTask.falRequestId, endpoint: latestTask.falEndpoint }
       : null)
@@ -3710,8 +3627,6 @@ async function executeTask(taskId: string) {
       const hintProfile = profile ?? {
         provider: latestTask.apiProvider ?? activeProfile.provider,
         apiMode: settings.apiMode,
-        streamImages: activeProfile.streamImages,
-        streamPartialImages: activeProfile.streamPartialImages,
       }
       const networkErrorHint = getApiRequestNetworkErrorHint(err, latestTask.createdAt, usesApiProxy, hintProfile)
       if (networkErrorHint && !errorMessage.includes(IMAGE_FETCH_CORS_HINT)) {
@@ -3979,7 +3894,6 @@ export async function removeTask(task: TaskRecord) {
     ...(task.inputImageIds || []),
     ...(task.maskImageId ? [task.maskImageId] : []),
     ...(task.outputImages || []),
-    ...(task.streamPartialImageIds || []),
   ])
 
   // 从列表移除
@@ -4154,7 +4068,6 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
           ...(task.inputImageIds || []),
           ...(task.maskImageId ? [task.maskImageId] : []),
           ...(task.outputImages || []),
-          ...(task.streamPartialImageIds || []),
         ]) {
           const prev = imageCreatedAtFallback.get(id)
           if (prev == null || task.createdAt < prev) {
@@ -4303,8 +4216,11 @@ export async function importData(file: File, options: ImportOptions = { importCo
         })
       }
 
+      const legacyIntermediateImageIds = new Set<string>()
       for (const task of data.tasks) {
-        await putTask(task)
+        const migration = migrateLegacyTaskStreamFields(task)
+        migration.removedImageIds.forEach((id) => legacyIntermediateImageIds.add(id))
+        await putTask(migration.task)
       }
       for (const session of data.amazonPlannerSessions ?? []) {
         await putAmazonPlannerSession(session)
@@ -4324,6 +4240,7 @@ export async function importData(file: File, options: ImportOptions = { importCo
           activeAgentConversationId,
         }
       })
+      await deleteUnreferencedImageIds(legacyIntermediateImageIds)
       scheduleThumbnailBackfill(importedImageIds)
     }
 
@@ -4368,6 +4285,101 @@ export async function createInputImageFromFile(file: File): Promise<InputImage |
   const id = await storeImage(dataUrl, 'upload')
   cacheImage(id, dataUrl)
   return { id, dataUrl }
+}
+
+export async function createInputImageFromDataUrl(dataUrl: string): Promise<InputImage> {
+  const id = await storeImage(dataUrl, 'upload')
+  cacheImage(id, dataUrl)
+  return { id, dataUrl }
+}
+
+export async function submitTaskWithInput(options: {
+  apiProfileId: string
+  prompt: string
+  inputImages: InputImage[]
+  params: TaskParams
+  category?: NonNullable<TaskRecord['category']>
+  imageEditContext?: TaskImageEditContext
+  maskTargetImageId?: string | null
+  maskImageId?: string | null
+}): Promise<string | null> {
+  const state = useStore.getState()
+  const settings = normalizeSettings(state.settings)
+  const homeProfile = getHomeApiProfile(settings)
+  const profile = homeProfile?.id === options.apiProfileId
+    ? homeProfile
+    : settings.profiles.find((item) => item.id === options.apiProfileId)
+  if (!profile) {
+    state.showToast('找不到指定的 API 配置', 'error')
+    return null
+  }
+  if (!canApiProfileGenerateImages(profile)) {
+    state.showToast(`配置「${profile.name}」不能生成图片`, 'error')
+    return null
+  }
+  const profileError = validateApiProfile(profile)
+  if (profileError) {
+    state.showToast(`请先完善 API 配置：${profileError}`, 'error')
+    return null
+  }
+
+  const prompt = options.prompt.trim()
+  if (!prompt) {
+    state.showToast('请输入编辑要求', 'error')
+    return null
+  }
+  const requestSettings = createSettingsForApiProfile(settings, profile)
+  const inputImageLimit = getInputImageLimitForSettings(requestSettings)
+  if (options.inputImages.length > inputImageLimit) {
+    state.showToast(`参考图数量不能超过 ${inputImageLimit} 张`, 'error')
+    return null
+  }
+
+  const storedImages: InputImage[] = []
+  try {
+    for (const image of options.inputImages) {
+      const dataUrl = image.dataUrl || await ensureImageCached(image.id)
+      if (!dataUrl) throw new Error('输入图片已不存在')
+      if (!await getImage(image.id)) {
+        await putImage({ id: image.id, dataUrl, source: 'upload', createdAt: Date.now() })
+      }
+      cacheImage(image.id, dataUrl)
+      storedImages.push({ id: image.id, dataUrl })
+    }
+  } catch (error) {
+    state.showToast(error instanceof Error ? error.message : String(error), 'error')
+    return null
+  }
+
+  const params = normalizeParamsForSettings(options.params, requestSettings, { hasInputImages: storedImages.length > 0 })
+  const taskId = genId()
+  const task: TaskRecord = {
+    id: taskId,
+    prompt,
+    params,
+    apiProvider: profile.provider,
+    apiProfileId: profile.id,
+    apiProfileName: profile.name,
+    apiMode: profile.apiMode,
+    apiModel: profile.model,
+    inputImageIds: storedImages.map((image) => image.id),
+    maskTargetImageId: options.maskTargetImageId ?? null,
+    maskImageId: options.maskImageId ?? null,
+    outputImages: [],
+    status: 'running',
+    error: null,
+    createdAt: Date.now(),
+    finishedAt: null,
+    elapsed: null,
+    category: options.category ?? { workflow: 'seedream-edit' },
+    imageEditContext: options.imageEditContext,
+  }
+
+  useStore.getState().setTasks([task, ...useStore.getState().tasks])
+  await putTask(task)
+  useStore.getState().showToast('任务已提交', 'success')
+  void executeTask(taskId)
+  return taskId
 }
 
 /** 添加图片到输入（右键菜单）—— 支持 data/blob/http URL */

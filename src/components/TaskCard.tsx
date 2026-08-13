@@ -97,10 +97,8 @@ export default function TaskCard({
   const [swipeStartedSelected, setSwipeStartedSelected] = useState(false)
   const [swipeActionActive, setSwipeActionActive] = useState(false)
   const [swipeDirection, setSwipeDirection] = useState<-1 | 0 | 1>(0)
-  const [streamPreviewLoaded, setStreamPreviewLoaded] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
   const settings = useStore((s) => s.settings)
-  const streamPreviewSrc = useStore((s) => s.streamPreviews[task.id] || '')
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const swipeResetTimerRef = useRef<number | null>(null)
   const suppressClickUntilRef = useRef(0)
@@ -254,10 +252,6 @@ export default function TaskCard({
       applySwipeOffset(0)
     }
   }, [isSwiping])
-
-  useEffect(() => {
-    setStreamPreviewLoaded(false)
-  }, [streamPreviewSrc, task.id])
 
   // 定时更新运行中任务的计时
   useEffect(() => {
@@ -444,23 +438,7 @@ export default function TaskCard({
           className={`${useWidePreviewLayout ? 'w-full' : 'w-40 min-w-[10rem] h-full flex-shrink-0'} bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden`}
           style={widePreviewStyle}
         >
-          {task.status === 'running' && streamPreviewSrc && (
-            <>
-              <img
-                src={streamPreviewSrc}
-                className={`${previewImageClass} ${streamPreviewLoaded ? '' : 'hidden'}`}
-                alt=""
-                onLoad={() => setStreamPreviewLoaded(true)}
-                onError={() => setStreamPreviewLoaded(false)}
-              />
-              {streamPreviewLoaded && (
-                <span className="absolute top-1.5 right-1.5 flex items-center gap-1 rounded bg-blue-500 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm sm:text-xs">
-                  预览
-                </span>
-              )}
-            </>
-          )}
-          {task.status === 'running' && (!streamPreviewSrc || !streamPreviewLoaded) && (
+          {task.status === 'running' && (
             <div className="flex flex-col items-center gap-2">
               <svg
                 className="w-8 h-8 text-blue-400 animate-spin"

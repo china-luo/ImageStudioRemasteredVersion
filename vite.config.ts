@@ -6,6 +6,7 @@ import http from 'node:http'
 import https from 'node:https'
 import {
   type DevProxyConfig,
+  LOCAL_DYNAMIC_PROXY_TARGET,
   normalizeDevProxyConfig,
   resolveDevProxyRequestTarget,
 } from './src/lib/devProxy'
@@ -24,6 +25,16 @@ function loadDevProxyConfig() {
     if (err.code === 'ENOENT') return null
     throw error
   }
+}
+
+function createDefaultLocalProxyConfig() {
+  return normalizeDevProxyConfig({
+    enabled: true,
+    prefix: '/api-proxy',
+    target: LOCAL_DYNAMIC_PROXY_TARGET,
+    changeOrigin: true,
+    secure: true,
+  })
 }
 
 function isLocalRequest(remoteAddress?: string | null) {
@@ -80,6 +91,12 @@ function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
           next()
           return
         }
+        if (!isLocalRequest(req.socket.remoteAddress)) {
+          res.statusCode = 403
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ error: { message: 'Local API proxy requests only' } }))
+          return
+        }
 
         const headers = { ...req.headers }
         if (proxyConfig.changeOrigin) headers.host = target.url.host
@@ -115,7 +132,9 @@ function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
 }
 
 export default defineConfig(({ command, mode }) => {
-  const devProxyConfig = command === 'serve' && mode !== 'test' ? loadDevProxyConfig() : null
+  const devProxyConfig = command === 'serve' && mode !== 'test'
+    ? loadDevProxyConfig() ?? createDefaultLocalProxyConfig()
+    : null
 
   return {
     plugins: [

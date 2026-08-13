@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
@@ -17,6 +17,8 @@ import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
+import ImageEditorPage from './components/ImageEditorPage'
+import SyntheticPerformerTaggerPage from './components/SyntheticPerformerTaggerPage'
 import SupportPromptModal from './components/SupportPromptModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
@@ -26,6 +28,7 @@ export default function App() {
   const appMode = useStore((s) => s.appMode)
   const showSettings = useStore((s) => s.showSettings)
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const [featureView, setFeatureView] = useState<'home' | 'editor' | 'tagger'>('home')
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -58,16 +61,17 @@ export default function App() {
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
 
+  const navigateFeature = (view: 'home' | 'editor' | 'tagger') => setFeatureView(view)
   return (
     <>
-      <Header />
+      <Header activeView={featureView} onNavigate={navigateFeature} />
       <main
         data-home-main
         data-drag-select-surface
-        className={appMode === 'sop' || appMode === 'voc' ? 'pb-10' : 'home-main-with-dock pb-48 lg:pb-10'}
+        className={featureView !== 'home' ? 'pb-10' : appMode === 'sop' || appMode === 'voc' ? 'pb-10' : 'home-main-with-dock pb-48 lg:pb-10'}
       >
         <div className="safe-area-x max-w-7xl mx-auto lg:!px-6">
-          {appMode === 'sop' ? (
+          {featureView === 'editor' ? <ImageEditorPage /> : featureView === 'tagger' ? <SyntheticPerformerTaggerPage /> : appMode === 'sop' ? (
             <SopReverseWorkspace />
           ) : appMode === 'voc' ? (
             <VocAmazonReviewsWorkspace />
@@ -80,7 +84,7 @@ export default function App() {
           )}
         </div>
       </main>
-      {appMode !== 'sop' && appMode !== 'voc' && <InputBar />}
+      {featureView === 'home' && appMode !== 'sop' && appMode !== 'voc' && <InputBar />}
       <DetailModal />
       <Lightbox />
       <ErrorBoundary
@@ -115,7 +119,7 @@ export default function App() {
           </div>
         )}
       >
-        <SettingsModal />
+      <SettingsModal />
       </ErrorBoundary>
       <ConfirmDialog />
       <Toast />

@@ -8,7 +8,7 @@ describe('callAgentResponsesApi', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps Agent image generation non-streaming even when legacy stream settings are present', async () => {
+  it('uses the standard JSON response path for Agent image generation', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       id: 'resp_1',
       output: [
@@ -19,12 +19,9 @@ describe('callAgentResponsesApi', () => {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
-    const textDeltas: string[] = []
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
       apiMode: 'responses',
-      streamImages: true,
-      streamPartialImages: 2,
     })
 
     const result = await callAgentResponsesApi({
@@ -32,19 +29,15 @@ describe('callAgentResponsesApi', () => {
       profile,
       params: DEFAULT_PARAMS,
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'prompt' }] }],
-      onTextDelta: (delta) => textDeltas.push(delta),
     })
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
-    expect(body.stream).toBeUndefined()
-    expect(body.tools[0].partial_images).toBeUndefined()
     expect(body.tools[0]).toMatchObject({
       output_format: 'jpeg',
       output_compression: 70,
       quality: 'auto',
     })
-    expect(textDeltas).toEqual([])
     expect(result).toMatchObject({
       responseId: 'resp_1',
       text: 'Hello',
@@ -80,38 +73,6 @@ describe('callAgentResponsesApi', () => {
     expect(body.tools[0].input_image_mask).toEqual({ image_url: 'data:image/png;base64,bWFzaw==' })
   })
 
-  it('does not enable Agent streaming for legacy stream profile settings', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      output: [{
-        type: 'message',
-        content: [{ type: 'output_text', text: 'Done' }],
-      }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
-    const textDeltas: string[] = []
-    const profile = createDefaultOpenAIProfile({
-      apiKey: 'test-key',
-      apiMode: 'responses',
-      streamImages: true,
-    })
-
-    const result = await callAgentResponsesApi({
-      settings: DEFAULT_SETTINGS,
-      profile,
-      params: DEFAULT_PARAMS,
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'prompt' }] }],
-      onTextDelta: (delta) => textDeltas.push(delta),
-    })
-
-    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))
-    expect(body.stream).toBeUndefined()
-    expect(body.tools[0].partial_images).toBeUndefined()
-    expect(textDeltas).toEqual([])
-    expect(result.text).toBe('Done')
-  })
-
   it('generates a short conversation title without image tools', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       output: [{
@@ -125,7 +86,6 @@ describe('callAgentResponsesApi', () => {
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
       apiMode: 'responses',
-      streamImages: true,
     })
 
     const title = await callAgentConversationTitleApi({
@@ -138,7 +98,6 @@ describe('callAgentResponsesApi', () => {
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body.instructions).toContain('<title>short title</title>')
     expect(body.tools).toBeUndefined()
-    expect(body.stream).toBeUndefined()
     expect(body.input[0].content[0].text).toContain('帮我生成一张橘猫头像，要赛博朋克风格')
     expect(title).toBe('生成猫咪头像')
   })

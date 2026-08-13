@@ -12,9 +12,10 @@ import type { AmazonPromptDraft } from './amazonPrompt'
 import {
   getAPlusContentTypeLabel,
   getAPlusModuleGenerationSize,
-  getAPlusModuleSpecs,
   getAPlusModuleUploadSize,
+  normalizeAPlusModuleSpecs,
   type APlusContentType,
+  type AmazonAPlusModuleSpec,
   type AmazonAPlusPlan,
   type AmazonImagePlan,
   type AmazonPlannerMode,
@@ -233,8 +234,7 @@ function createTiktokPlannerSchema(designType: TiktokDesignType) {
   } as const
 }
 
-function createAPlusPlannerSchema(aPlusType: APlusContentType, marketplaceId?: AmazonMarketplaceId) {
-  const specs = getAPlusModuleSpecs(aPlusType)
+function createAPlusPlannerSchema(specs: AmazonAPlusModuleSpec[], marketplaceId?: AmazonMarketplaceId) {
   return {
     type: 'object',
     additionalProperties: false,
@@ -532,16 +532,16 @@ function normalizeListingPlannerApiPayload(payload: PlannerApiPayload, slots = [
 function normalizeAPlusPlan(
   plan: Partial<AmazonAPlusPlan> | undefined,
   index: number,
-  aPlusType: APlusContentType,
   tier: SizeTier,
+  specs: AmazonAPlusModuleSpec[],
 ): AmazonAPlusPlan {
-  const spec = getAPlusModuleSpecs(aPlusType)[index]
+  const spec = specs[index]
   if (!spec) throw new Error('A+ 模块规格不存在')
 
   return {
     slot: plan?.slot || spec.slot,
-    label: plan?.label || spec.label,
-    moduleType: plan?.moduleType || spec.moduleType,
+    label: spec.label,
+    moduleType: spec.moduleType,
     uploadSize: getAPlusModuleUploadSize(spec),
     generationSize: getAPlusModuleGenerationSize(spec, tier),
     planMarkdown: plan?.planMarkdown || '',
@@ -552,17 +552,16 @@ function normalizeAPlusPlan(
   }
 }
 
-function normalizeAPlusPlannerApiPayload(payload: PlannerApiPayload, aPlusType: APlusContentType, tier: SizeTier, marketplaceId?: AmazonMarketplaceId): PlannerApiResult {
+function normalizeAPlusPlannerApiPayload(payload: PlannerApiPayload, aPlusType: APlusContentType, tier: SizeTier, specs: AmazonAPlusModuleSpec[], marketplaceId?: AmazonMarketplaceId): PlannerApiResult {
   const parsed = normalizeParsedListing(payload)
   const seriesStyleGuide = normalizeSeriesStyleGuide(payload)
   const styleCandidates = normalizeStyleCandidates(payload)
-  const specs = getAPlusModuleSpecs(aPlusType)
   const rawPlans = Array.isArray(payload.aPlusPlans) ? payload.aPlusPlans : []
   if (rawPlans.length !== specs.length) throw new Error(`AI A+ 策划结果不是 ${specs.length} 个模块`)
 
   const aPlusPlans = specs.map((spec, index) => {
     const bySlot = rawPlans.find((plan) => plan?.slot === spec.slot)
-    return normalizeAPlusPlan(bySlot ?? rawPlans[index], index, aPlusType, tier)
+    return normalizeAPlusPlan(bySlot ?? rawPlans[index], index, tier, specs)
   })
 
   const emptyPrompt = aPlusPlans.find((plan) => !plan.prompt.trim())
@@ -633,17 +632,21 @@ function getAPlusPlannerTypeName(aPlusType: APlusContentType) {
   switch (aPlusType) {
     case 'premium':
       return 'Premium A+ Content'
+    case 'mobile':
+      return 'Mobile A+ Content 600x450 module set'
     case 'standard-large':
-      return 'Standard A+ Content large-image template'
+      return 'Regular A+ Content large-image template'
     default:
       return 'Standard A+ Content'
   }
 }
 
-function buildAPlusPlannerInstructions(baseDraft: AmazonPromptDraft, aPlusType: APlusContentType, marketplaceId?: AmazonMarketplaceId) {
-  const specs = getAPlusModuleSpecs(aPlusType)
+function buildAPlusPlannerInstructions(baseDraft: AmazonPromptDraft, aPlusType: APlusContentType, specs: AmazonAPlusModuleSpec[], marketplaceId?: AmazonMarketplaceId) {
   const typeLabel = getAPlusPlannerTypeName(aPlusType)
   const marketplace = getAmazonMarketplace(marketplaceId)
+  const mobileGuidance = aPlusType === 'mobile'
+    ? `For Mobile A+ modules, design every 600x450 image for compact mobile screens: one clear message per module, large product evidence, short mobile-readable ${marketplace.onImageCopyLanguage} copy, and no dense multi-column layouts.`
+    : ''
   return [
     'You are an Amazon A+ Content image-planning agent. The user provides listing copy, optional brand notes, and optional product reference images.',
     buildMarketplaceInstructionBlock(marketplaceId),
@@ -656,6 +659,7 @@ function buildAPlusPlannerInstructions(baseDraft: AmazonPromptDraft, aPlusType: 
     'For each module, write planMarkdown in Simplified Chinese as a detailed agent-style plan similar to a ChatGPT web response, then write a professional English image prompt and English negative prompt.',
     `Each module prompt should fully plan the finished Amazon image: composition, product evidence, on-image ${marketplace.onImageCopyLanguage} copy when useful, callouts or information areas when useful, visual hierarchy, and rendering style.`,
     'For A+ information modules, prefer complete information design with clear hierarchy and useful product evidence; lifestyle or brand modules should still have purposeful composition and visible product support.',
+    mobileGuidance,
     baseDraft.brand
       ? `Known brand/model: ${baseDraft.brand}. For header-banner and hero-banner modules, naturally include this real brand/model as a small brand line, headline prefix, or subline when it improves the composition. For brand-story modules, use this brand/model to frame the brand tone or promise only when supported by the provided listing or brand notes.`
       : 'If no real brand/model is provided, do not invent a brand name, logo, trademark, brand history, brand promise, authorization claim, website, contact detail, or external link.',
@@ -698,14 +702,14 @@ function buildTiktokPlannerInstructions(baseDraft: AmazonPromptDraft, designType
   ].filter(Boolean).join('\n')
 }
 
-function buildPlannerInstructions(baseDraft: AmazonPromptDraft, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId) {
+function buildPlannerInstructions(baseDraft: AmazonPromptDraft, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId, aPlusModuleSpecs?: AmazonAPlusModuleSpec[]) {
   if (platform === 'tiktok') return buildTiktokPlannerInstructions(baseDraft, tiktokDesignType)
   return mode === 'aplus'
-    ? buildAPlusPlannerInstructions(baseDraft, aPlusType, marketplaceId)
+    ? buildAPlusPlannerInstructions(baseDraft, aPlusType, normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecs), marketplaceId)
     : buildListingPlannerInstructions(baseDraft, marketplaceId)
 }
 
-function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId) {
+function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId, aPlusModuleSpecs?: AmazonAPlusModuleSpec[]) {
   if (platform === 'tiktok') {
     const slots = getTikTokSlots(tiktokDesignType)
     return [
@@ -719,10 +723,10 @@ function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPl
   }
 
   if (mode === 'aplus') {
-    const specs = getAPlusModuleSpecs(aPlusType)
+    const specs = normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecs)
     const marketplace = getAmazonMarketplace(marketplaceId)
     return [
-      `Parse this ${marketplace.domain} listing copy and produce the ${getAPlusContentTypeLabel(aPlusType)} A+ Content module plan for ${marketplace.label}.`,
+      `Parse this ${marketplace.domain} listing copy and produce the ${getAPlusContentTypeLabel(aPlusType)} Content module plan for ${marketplace.label}.`,
       'Use the title and bullet points from the pasted text. If a field is uncertain, infer conservatively from the listing.',
       `Target marketplace language for visible customer-facing copy: ${marketplace.copyLanguage}.`,
       `Use these A+ modules exactly: ${specs.map((spec) => spec.slot).join(', ')}.`,
@@ -772,7 +776,7 @@ function buildResponsesPlannerInput(text: string, referenceImageDataUrls: string
   ]
 }
 
-function buildChatPlannerSchemaGuide(mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId) {
+function buildChatPlannerSchemaGuide(mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId, aPlusModuleSpecs?: AmazonAPlusModuleSpec[]) {
   const productFields = 'product { title, category, color, material, audience, packageIncludes }'
   const styleFields = 'seriesStyleGuide string, styleCandidates array of exactly 3 style options'
   if (platform === 'tiktok') {
@@ -785,7 +789,7 @@ function buildChatPlannerSchemaGuide(mode: AmazonPlannerMode, aPlusType: APlusCo
   }
 
   if (mode === 'aplus') {
-    const specs = getAPlusModuleSpecs(aPlusType)
+    const specs = normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecs)
     const marketplace = getAmazonMarketplace(marketplaceId)
     return [
       `Return JSON with: ${productFields}, sellingPoints string[], ${styleFields}, aPlusPlans array.`,
@@ -811,11 +815,12 @@ function buildChatPlannerSystemPrompt(
   platform: CommercePlannerPlatform,
   tiktokDesignType: TiktokDesignType,
   marketplaceId?: AmazonMarketplaceId,
+  aPlusModuleSpecs?: AmazonAPlusModuleSpec[],
 ) {
   return [
-    buildPlannerInstructions(baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId),
+    buildPlannerInstructions(baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs),
     'Return a valid JSON object only. Do not output Markdown fences, comments, or any text outside the JSON object.',
-    buildChatPlannerSchemaGuide(mode, aPlusType, platform, tiktokDesignType, marketplaceId),
+    buildChatPlannerSchemaGuide(mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs),
   ].join('\n\n')
 }
 
@@ -830,6 +835,7 @@ export async function callAmazonPlannerApi(options: {
   marketplaceId?: AmazonMarketplaceId
   tiktokDesignType?: TiktokDesignType
   aPlusType?: APlusContentType
+  aPlusModuleSpecs?: Array<Partial<AmazonAPlusModuleSpec>>
   aPlusGenerationTier?: SizeTier
   signal?: AbortSignal
 }): Promise<PlannerApiResult> {
@@ -839,14 +845,15 @@ export async function callAmazonPlannerApi(options: {
   const marketplaceId = normalizeAmazonMarketplaceId(options.marketplaceId)
   const tiktokDesignType = options.tiktokDesignType ?? 'main'
   const aPlusType = options.aPlusType ?? 'standard-large'
+  const aPlusModuleSpecs = normalizeAPlusModuleSpecs(aPlusType, options.aPlusModuleSpecs)
   const aPlusGenerationTier = options.aPlusGenerationTier ?? '2K'
   const schema = platform === 'tiktok'
     ? createTiktokPlannerSchema(tiktokDesignType)
-    : mode === 'aplus' ? createAPlusPlannerSchema(aPlusType, marketplaceId) : createListingPlannerSchema(marketplaceId)
+    : mode === 'aplus' ? createAPlusPlannerSchema(aPlusModuleSpecs, marketplaceId) : createListingPlannerSchema(marketplaceId)
   const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(options.profile.apiProxy, proxyConfig)
+  const useApiProxy = shouldUseApiProxy(options.profile.apiProxy, proxyConfig, options.profile.baseUrl)
   const useChatCompletions = options.profile.apiMode === 'chat'
-  const inputText = buildPlannerInputText(options.listingText, mode, aPlusType, platform, tiktokDesignType, marketplaceId)
+  const inputText = buildPlannerInputText(options.listingText, mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs)
   const referenceImageDataUrls = options.referenceImageDataUrls ?? []
   const response = await fetch(
     useChatCompletions
@@ -866,7 +873,7 @@ export async function callAmazonPlannerApi(options: {
           messages: [
             {
               role: 'system',
-              content: buildChatPlannerSystemPrompt(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId),
+              content: buildChatPlannerSystemPrompt(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs),
             },
             {
               role: 'user',
@@ -878,7 +885,7 @@ export async function callAmazonPlannerApi(options: {
         }
       : {
           model,
-          instructions: buildPlannerInstructions(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId),
+          instructions: buildPlannerInstructions(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs),
           input: buildResponsesPlannerInput(inputText, referenceImageDataUrls),
           text: {
             format: {
@@ -902,6 +909,6 @@ export async function callAmazonPlannerApi(options: {
   const payload = parsePlannerPayload(text)
   if (platform === 'tiktok') return normalizeListingPlannerApiPayload(payload, [...getTikTokSlots(tiktokDesignType)])
   return mode === 'aplus'
-    ? normalizeAPlusPlannerApiPayload(payload, aPlusType, aPlusGenerationTier, marketplaceId)
+    ? normalizeAPlusPlannerApiPayload(payload, aPlusType, aPlusGenerationTier, aPlusModuleSpecs, marketplaceId)
     : normalizeListingPlannerApiPayload(payload, undefined, marketplaceId)
 }
