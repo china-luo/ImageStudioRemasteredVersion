@@ -2,29 +2,31 @@ import { expect, test } from '@playwright/test'
 
 const OUTPUT_IMAGE =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLz4QAAAABJRU5ErkJggg=='
+const DB_NAME = 'amazon-image-studio'
+const DB_VERSION = 3
+const STORE_NAMES = ['tasks', 'images', 'thumbnails', 'amazonPlannerSessions']
 
 async function seedGalleryTasks(page: import('@playwright/test').Page) {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/#/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(
-    async ({ outputImage }) => {
+    async ({ outputImage, dbName, dbVersion, storeNames }) => {
       localStorage.removeItem('amazon-image-studio')
       await new Promise<void>((resolve, reject) => {
-        const deletion = indexedDB.deleteDatabase('amazon-image-studio')
-        deletion.onsuccess = () => resolve()
-        deletion.onerror = () => reject(deletion.error)
-        deletion.onblocked = () => resolve()
-      })
-      await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open('amazon-image-studio', 3)
+        const request = indexedDB.open(dbName, dbVersion)
         request.onupgradeneeded = () => {
-          request.result.createObjectStore('tasks', { keyPath: 'id' })
-          request.result.createObjectStore('images', { keyPath: 'id' })
-          request.result.createObjectStore('thumbnails', { keyPath: 'id' })
-          request.result.createObjectStore('amazonPlannerSessions', { keyPath: 'id' })
+          const db = request.result
+          for (const storeName of storeNames) {
+            if (!db.objectStoreNames.contains(storeName)) {
+              db.createObjectStore(storeName, { keyPath: 'id' })
+            }
+          }
         }
+        request.onerror = () => reject(request.error)
         request.onsuccess = () => {
           const db = request.result
-          const transaction = db.transaction('tasks', 'readwrite')
+          const transaction = db.transaction(storeNames, 'readwrite')
+          for (const storeName of storeNames) transaction.objectStore(storeName).clear()
           const store = transaction.objectStore('tasks')
           for (const id of ['task-e2e-1', 'task-e2e-2']) {
             store.put({
@@ -53,19 +55,23 @@ async function seedGalleryTasks(page: import('@playwright/test').Page) {
           }
           transaction.onerror = () => reject(transaction.error)
         }
-        request.onerror = () => reject(request.error)
       })
     },
-    { outputImage: OUTPUT_IMAGE },
+    { outputImage: OUTPUT_IMAGE, dbName: DB_NAME, dbVersion: DB_VERSION, storeNames: STORE_NAMES },
   )
-  await page.reload()
+  await page.reload({ waitUntil: 'domcontentloaded' })
 }
 
 test('selects multiple gallery tasks and downloads their output images', async ({ page }) => {
   await seedGalleryTasks(page)
-  await expect(page.locator('[data-task-id="task-e2e-1"]')).toBeVisible({ timeout: 15_000 })
-  await page.locator('[data-task-id="task-e2e-1"]').click({ modifiers: ['Control'] })
-  await page.locator('[data-task-id="task-e2e-2"]').click({ modifiers: ['Control'] })
+  const firstCard = page.locator('[data-task-id="task-e2e-1"]')
+  const secondCard = page.locator('[data-task-id="task-e2e-2"]')
+  await expect(firstCard).toBeVisible({ timeout: 15_000 })
+  await expect(secondCard).toBeVisible({ timeout: 15_000 })
+  await expect(firstCard).toHaveCSS('transform', 'none')
+  await expect(secondCard).toHaveCSS('transform', 'none')
+  await firstCard.click({ modifiers: ['Control'] })
+  await secondCard.click({ modifiers: ['Control'] })
 
   await expect(page.getByRole('button', { name: '批量下载' })).toBeVisible()
   const download = page.waitForEvent('download')
