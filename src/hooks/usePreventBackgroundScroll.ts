@@ -124,4 +124,3 @@ export function usePreventBackgroundScroll(active: boolean, allowRefs?: ScrollBo
     }
   }, [active, allowRefs])
 }
-

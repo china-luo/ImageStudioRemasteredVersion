@@ -89,9 +89,7 @@ async function writeImageBlobToClipboard(blob: Blob) {
     throw new Error('当前浏览器不支持图像剪贴板写入')
   }
 
-  await navigator.clipboard.write([
-    new ClipboardItem(clipboardItems),
-  ])
+  await navigator.clipboard.write([new ClipboardItem(clipboardItems)])
 }
 
 function isClipboardTypeSupported(type: string) {
@@ -131,8 +129,5 @@ function isEmbeddedPage() {
 function isClipboardPermissionError(err: unknown) {
   if (!(err instanceof Error)) return false
 
-  return (
-    err.name === 'NotAllowedError' ||
-    /permission|permissions policy|not allowed|denied/i.test(err.message)
-  )
+  return err.name === 'NotAllowedError' || /permission|permissions policy|not allowed|denied/i.test(err.message)
 }

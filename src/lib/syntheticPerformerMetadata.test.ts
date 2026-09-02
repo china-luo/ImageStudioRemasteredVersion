@@ -69,10 +69,7 @@ function makeIsoBox(type: string, payload: Uint8Array) {
 }
 
 function makeVideo() {
-  return join(
-    makeIsoBox('ftyp', ascii('isom\0\0\0\0isom')),
-    makeIsoBox('mdat', new Uint8Array([1, 2, 3, 4, 5, 6])),
-  )
+  return join(makeIsoBox('ftyp', ascii('isom\0\0\0\0isom')), makeIsoBox('mdat', new Uint8Array([1, 2, 3, 4, 5, 6])))
 }
 
 function createXmp(subjects: string[]) {
@@ -116,7 +113,12 @@ describe('synthetic performer metadata', () => {
   it('exposes the selected safety limits', () => {
     expect(MAX_SYNTHETIC_PERFORMER_FILE_BYTES).toBe(500 * 1024 * 1024)
     expect(MAX_SYNTHETIC_PERFORMER_BATCH_BYTES).toBe(1024 * 1024 * 1024)
-    expect(getSyntheticPerformerMediaValidationError({ name: 'x.jpg', size: MAX_SYNTHETIC_PERFORMER_FILE_BYTES + 1 } as File)).toContain('500 MB')
+    expect(
+      getSyntheticPerformerMediaValidationError({
+        name: 'x.jpg',
+        size: MAX_SYNTHETIC_PERFORMER_FILE_BYTES + 1,
+      } as File),
+    ).toContain('500 MB')
     expect(getSyntheticPerformerMediaValidationError({ name: 'x.gif', size: 1 } as File)).toContain('不支持')
   })
 
@@ -137,14 +139,19 @@ describe('synthetic performer metadata', () => {
   })
 
   it('keeps existing subject values and custom XMP fields while deduplicating the target', () => {
-    const source = makeJpegWithXmp(createXmp(['existing-keyword', SYNTHETIC_PERFORMER_KEYWORD, SYNTHETIC_PERFORMER_KEYWORD]))
+    const source = makeJpegWithXmp(
+      createXmp(['existing-keyword', SYNTHETIC_PERFORMER_KEYWORD, SYNTHETIC_PERFORMER_KEYWORD]),
+    )
     const tagged = tagSyntheticPerformerBytes(source, 'existing.jpg')
     const taggedAgain = tagSyntheticPerformerBytes(tagged.bytes, 'existing.jpg')
 
     expect(tagged.xmp).toContain('<rdf:li>existing-keyword</rdf:li>')
     expect(tagged.xmp).toContain('<custom:keep>preserve-me</custom:keep>')
     expect(tagged.xmp.match(new RegExp(SYNTHETIC_PERFORMER_KEYWORD, 'g'))).toHaveLength(1)
-    expect(verifySyntheticPerformerTag(taggedAgain.bytes, 'existing.jpg')).toMatchObject({ valid: true, keywordCount: 1 })
+    expect(verifySyntheticPerformerTag(taggedAgain.bytes, 'existing.jpg')).toMatchObject({
+      valid: true,
+      keywordCount: 1,
+    })
   })
 
   it('does not alter the original video bytes when appending its XMP UUID box', () => {
@@ -170,6 +177,9 @@ describe('synthetic performer metadata', () => {
 
   it('returns a safe failure for malformed or unsupported input', () => {
     expect(() => tagSyntheticPerformerBytes(new Uint8Array([1, 2, 3]), 'broken.jpg')).toThrow('JPEG')
-    expect(verifySyntheticPerformerTag(new Uint8Array([1, 2, 3]), 'broken.gif')).toMatchObject({ valid: false, keywordCount: 0 })
+    expect(verifySyntheticPerformerTag(new Uint8Array([1, 2, 3]), 'broken.gif')).toMatchObject({
+      valid: false,
+      keywordCount: 0,
+    })
   })
 })

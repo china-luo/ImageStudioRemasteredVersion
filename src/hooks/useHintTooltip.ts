@@ -56,13 +56,13 @@ export function useHintTooltip(options: UseHintTooltipOptions = {}) {
     }, touchDelayMs)
   }, [clearTimer, show, touchDelayMs])
 
-  useEffect(() => () => {
-    clearTimer()
-    clearAutoHideTimer()
-  }, [clearAutoHideTimer, clearTimer])
-
-  return useMemo(
-    () => ({ visible, show, hide, clearTimer, startTouch }),
-    [clearTimer, hide, show, startTouch, visible],
+  useEffect(
+    () => () => {
+      clearTimer()
+      clearAutoHideTimer()
+    },
+    [clearAutoHideTimer, clearTimer],
   )
+
+  return useMemo(() => ({ visible, show, hide, clearTimer, startTouch }), [clearTimer, hide, show, startTouch, visible])
 }

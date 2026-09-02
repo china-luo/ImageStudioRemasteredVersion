@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  assertUsableMaskCoverage,
-  classifyMaskAlpha,
-  orderInputImagesForMask,
-  validateMaskTarget,
-} from './mask'
+import { assertUsableMaskCoverage, classifyMaskAlpha, orderInputImagesForMask, validateMaskTarget } from './mask'
 import type { InputImage } from '../types'
 
 function img(id: string): InputImage {

@@ -8,9 +8,9 @@ type MarkdownRendererProps = {
   className?: string
 }
 
-type StreamdownComponent = typeof import('streamdown')['Streamdown']
-type ReactMarkdownComponent = typeof import('react-markdown')['default']
-type RemarkGfmPlugin = typeof import('remark-gfm')['default']
+type StreamdownComponent = (typeof import('streamdown'))['Streamdown']
+type ReactMarkdownComponent = (typeof import('react-markdown'))['default']
+type RemarkGfmPlugin = (typeof import('remark-gfm'))['default']
 type LegacyMarkdownModule = {
   ReactMarkdown: ReactMarkdownComponent
   remarkGfm: RemarkGfmPlugin
@@ -132,11 +132,7 @@ function loadMarkdownRenderer() {
 
 function PlainTextMarkdown({ content, className = '' }: MarkdownRendererProps) {
   return (
-    <div
-      className={`markdown-renderer ${className}`.trim()}
-      dir="auto"
-      style={{ whiteSpace: 'pre-wrap' }}
-    >
+    <div className={`markdown-renderer ${className}`.trim()} dir="auto" style={{ whiteSpace: 'pre-wrap' }}>
       {content}
     </div>
   )
@@ -165,11 +161,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
     const { ReactMarkdown, remarkGfm } = renderer.module
     return (
       <div className={`markdown-renderer ${className}`.trim()} dir="auto">
-        <ReactMarkdown
-          components={legacyMarkdownComponents}
-          remarkPlugins={[remarkGfm]}
-          urlTransform={safeUrl}
-        >
+        <ReactMarkdown components={legacyMarkdownComponents} remarkPlugins={[remarkGfm]} urlTransform={safeUrl}>
           {content}
         </ReactMarkdown>
       </div>

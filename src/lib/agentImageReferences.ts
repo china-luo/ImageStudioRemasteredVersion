@@ -57,26 +57,28 @@ export function replaceAgentPromptImageReferencesForApi(
   rounds: AgentRound[],
   tasks: TaskRecord[],
 ) {
-  const withCurrentReferences = replaceImageMentionsForApi(
-    prompt,
-    currentRound.inputImageIds.length,
-    (index) => getAgentReferenceTag(getAgentCurrentReferenceId(currentRound, index)),
+  const withCurrentReferences = replaceImageMentionsForApi(prompt, currentRound.inputImageIds.length, (index) =>
+    getAgentReferenceTag(getAgentCurrentReferenceId(currentRound, index)),
   )
 
-  const withAgentReferences = withCurrentReferences.replace(AGENT_ROUND_IMAGE_REFERENCE_RE, (text, roundNumber, imageNumber) => {
-    const roundIndex = Number(roundNumber) - 1
-    const imageIndex = Number(imageNumber) - 1
-    const sourceRound = rounds[roundIndex]
-    if (!sourceRound || imageIndex < 0) return text
+  const withAgentReferences = withCurrentReferences.replace(
+    AGENT_ROUND_IMAGE_REFERENCE_RE,
+    (text, roundNumber, imageNumber) => {
+      const roundIndex = Number(roundNumber) - 1
+      const imageIndex = Number(imageNumber) - 1
+      const sourceRound = rounds[roundIndex]
+      if (!sourceRound || imageIndex < 0) return text
 
-    const imageId = collectAgentRoundOutputImageSlots(sourceRound, tasks)[imageIndex]
-    if (!imageId) return getAgentRemovedReferenceTag(getAgentGeneratedImageReferenceId(sourceRound, imageIndex))
+      const imageId = collectAgentRoundOutputImageSlots(sourceRound, tasks)[imageIndex]
+      if (!imageId) return getAgentRemovedReferenceTag(getAgentGeneratedImageReferenceId(sourceRound, imageIndex))
 
-    const currentReferenceIndex = currentRound.inputImageIds.indexOf(imageId)
-    const referenceId = currentReferenceIndex >= 0
-      ? getAgentCurrentReferenceId(currentRound, currentReferenceIndex)
-      : getAgentGeneratedImageReferenceId(sourceRound, imageIndex)
-    return getAgentReferenceTag(referenceId)
-  })
+      const currentReferenceIndex = currentRound.inputImageIds.indexOf(imageId)
+      const referenceId =
+        currentReferenceIndex >= 0
+          ? getAgentCurrentReferenceId(currentRound, currentReferenceIndex)
+          : getAgentGeneratedImageReferenceId(sourceRound, imageIndex)
+      return getAgentReferenceTag(referenceId)
+    },
+  )
   return stripImageMentionMarkers(withAgentReferences)
 }

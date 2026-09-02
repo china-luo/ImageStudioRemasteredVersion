@@ -76,8 +76,7 @@ export default function SupportPromptModal() {
           onClick={dismissSupportPrompt}
           className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gray-950 px-4 text-sm font-semibold text-white transition hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 active:scale-[0.99] dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200 dark:focus:ring-offset-gray-900"
         >
-          <GithubIcon className="h-4 w-4" />
-          去 GitHub 点个 Star
+          <GithubIcon className="h-4 w-4" />去 GitHub 点个 Star
         </a>
 
         {!showDonationQr && (
@@ -98,9 +97,7 @@ export default function SupportPromptModal() {
               alt="微信 / 支付宝打赏码"
               className="mx-auto w-full max-w-[280px] rounded-xl border border-gray-200 bg-white object-contain p-1.5 shadow-sm dark:border-white/[0.08]"
             />
-            <p className="mt-2 text-center text-xs text-gray-500 dark:text-gray-400">
-              微信 / 支付宝扫码打赏 1 元
-            </p>
+            <p className="mt-2 text-center text-xs text-gray-500 dark:text-gray-400">微信 / 支付宝扫码打赏 1 元</p>
           </div>
         )}
       </div>

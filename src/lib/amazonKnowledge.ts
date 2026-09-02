@@ -24,10 +24,7 @@ const APLUS_REFERENCE_NOTES = [
 ]
 
 function formatReferenceMaterial(title: string, notes: readonly string[]) {
-  return [
-    title,
-    ...notes.map((note) => `- ${note}`),
-  ].join('\n')
+  return [title, ...notes.map((note) => `- ${note}`)].join('\n')
 }
 
 function getMarketplaceReferenceNotes(marketplaceId?: AmazonMarketplaceId) {

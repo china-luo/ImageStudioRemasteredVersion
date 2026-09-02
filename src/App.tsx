@@ -1,34 +1,50 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
+import { parseAppRoute, routeFromAppState, serializeAppRoute, type AppFeatureView, type AppRoute } from './lib/appRoute'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import Header from './components/Header'
-import AmazonPlanner from './components/AmazonPlanner'
-import SopReverseWorkspace from './components/SopReverseWorkspace'
-import VocAmazonReviewsWorkspace from './components/VocAmazonReviewsWorkspace'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
 import InputBar from './components/InputBar'
 import DetailModal from './components/DetailModal'
 import Lightbox from './components/Lightbox'
-import SettingsModal from './components/SettingsModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
-import ImageEditorPage from './components/ImageEditorPage'
-import SyntheticPerformerTaggerPage from './components/SyntheticPerformerTaggerPage'
 import SupportPromptModal from './components/SupportPromptModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
+
+const AmazonPlanner = lazy(() => import('./components/AmazonPlanner'))
+const SopReverseWorkspace = lazy(() => import('./components/SopReverseWorkspace'))
+const VocAmazonReviewsWorkspace = lazy(() => import('./components/VocAmazonReviewsWorkspace'))
+const ImageEditorPage = lazy(() => import('./components/ImageEditorPage'))
+const SyntheticPerformerTaggerPage = lazy(() => import('./components/SyntheticPerformerTaggerPage'))
+const SettingsModal = lazy(() => import('./components/SettingsModal'))
+
+function applyAppRoute(route: AppRoute, setFeatureView: (view: AppFeatureView) => void) {
+  if (route.view === 'editor' || route.view === 'tagger') {
+    setFeatureView(route.view)
+    return
+  }
+  setFeatureView('home')
+  useStore.getState().setAppMode(route.mode)
+}
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
   const appMode = useStore((s) => s.appMode)
   const showSettings = useStore((s) => s.showSettings)
   const setShowSettings = useStore((s) => s.setShowSettings)
-  const [featureView, setFeatureView] = useState<'home' | 'editor' | 'tagger'>('home')
+  const [featureView, setFeatureView] = useState<AppFeatureView>(() => {
+    const route = parseAppRoute(window.location.hash)
+    if (route.view === 'home') useStore.setState({ appMode: route.mode })
+    return route.view
+  })
+  const [routeReady, setRouteReady] = useState(false)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -47,8 +63,26 @@ export default function App() {
     }
 
     initStore()
-    useStore.getState().setAppMode('gallery')
+    applyAppRoute(parseAppRoute(window.location.hash), setFeatureView)
+    setRouteReady(true)
   }, [setSettings])
+
+  useEffect(() => {
+    const syncFromLocation = () => applyAppRoute(parseAppRoute(window.location.hash), setFeatureView)
+    window.addEventListener('hashchange', syncFromLocation)
+    window.addEventListener('popstate', syncFromLocation)
+    return () => {
+      window.removeEventListener('hashchange', syncFromLocation)
+      window.removeEventListener('popstate', syncFromLocation)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!routeReady) return
+    const next = serializeAppRoute(routeFromAppState(featureView, appMode))
+    if (serializeAppRoute(parseAppRoute(window.location.hash)) === next) return
+    window.history.pushState(null, '', next)
+  }, [appMode, featureView, routeReady])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {
@@ -61,27 +95,39 @@ export default function App() {
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
 
-  const navigateFeature = (view: 'home' | 'editor' | 'tagger') => setFeatureView(view)
+  const navigateFeature = (view: AppFeatureView) => setFeatureView(view)
   return (
     <>
       <Header activeView={featureView} onNavigate={navigateFeature} />
       <main
         data-home-main
         data-drag-select-surface
-        className={featureView !== 'home' ? 'pb-10' : appMode === 'sop' || appMode === 'voc' ? 'pb-10' : 'home-main-with-dock pb-48 lg:pb-10'}
+        className={
+          featureView !== 'home'
+            ? 'pb-10'
+            : appMode === 'sop' || appMode === 'voc'
+              ? 'pb-10'
+              : 'home-main-with-dock pb-48 lg:pb-10'
+        }
       >
         <div className="safe-area-x max-w-7xl mx-auto lg:!px-6">
-          {featureView === 'editor' ? <ImageEditorPage /> : featureView === 'tagger' ? <SyntheticPerformerTaggerPage /> : appMode === 'sop' ? (
-            <SopReverseWorkspace />
-          ) : appMode === 'voc' ? (
-            <VocAmazonReviewsWorkspace />
-          ) : (
-            <>
-              <AmazonPlanner />
-              <SearchBar />
-              <TaskGrid />
-            </>
-          )}
+          <Suspense fallback={<div className="py-16 text-center text-sm text-gray-500">页面加载中…</div>}>
+            {featureView === 'editor' ? (
+              <ImageEditorPage />
+            ) : featureView === 'tagger' ? (
+              <SyntheticPerformerTaggerPage />
+            ) : appMode === 'sop' ? (
+              <SopReverseWorkspace />
+            ) : appMode === 'voc' ? (
+              <VocAmazonReviewsWorkspace />
+            ) : (
+              <>
+                <AmazonPlanner />
+                <SearchBar />
+                <TaskGrid />
+              </>
+            )}
+          </Suspense>
         </div>
       </main>
       {featureView === 'home' && appMode !== 'sop' && appMode !== 'voc' && <InputBar />}
@@ -90,10 +136,16 @@ export default function App() {
       <ErrorBoundary
         resetKey={showSettings}
         fallback={(error, reset) => (
-          <div data-no-drag-select className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+          <div
+            data-no-drag-select
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
+          >
             <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 shadow-2xl dark:border-red-400/20 dark:bg-gray-900">
               <div className="text-base font-semibold text-gray-900 dark:text-gray-100">设置面板打开失败</div>
-              <div data-selectable-text className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700 dark:bg-red-400/10 dark:text-red-200">
+              <div
+                data-selectable-text
+                className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700 dark:bg-red-400/10 dark:text-red-200"
+              >
                 {error.message}
               </div>
               <div className="mt-4 flex justify-end gap-2">
@@ -119,7 +171,9 @@ export default function App() {
           </div>
         )}
       >
-      <SettingsModal />
+        <Suspense fallback={null}>
+          <SettingsModal />
+        </Suspense>
       </ErrorBoundary>
       <ConfirmDialog />
       <Toast />

@@ -1,4 +1,5 @@
-const VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
+const VIEWPORT_CONTENT =
+  'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
 
 function isInsideLightbox(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('[data-lightbox-root]'))

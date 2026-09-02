@@ -54,11 +54,14 @@ export function zoomAtPoint(
   }
   const scale = clamp(nextScale, MIN_SCALE, MAX_SCALE)
 
-  return clampViewTransform({
-    scale,
-    x: point.x - localPoint.x * scale,
-    y: point.y - localPoint.y * scale,
-  }, viewportSize)
+  return clampViewTransform(
+    {
+      scale,
+      x: point.x - localPoint.x * scale,
+      y: point.y - localPoint.y * scale,
+    },
+    viewportSize,
+  )
 }
 
 export function getPinchTransform(input: {
@@ -76,11 +79,14 @@ export function getPinchTransform(input: {
   const distanceRatio = input.startDistance > 0 ? input.nextDistance / input.startDistance : 1
   const scale = clamp(input.startTransform.scale * distanceRatio, MIN_SCALE, MAX_SCALE)
 
-  return clampViewTransform({
-    scale,
-    x: input.nextCentroid.x - localPoint.x * scale,
-    y: input.nextCentroid.y - localPoint.y * scale,
-  }, input.viewportSize)
+  return clampViewTransform(
+    {
+      scale,
+      x: input.nextCentroid.x - localPoint.x * scale,
+      y: input.nextCentroid.y - localPoint.y * scale,
+    },
+    input.viewportSize,
+  )
 }
 
 export function clientPointToCanvasPoint(rect: ClientRectLike, point: Point, canvasSize: Size): Point {

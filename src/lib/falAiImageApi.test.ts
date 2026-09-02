@@ -31,16 +31,20 @@ describe('callFalAiImageApi', () => {
       data: { images: [{ b64_json: 'aW1hZ2U=' }] },
     })
 
-    await callFalAiImageApi({
-      settings: DEFAULT_SETTINGS,
-      prompt: 'prompt',
-      params: { ...DEFAULT_PARAMS },
-      inputImageDataUrls: [],
-    }, createDefaultFalProfile({ apiKey: 'fal-key', baseUrl: DEFAULT_FAL_BASE_URL }))
+    await callFalAiImageApi(
+      {
+        settings: DEFAULT_SETTINGS,
+        prompt: 'prompt',
+        params: { ...DEFAULT_PARAMS },
+        inputImageDataUrls: [],
+      },
+      createDefaultFalProfile({ apiKey: 'fal-key', baseUrl: DEFAULT_FAL_BASE_URL }),
+    )
 
     expect(falMock.config).toHaveBeenCalledWith({
       credentials: 'fal-key',
       suppressLocalCredentialsWarning: true,
+      fetch,
     })
   })
 
@@ -50,19 +54,23 @@ describe('callFalAiImageApi', () => {
       data: { images: [{ b64_json: 'aW1hZ2U=' }] },
     })
 
-    await callFalAiImageApi({
-      settings: DEFAULT_SETTINGS,
-      prompt: 'prompt',
-      params: { ...DEFAULT_PARAMS },
-      inputImageDataUrls: [],
-    }, createDefaultFalProfile({
-      apiKey: 'fal-key',
-      baseUrl: 'https://fal-proxy.example.com/api/fal/',
-    }))
+    await callFalAiImageApi(
+      {
+        settings: DEFAULT_SETTINGS,
+        prompt: 'prompt',
+        params: { ...DEFAULT_PARAMS },
+        inputImageDataUrls: [],
+      },
+      createDefaultFalProfile({
+        apiKey: 'fal-key',
+        baseUrl: 'https://fal-proxy.example.com/api/fal/',
+      }),
+    )
 
     expect(falMock.config).toHaveBeenCalledWith({
       credentials: 'fal-key',
       suppressLocalCredentialsWarning: true,
+      fetch,
       proxyUrl: 'https://fal-proxy.example.com/api/fal',
     })
   })

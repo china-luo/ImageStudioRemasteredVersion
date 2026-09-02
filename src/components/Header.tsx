@@ -19,7 +19,13 @@ function isInstalledPwa() {
 }
 
 type AppView = 'home' | 'editor' | 'tagger'
-export default function Header({ activeView = 'home', onNavigate }: { activeView?: AppView; onNavigate?: (view: AppView) => void }) {
+export default function Header({
+  activeView = 'home',
+  onNavigate,
+}: {
+  activeView?: AppView
+  onNavigate?: (view: AppView) => void
+}) {
   const appMode = useStore((s) => s.appMode)
   const setAppMode = useStore((s) => s.setAppMode)
   const setShowSettings = useStore((s) => s.setShowSettings)
@@ -83,7 +89,9 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
         setIsPwaInstalled(isInstalledPwa())
       }
     } else {
-      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      const isIos =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
       if (isIos) {
         setConfirmDialog({
           title: '安装为应用',
@@ -96,7 +104,8 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
       } else {
         setConfirmDialog({
           title: '安装为应用',
-          message: '请在浏览器的菜单中选择「添加到主屏幕」或「安装应用」。\n\n（如果在微信等内置浏览器中，请先在外部浏览器打开）',
+          message:
+            '请在浏览器的菜单中选择「添加到主屏幕」或「安装应用」。\n\n（如果在微信等内置浏览器中，请先在外部浏览器打开）',
           showCancel: false,
           confirmText: '我知道了',
           icon: 'info',
@@ -136,7 +145,10 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
 
   return (
     <>
-      <header data-no-drag-select className="safe-area-top fixed top-0 left-0 right-0 z-40 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80">
+      <header
+        data-no-drag-select
+        className="safe-area-top fixed top-0 left-0 right-0 z-40 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80"
+      >
         <div className="safe-area-x safe-header-inner relative mx-auto flex max-w-7xl items-center justify-between">
           <div className={`group/brand min-w-0 pr-3 ${onNavigate ? 'hidden lg:block' : ''}`}>
             <h1 className="min-w-0 leading-none">
@@ -173,52 +185,68 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
               </button>
             </span>
           </div>
-          {onNavigate && <nav className="mr-auto flex shrink-0 items-center gap-1 sm:hidden">
-            {(['home', 'editor', 'tagger'] as const).map((view) => <button key={view} type="button" onClick={() => onNavigate(view)} className={`rounded-lg px-1.5 py-1.5 text-[11px] font-semibold ${activeView === view ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/[0.06]'}`}>{view === 'home' ? '首页' : view === 'editor' ? '图片编辑' : 'AI 人物打标'}</button>)}
-          </nav>}
-          {onNavigate && <nav className="absolute left-1/2 hidden min-w-0 -translate-x-1/2 items-center sm:flex" aria-label="功能导航">
-            <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
-              {([
-                ['gallery', '图片生成'],
-                ['editor', '图片编辑'],
-                ['tagger', 'AI 人物打标'],
-                ['sop', '拆图反推'],
-                ['voc', 'VOC评论'],
-              ] as const).map(([destination, label]) => {
-                const selected = destination === 'editor'
-                  ? activeView === 'editor'
-                  : destination === 'tagger'
-                    ? activeView === 'tagger'
-                    : activeView === 'home' && appMode === destination
-                return (
+          {onNavigate && (
+            <nav className="mr-auto flex shrink-0 items-center gap-1 sm:hidden">
+              {(['home', 'editor', 'tagger'] as const).map((view) => (
                 <button
-                  key={destination}
+                  key={view}
                   type="button"
-                  onClick={() => {
-                    if (destination === 'editor' || destination === 'tagger') onNavigate(destination)
-                    else {
-                      setAppMode(destination)
-                      onNavigate('home')
-                    }
-                  }}
-                  className={`h-8 rounded-lg px-3 text-sm font-medium transition ${
-                    selected
-                      ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
-                      : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-                  }`}
+                  onClick={() => onNavigate(view)}
+                  className={`rounded-lg px-1.5 py-1.5 text-[11px] font-semibold ${activeView === view ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/[0.06]'}`}
                 >
-                  {label}
+                  {view === 'home' ? '首页' : view === 'editor' ? '图片编辑' : 'AI 人物打标'}
                 </button>
-                )
-              })}
-            </div>
-          </nav>}
+              ))}
+            </nav>
+          )}
+          {onNavigate && (
+            <nav
+              className="absolute left-1/2 hidden min-w-0 -translate-x-1/2 items-center sm:flex"
+              aria-label="功能导航"
+            >
+              <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                {(
+                  [
+                    ['gallery', '图片生成'],
+                    ['editor', '图片编辑'],
+                    ['tagger', 'AI 人物打标'],
+                    ['sop', '拆图反推'],
+                    ['voc', 'VOC评论'],
+                  ] as const
+                ).map(([destination, label]) => {
+                  const selected =
+                    destination === 'editor'
+                      ? activeView === 'editor'
+                      : destination === 'tagger'
+                        ? activeView === 'tagger'
+                        : activeView === 'home' && appMode === destination
+                  return (
+                    <button
+                      key={destination}
+                      type="button"
+                      onClick={() => {
+                        if (destination === 'editor' || destination === 'tagger') onNavigate(destination)
+                        else {
+                          setAppMode(destination)
+                          onNavigate('home')
+                        }
+                      }}
+                      className={`h-8 rounded-lg px-3 text-sm font-medium transition-[color,background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                        selected
+                          ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+                          : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </nav>
+          )}
           <div className="flex shrink-0 items-center gap-1">
             {!isDesktopApp && !isPwaInstalled && (
-              <div
-                className="relative"
-                {...installTooltip.handlers}
-              >
+              <div className="relative" {...installTooltip.handlers}>
                 <button
                   onClick={() => {
                     dismissAllTooltips()
@@ -234,10 +262,7 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
                 </ViewportTooltip>
               </div>
             )}
-            <div
-              className="relative"
-              {...helpTooltip.handlers}
-            >
+            <div className="relative" {...helpTooltip.handlers}>
               <button
                 onClick={() => {
                   dismissAllTooltips()
@@ -252,10 +277,7 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
                 操作指南
               </ViewportTooltip>
             </div>
-            <div
-              className="relative"
-              {...settingsTooltip.handlers}
-            >
+            <div className="relative" {...settingsTooltip.handlers}>
               <button
                 onClick={() => setShowSettings(true)}
                 className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
@@ -268,10 +290,7 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
               </ViewportTooltip>
             </div>
             {import.meta.env.DEV && (
-              <div
-                className="relative"
-                {...shutdownTooltip.handlers}
-              >
+              <div className="relative" {...shutdownTooltip.handlers}>
                 <button
                   onClick={handleShutdownClick}
                   disabled={isStoppingServer}
@@ -292,30 +311,40 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
       <div className="safe-area-top invisible pointer-events-none" aria-hidden="true">
         <div className="safe-header-inner" />
       </div>
-      {activeView === 'home' && <div data-no-drag-select className="safe-area-x fixed left-0 right-0 top-[calc(var(--safe-area-top)+3.5rem)] z-30 border-b border-gray-200 bg-white/80 py-2 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80 sm:hidden">
-        <nav className="mx-auto flex max-w-7xl justify-center" aria-label="功能板块">
-          <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
-            {([
-              ['gallery', '图片生成'],
-              ['sop', '拆图反推'],
-              ['voc', 'VOC评论'],
-            ] as const).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setAppMode(mode)}
-                className={`h-8 rounded-lg px-4 text-sm font-medium transition ${
-                  appMode === mode
-                    ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
-                    : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </nav>
-      </div>}
+      {activeView === 'home' && (
+        <div
+          data-no-drag-select
+          className="safe-area-x fixed left-0 right-0 top-[calc(var(--safe-area-top)+3.5rem)] z-30 border-b border-gray-200 bg-white/80 py-2 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80 sm:hidden"
+        >
+          <nav className="mx-auto flex max-w-7xl justify-center" aria-label="功能板块">
+            <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+              {(
+                [
+                  ['gallery', '图片生成'],
+                  ['sop', '拆图反推'],
+                  ['voc', 'VOC评论'],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setAppMode(mode)
+                    onNavigate?.('home')
+                  }}
+                  className={`h-8 rounded-lg px-4 text-sm font-medium transition-[color,background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                    appMode === mode
+                      ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+                      : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </nav>
+        </div>
+      )}
       {activeView === 'home' && <div className="h-[52px] sm:hidden" aria-hidden="true" />}
       {showHelp && <HelpModal appMode="gallery" onClose={() => setShowHelp(false)} />}
       {showSupportQr && (
@@ -336,9 +365,7 @@ export default function Header({ activeView = 'home', onNavigate }: { activeView
                 <div id="support-qr-title" className="text-base font-bold text-gray-950 dark:text-gray-100">
                   打赏支持
                 </div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  微信 / 支付宝扫码
-                </div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">微信 / 支付宝扫码</div>
               </div>
               <button
                 type="button"

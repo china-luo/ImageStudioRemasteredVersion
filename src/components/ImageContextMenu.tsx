@@ -6,7 +6,13 @@ import { suppressGlobalClicks } from '../lib/clickSuppression'
 import { CopyIcon, DownloadIcon, EditIcon } from './icons'
 
 export default function ImageContextMenu() {
-  const [menuInfo, setMenuInfo] = useState<{ src: string; imageId?: string; outputImageIds: string[]; x: number; y: number } | null>(null)
+  const [menuInfo, setMenuInfo] = useState<{
+    src: string
+    imageId?: string
+    outputImageIds: string[]
+    x: number
+    y: number
+  } | null>(null)
   const showToast = useStore((s) => s.showToast)
   const inputImages = useStore((s) => s.inputImages)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
@@ -25,7 +31,9 @@ export default function ImageContextMenu() {
         if (!imgTarget.src) return
 
         // iOS 触控设备上，放行原生长按菜单（以支持原生保存图片）
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+        const isIOS =
+          /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
         const isTouch = window.matchMedia('(pointer: coarse)').matches
         if (isIOS && isTouch) return
 
@@ -78,7 +86,7 @@ export default function ImageContextMenu() {
 
   const getOriginalImageSrc = async () => {
     if (!menuInfo.imageId) return menuInfo.src
-    return await ensureImageCached(menuInfo.imageId) ?? menuInfo.src
+    return (await ensureImageCached(menuInfo.imageId)) ?? menuInfo.src
   }
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -103,7 +111,7 @@ export default function ImageContextMenu() {
       let fileNameBase = ''
       if (imageId) {
         const tasks = useStore.getState().tasks
-        const matchedTask = tasks.find(t => t.outputImages?.includes(imageId))
+        const matchedTask = tasks.find((t) => t.outputImages?.includes(imageId))
         if (matchedTask) {
           fileNameBase = `task-${matchedTask.id}`
         } else {
@@ -136,7 +144,7 @@ export default function ImageContextMenu() {
       let fileNameBase = ''
       if (outputImageIds[0]) {
         const tasks = useStore.getState().tasks
-        const matchedTask = tasks.find(t => t.outputImages?.includes(outputImageIds[0]))
+        const matchedTask = tasks.find((t) => t.outputImages?.includes(outputImageIds[0]))
         if (matchedTask) {
           fileNameBase = `task-${matchedTask.id}`
         }

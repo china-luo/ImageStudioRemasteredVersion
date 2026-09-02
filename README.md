@@ -75,6 +75,12 @@
 - 支持自定义 OpenAI 兼容图片接口。
 - 本地浏览器运行时支持动态 API 代理，可直接修改 API URL 并解决接口跨域限制。
 
+## 构建、安装包与部署
+
+- 技术整改进度：`docs/technical-rectification-progress.md`
+- Windows 安装包只走 `npm run build:installer`，说明见 `docs/packaging.md`
+- Cloudflare / Vercel / GitHub Pages 均为静态托管，不提供 API 代理，说明见 `docs/deployment.md`
+
 ## 赞助
 
 应用内“设置 - 关于”和支持提示弹窗提供赞助入口。

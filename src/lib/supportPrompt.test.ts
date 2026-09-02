@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TaskRecord } from '../types'
-import {
-  SUPPORT_PROMPT_IMAGE_THRESHOLD,
-  shouldOpenSupportPromptForTaskCompletion,
-} from './supportPrompt'
+import { SUPPORT_PROMPT_IMAGE_THRESHOLD, shouldOpenSupportPromptForTaskCompletion } from './supportPrompt'
 
 function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {

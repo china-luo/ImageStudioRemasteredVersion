@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { InputImage } from '../types'
-import { getAtImageQuery, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, insertImageMention, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, remapImageMentionsForOrder, replaceImageMentionsForApi } from './promptImageMentions'
+import {
+  getAtImageQuery,
+  getPromptMentionParts,
+  getSelectedImageMentionLabel,
+  getSelectedTextMentionLabel,
+  insertImageMention,
+  insertTextMentionAtVisibleRange,
+  isCursorInSelectedImageMention,
+  remapImageMentionsForOrder,
+  replaceImageMentionsForApi,
+} from './promptImageMentions'
 
 const images: InputImage[] = [
   { id: 'image-a', dataUrl: 'data:image/png;base64,a' },
@@ -45,8 +55,6 @@ describe('prompt image mentions', () => {
     })
   })
 
-
-
   it('splits valid image mentions for tag rendering', () => {
     expect(getPromptMentionParts(`用${getSelectedImageMentionLabel(1)}的方式生成@图9`, images)).toEqual([
       { type: 'text', text: '用' },
@@ -56,9 +64,7 @@ describe('prompt image mentions', () => {
   })
 
   it('keeps manually typed mentions as plain text', () => {
-    expect(getPromptMentionParts('用@图2的方式生成', images)).toEqual([
-      { type: 'text', text: '用@图2的方式生成' },
-    ])
+    expect(getPromptMentionParts('用@图2的方式生成', images)).toEqual([{ type: 'text', text: '用@图2的方式生成' }])
   })
 
   it('splits selected agent round image mentions for tag rendering', () => {
@@ -88,22 +94,29 @@ describe('prompt image mentions', () => {
 
   describe('remapImageMentionsForOrder', () => {
     it('keeps mentions attached to the same image after reordering', () => {
-      expect(remapImageMentionsForOrder(`用 ${getSelectedImageMentionLabel(1)} 参考 ${getSelectedImageMentionLabel(0)}`, images, [images[1], images[0]])).toBe(`用 ${getSelectedImageMentionLabel(0)} 参考 ${getSelectedImageMentionLabel(1)}`)
+      expect(
+        remapImageMentionsForOrder(
+          `用 ${getSelectedImageMentionLabel(1)} 参考 ${getSelectedImageMentionLabel(0)}`,
+          images,
+          [images[1], images[0]],
+        ),
+      ).toBe(`用 ${getSelectedImageMentionLabel(0)} 参考 ${getSelectedImageMentionLabel(1)}`)
     })
 
     it('marks removed image mentions as unavailable', () => {
-      expect(remapImageMentionsForOrder(`用 ${getSelectedImageMentionLabel(1)}`, images, [images[0]])).toBe('用 @已移除图片')
+      expect(remapImageMentionsForOrder(`用 ${getSelectedImageMentionLabel(1)}`, images, [images[0]])).toBe(
+        '用 @已移除图片',
+      )
     })
 
     it('keeps mentions attached when an image id is replaced with an equivalent id', () => {
       const replacement = { id: 'image-b-replacement', dataUrl: images[1].dataUrl }
 
-      expect(remapImageMentionsForOrder(
-        `用 ${getSelectedImageMentionLabel(1)}`,
-        images,
-        [images[0], replacement],
-        { [images[1].id]: replacement.id },
-      )).toBe(`用 ${getSelectedImageMentionLabel(1)}`)
+      expect(
+        remapImageMentionsForOrder(`用 ${getSelectedImageMentionLabel(1)}`, images, [images[0], replacement], {
+          [images[1].id]: replacement.id,
+        }),
+      ).toBe(`用 ${getSelectedImageMentionLabel(1)}`)
     })
   })
 
@@ -113,7 +126,11 @@ describe('prompt image mentions', () => {
     })
 
     it('replaces multiple mentions', () => {
-      expect(replaceImageMentionsForApi(`把 ${getSelectedImageMentionLabel(1)} 的背景换到 ${getSelectedImageMentionLabel(0)} 上`)).toBe('把 [image 2] 的背景换到 [image 1] 上')
+      expect(
+        replaceImageMentionsForApi(
+          `把 ${getSelectedImageMentionLabel(1)} 的背景换到 ${getSelectedImageMentionLabel(0)} 上`,
+        ),
+      ).toBe('把 [image 2] 的背景换到 [image 1] 上')
     })
 
     it('does not replace manually typed mentions', () => {

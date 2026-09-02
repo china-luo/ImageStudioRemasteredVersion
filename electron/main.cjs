@@ -1,6 +1,8 @@
 const path = require('node:path')
 const fs = require('node:fs')
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const dns = require('node:dns')
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron')
+const { createIpcHandlers } = require('./ipcHandlers.cjs')
 
 const APP_TITLE = '跨境Image工作台'
 const APP_ID = 'com.chinaluo.imagestudio'
@@ -56,6 +58,13 @@ ipcMain.handle('image-studio:finish-image-save', (event) => {
   selectedImageSaveDirectories.delete(event.sender.id)
 })
 
+const ipcHandlers = createIpcHandlers({ app, fs, safeStorage, lookupHost: (hostname) => dns.promises.lookup(hostname, { all: true }) })
+
+ipcMain.handle('image-studio:fetch', ipcHandlers.fetch)
+
+ipcMain.handle('image-studio:secrets-get', ipcHandlers.getSecrets)
+ipcMain.handle('image-studio:secrets-set', ipcHandlers.setSecrets)
+
 function getAppIconPath() {
   return fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined
 }
@@ -81,9 +90,6 @@ function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // The renderer calls user-configured AI providers directly. In the desktop
-      // app this avoids browser-only CORS failures while keeping Node disabled.
-      webSecurity: false,
     },
   })
 

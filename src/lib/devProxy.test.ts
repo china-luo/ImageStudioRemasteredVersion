@@ -3,9 +3,7 @@ import { buildApiUrl, LOCAL_DYNAMIC_PROXY_TARGET, resolveDevProxyRequestTarget, 
 
 describe('buildApiUrl', () => {
   it('uses the same-origin proxy prefix when API proxy is enabled', () => {
-    expect(buildApiUrl('http://api.example.com/v1', 'images/edits', null, true)).toBe(
-      '/api-proxy/images/edits',
-    )
+    expect(buildApiUrl('http://api.example.com/v1', 'images/edits', null, true)).toBe('/api-proxy/images/edits')
   })
 
   it('keeps the v1 segment when the configured API URL does not include it', () => {
@@ -93,6 +91,8 @@ describe('shouldUseApiProxy', () => {
   })
 
   it('routes every configured profile through the default local dynamic proxy', () => {
-    expect(shouldUseApiProxy(false, { ...proxyConfig, target: LOCAL_DYNAMIC_PROXY_TARGET }, 'https://other.example.com/v1')).toBe(true)
+    expect(
+      shouldUseApiProxy(false, { ...proxyConfig, target: LOCAL_DYNAMIC_PROXY_TARGET }, 'https://other.example.com/v1'),
+    ).toBe(true)
   })
 })

@@ -10,6 +10,7 @@ import {
   normalizeDevProxyConfig,
   resolveDevProxyRequestTarget,
 } from './src/lib/devProxy'
+import { ALLOWED_HOSTS_HEADER, evaluateProxyRequest } from './src/lib/networkGuard'
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 process.env.VITE_APP_VERSION = process.env.VITE_APP_VERSION || pkg.version
@@ -17,9 +18,7 @@ const shutdownPath = '/__amazon-image-studio/stop'
 
 function loadDevProxyConfig() {
   try {
-    return normalizeDevProxyConfig(
-      JSON.parse(readFileSync('./dev-proxy.config.json', 'utf-8')) as unknown,
-    )
+    return normalizeDevProxyConfig(JSON.parse(readFileSync('./dev-proxy.config.json', 'utf-8')) as unknown)
   } catch (error) {
     const err = error as NodeJS.ErrnoException
     if (err.code === 'ENOENT') return null
@@ -81,7 +80,24 @@ function localShutdownPlugin(): Plugin {
   }
 }
 
-function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
+function writeProxyError(res: http.ServerResponse, status: number, message: string) {
+  res.statusCode = status
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.end(JSON.stringify({ error: { message } }))
+}
+
+function readExtraAllowedHosts(req: http.IncomingMessage, configured: string[] = []): string[] {
+  const header = req.headers[ALLOWED_HOSTS_HEADER]
+  const fromHeader =
+    typeof header === 'string'
+      ? header.split(',')
+      : Array.isArray(header)
+        ? header.flatMap((value) => String(value).split(','))
+        : []
+  return [...configured, ...fromHeader.map((item) => item.trim()).filter(Boolean)]
+}
+
+export function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
   return {
     name: 'amazon-image-studio-dynamic-api-proxy',
     configureServer(viteServer) {
@@ -92,9 +108,19 @@ function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
           return
         }
         if (!isLocalRequest(req.socket.remoteAddress)) {
-          res.statusCode = 403
-          res.setHeader('Content-Type', 'application/json; charset=utf-8')
-          res.end(JSON.stringify({ error: { message: 'Local API proxy requests only' } }))
+          writeProxyError(res, 403, 'Local API proxy requests only')
+          return
+        }
+        const guard = evaluateProxyRequest({
+          origin: typeof req.headers.origin === 'string' ? req.headers.origin : null,
+          method: req.method,
+          hostname: target.url.hostname,
+          pathname: target.url.pathname,
+          protocol: target.url.protocol,
+          extraAllowedHosts: readExtraAllowedHosts(req, proxyConfig.allowedHosts),
+        })
+        if (!guard.ok) {
+          writeProxyError(res, guard.status ?? 403, guard.error ?? 'Forbidden proxy request')
           return
         }
 
@@ -132,9 +158,8 @@ function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
 }
 
 export default defineConfig(({ command, mode }) => {
-  const devProxyConfig = command === 'serve' && mode !== 'test'
-    ? loadDevProxyConfig() ?? createDefaultLocalProxyConfig()
-    : null
+  const devProxyConfig =
+    command === 'serve' && mode !== 'test' ? (loadDevProxyConfig() ?? createDefaultLocalProxyConfig()) : null
 
   return {
     plugins: [
@@ -150,6 +175,32 @@ export default defineConfig(({ command, mode }) => {
     },
     server: {
       host: true,
+    },
+    build: {
+      chunkSizeWarningLimit: 700,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/xlsx') || id.includes('node_modules\\xlsx')) return 'xlsx'
+            if (id.includes('node_modules/three') || id.includes('node_modules\\three')) return 'three'
+          },
+        },
+      },
+    },
+    test: {
+      include: ['src/**/*.test.ts'],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/.worktrees/**'],
+      coverage: {
+        provider: 'v8',
+        include: ['src/lib/**/*.ts'],
+        exclude: ['src/lib/**/*.test.ts', 'src/lib/contentEditableMentions.ts'],
+        reporter: ['text', 'json-summary'],
+        thresholds: {
+          lines: 50,
+          functions: 45,
+          statements: 50,
+        },
+      },
     },
   }
 })

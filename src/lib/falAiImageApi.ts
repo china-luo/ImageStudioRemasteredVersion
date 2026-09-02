@@ -41,6 +41,7 @@ function configureFal(profile: ApiProfile) {
   const config: Parameters<typeof fal.config>[0] = {
     credentials: profile.apiKey,
     suppressLocalCredentialsWarning: true,
+    fetch,
   }
   if (baseUrl !== DEFAULT_FAL_BASE_URL) config.proxyUrl = baseUrl
   fal.config(config)
@@ -91,11 +92,18 @@ function readFalImageSize(value: unknown): Partial<TaskParams> | undefined {
   return { size: `${Math.round(width)}x${Math.round(height)}` }
 }
 
-async function parseFalImageResults(payload: FalApiResponse, fallbackMime: string, customBaseUrlLabel: string | null, signal?: AbortSignal): Promise<Array<{
-  image: string
-  actualParams?: Partial<TaskParams>
-  rawImageUrl?: string
-}>> {
+async function parseFalImageResults(
+  payload: FalApiResponse,
+  fallbackMime: string,
+  customBaseUrlLabel: string | null,
+  signal?: AbortSignal,
+): Promise<
+  Array<{
+    image: string
+    actualParams?: Partial<TaskParams>
+    rawImageUrl?: string
+  }>
+> {
   const candidates: unknown[] = []
   if (Array.isArray(payload.images)) candidates.push(...payload.images)
   if (payload.image) candidates.push(payload.image)
@@ -116,7 +124,7 @@ async function parseFalImageResults(payload: FalApiResponse, fallbackMime: strin
     }
   } catch (err) {
     if (rawImageUrls.length > 0 && err instanceof Error) {
-      (err as any).rawImageUrls = rawImageUrls
+      ;(err as Error & { rawImageUrls?: string[] }).rawImageUrls = rawImageUrls
     }
     throw err
   }
@@ -128,14 +136,19 @@ async function parseFalImageResults(payload: FalApiResponse, fallbackMime: strin
         : 'fal.ai 未返回可用图片数据',
     )
     if (customBaseUrlLabel) {
-      ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
+      ;(err as Error & { rawResponsePayload?: string }).rawResponsePayload = JSON.stringify(payload, null, 2)
     }
     throw err
   }
   return results
 }
 
-async function parseFalResult(payload: FalApiResponse, params: TaskParams, customBaseUrlLabel: string | null, signal?: AbortSignal): Promise<CallApiResult> {
+async function parseFalResult(
+  payload: FalApiResponse,
+  params: TaskParams,
+  customBaseUrlLabel: string | null,
+  signal?: AbortSignal,
+): Promise<CallApiResult> {
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const imageResults = await parseFalImageResults(payload, mime, customBaseUrlLabel, signal)
   const actualParams = mergeActualParams(imageResults[0]?.actualParams)

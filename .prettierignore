@@ -1,0 +1,16 @@
+dist
+release
+node_modules
+.worktrees
+coverage
+playwright-report
+test-results
+package-lock.json
+*.md
+*.json
+*.yml
+*.cjs
+*.ps1
+*.nsi
+*.html
+*.css

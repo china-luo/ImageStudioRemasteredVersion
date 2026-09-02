@@ -1,8 +1,4 @@
-import {
-  AMAZON_MARKETPLACES,
-  getAmazonMarketplace,
-  type AmazonMarketplaceId,
-} from '../../lib/amazonMarketplaces'
+import { AMAZON_MARKETPLACES, getAmazonMarketplace, type AmazonMarketplaceId } from '../../lib/amazonMarketplaces'
 
 interface MarketplaceControlsProps {
   marketplaceId: AmazonMarketplaceId

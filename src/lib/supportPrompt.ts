@@ -8,11 +8,7 @@ export function isSupportPromptAgentTask(task: TaskRecord) {
 
 export function countSuccessfulOutputImages(tasks: TaskRecord[]) {
   return tasks.reduce(
-    (count, task) => count + (
-      task.status === 'done' && !isSupportPromptAgentTask(task)
-        ? task.outputImages.length
-        : 0
-    ),
+    (count, task) => count + (task.status === 'done' && !isSupportPromptAgentTask(task) ? task.outputImages.length : 0),
     0,
   )
 }
@@ -33,7 +29,8 @@ export function shouldOpenSupportPromptForTaskCompletion(
     nextTask.status !== 'done' ||
     nextTask.outputImages.length === 0 ||
     isSupportPromptAgentTask(nextTask)
-  ) return false
+  )
+    return false
 
   const previousCount = countSuccessfulOutputImages(previousTasks)
   const nextCount = countSuccessfulOutputImages(nextTasks)

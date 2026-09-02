@@ -98,7 +98,7 @@ async function parseImagesApiResponse(
   const data = payload.data
   if (!Array.isArray(data) || !data.length) {
     const err = new Error('火山方舟 Seedream 没有返回图片数据')
-    ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
+    ;(err as Error & { rawResponsePayload?: string }).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
 
@@ -115,25 +115,27 @@ async function parseImagesApiResponse(
       }
 
       if (isHttpUrl(item.url) || isDataUrl(item.url)) {
-        images.push(await fetchImageUrlAsDataUrl(
-          item.url,
-          fallbackMime,
-          signal,
-          isHttpUrl(item.url) ? createVolcengineImageProxy(item.url) : undefined,
-        ))
+        images.push(
+          await fetchImageUrlAsDataUrl(
+            item.url,
+            fallbackMime,
+            signal,
+            isHttpUrl(item.url) ? createVolcengineImageProxy(item.url) : undefined,
+          ),
+        )
         revisedPrompts.push(typeof item.revised_prompt === 'string' ? item.revised_prompt : undefined)
       }
     }
   } catch (err) {
     if (rawImageUrls.length > 0 && err instanceof Error) {
-      ;(err as any).rawImageUrls = rawImageUrls
+      ;(err as Error & { rawImageUrls?: string[] }).rawImageUrls = rawImageUrls
     }
     throw err
   }
 
   if (!images.length) {
     const err = new Error('火山方舟 Seedream 没有返回可识别的图片数据')
-    ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
+    ;(err as Error & { rawResponsePayload?: string }).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
 
@@ -171,21 +173,23 @@ export async function callVolcengineImageApi(opts: CallApiOptions, profile: ApiP
   const controller = abortController.controller
 
   try {
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'images/generations', proxyConfig, useApiProxy, { prefixV1: false }), {
-      method: 'POST',
-      headers: createRequestHeaders(profile),
-      cache: 'no-store',
-      body: JSON.stringify(createRequestBody(opts, profile)),
-      signal: controller.signal,
-    })
+    const response = await fetch(
+      buildApiUrl(profile.baseUrl, 'images/generations', proxyConfig, useApiProxy, { prefixV1: false }),
+      {
+        method: 'POST',
+        headers: createRequestHeaders(profile),
+        cache: 'no-store',
+        body: JSON.stringify(createRequestBody(opts, profile)),
+        signal: controller.signal,
+      },
+    )
 
     if (!response.ok) {
       throw new Error(await getApiErrorMessage(response))
     }
 
-    return parseImagesApiResponse(await response.json() as ImageApiResponse, opts.params, mime, controller.signal)
+    return parseImagesApiResponse((await response.json()) as ImageApiResponse, opts.params, mime, controller.signal)
   } finally {
     abortController.cleanup()
   }
 }
-

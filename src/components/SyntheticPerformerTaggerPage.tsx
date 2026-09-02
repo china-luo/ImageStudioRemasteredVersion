@@ -3,7 +3,6 @@ import { zipSync } from 'fflate'
 import { useStore } from '../store'
 import {
   getSyntheticPerformerMediaFormat,
-  getSyntheticPerformerMediaMimeType,
   getSyntheticPerformerMediaValidationError,
   MAX_SYNTHETIC_PERFORMER_BATCH_BYTES,
   processSyntheticPerformerFile,
@@ -102,20 +101,55 @@ function nextPaint() {
 }
 
 function StatusMark({ status }: { status: QueueStatus }) {
-  if (status === 'processing') return <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-500/30 border-t-blue-500" aria-label="处理中" />
-  if (status === 'success') return <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-300" aria-label="已完成">✓</span>
-  if (status === 'skipped') return <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[hsl(var(--ios-blue-tint))] text-[hsl(var(--primary))]" aria-label="已包含标记">✓</span>
-  if (status === 'error') return <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-400/15 dark:text-red-300" aria-label="失败">!</span>
+  if (status === 'processing')
+    return (
+      <span
+        className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-500/30 border-t-blue-500"
+        aria-label="处理中"
+      />
+    )
+  if (status === 'success')
+    return (
+      <span
+        className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-300"
+        aria-label="已完成"
+      >
+        ✓
+      </span>
+    )
+  if (status === 'skipped')
+    return (
+      <span
+        className="flex h-5 w-5 items-center justify-center rounded-full bg-[hsl(var(--ios-blue-tint))] text-[hsl(var(--primary))]"
+        aria-label="已包含标记"
+      >
+        ✓
+      </span>
+    )
+  if (status === 'error')
+    return (
+      <span
+        className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-400/15 dark:text-red-300"
+        aria-label="失败"
+      >
+        !
+      </span>
+    )
   return <span className="h-2 w-2 rounded-full bg-gray-300 dark:bg-gray-600" aria-label="待处理" />
 }
 
 function statusLabel(status: QueueStatus) {
   switch (status) {
-    case 'processing': return '正在写入并验证'
-    case 'success': return '已验证 XMP'
-    case 'skipped': return '已包含标记，不输出'
-    case 'error': return '处理失败'
-    default: return '等待处理'
+    case 'processing':
+      return '正在写入并验证'
+    case 'success':
+      return '已验证 XMP'
+    case 'skipped':
+      return '已包含标记，不输出'
+    case 'error':
+      return '处理失败'
+    default:
+      return '等待处理'
   }
 }
 
@@ -139,17 +173,37 @@ function FilePreview({ file, format }: { file: File; format: keyof typeof FORMAT
 
   if (!source || hasError) {
     return (
-      <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--muted)/0.86)] text-[10px] font-semibold text-gray-400 dark:text-gray-500" aria-label={`${format ? FORMAT_LABELS[format] : '媒体'}预览不可用`}>
+      <div
+        className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--muted)/0.86)] text-[10px] font-semibold text-gray-400 dark:text-gray-500"
+        aria-label={`${format ? FORMAT_LABELS[format] : '媒体'}预览不可用`}
+      >
         {format ? FORMAT_LABELS[format] : '媒体'}
       </div>
     )
   }
 
   if (format === 'jpeg' || format === 'png' || format === 'webp') {
-    return <img src={source} alt={`${file.name} 预览`} className="h-14 w-24 shrink-0 rounded-lg bg-[hsl(var(--muted)/0.86)] object-contain" onError={() => setHasError(true)} />
+    return (
+      <img
+        src={source}
+        alt={`${file.name} 预览`}
+        className="h-14 w-24 shrink-0 rounded-lg bg-[hsl(var(--muted)/0.86)] object-contain"
+        onError={() => setHasError(true)}
+      />
+    )
   }
 
-  return <video src={source} muted playsInline preload="metadata" aria-label={`${file.name} 预览`} className="h-14 w-24 shrink-0 rounded-lg bg-[hsl(var(--muted)/0.86)] object-cover" onError={() => setHasError(true)} />
+  return (
+    <video
+      src={source}
+      muted
+      playsInline
+      preload="metadata"
+      aria-label={`${file.name} 预览`}
+      className="h-14 w-24 shrink-0 rounded-lg bg-[hsl(var(--muted)/0.86)] object-cover"
+      onError={() => setHasError(true)}
+    />
+  )
 }
 
 export default function SyntheticPerformerTaggerPage() {
@@ -247,29 +301,38 @@ export default function SyntheticPerformerTaggerPage() {
     const skipped: QueueItem[] = []
 
     for (const item of pending) {
-      setItems((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, status: 'processing', error: undefined } : candidate))
+      setItems((current) =>
+        current.map((candidate) =>
+          candidate.id === item.id ? { ...candidate, status: 'processing', error: undefined } : candidate,
+        ),
+      )
       await nextPaint()
       try {
         const result = await processSyntheticPerformerFile(item.file)
         if (result.kind === 'already-tagged') {
           const completed = { ...item, status: 'skipped' as const, output: undefined, error: undefined }
           skipped.push(completed)
-          setItems((current) => current.map((candidate) => candidate.id === item.id ? completed : candidate))
+          setItems((current) => current.map((candidate) => (candidate.id === item.id ? completed : candidate)))
           continue
         }
         const output = result.output
         const completed = { ...item, status: 'success' as const, output, error: undefined }
         successful.push(completed)
-        setItems((current) => current.map((candidate) => candidate.id === item.id ? completed : candidate))
+        setItems((current) => current.map((candidate) => (candidate.id === item.id ? completed : candidate)))
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        setItems((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, status: 'error', error: message } : candidate))
+        setItems((current) =>
+          current.map((candidate) =>
+            candidate.id === item.id ? { ...candidate, status: 'error', error: message } : candidate,
+          ),
+        )
       }
     }
 
     setIsRunning(false)
     if (successful.length > 0) deliverOutputs(successful)
-    if (successful.length === 0 && skipped.length > 0) showToast(`已跳过 ${skipped.length} 个已包含标记的文件，没有生成下载`, 'info')
+    if (successful.length === 0 && skipped.length > 0)
+      showToast(`已跳过 ${skipped.length} 个已包含标记的文件，没有生成下载`, 'info')
     if (successful.length === 0 && skipped.length === 0) showToast('没有文件完成打标，请检查失败原因后重试', 'error')
   }
 
@@ -291,14 +354,22 @@ export default function SyntheticPerformerTaggerPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-semibold tracking-[-0.025em] text-gray-950 dark:text-gray-50">AI 人物打标</h2>
-              <span className="rounded-full bg-[hsl(var(--ios-blue-tint))] px-2.5 py-1 text-[11px] font-semibold text-[hsl(var(--primary))]">本地处理</span>
+              <h2 className="text-2xl font-semibold tracking-[-0.025em] text-gray-950 dark:text-gray-50">
+                AI 人物打标
+              </h2>
+              <span className="rounded-full bg-[hsl(var(--ios-blue-tint))] px-2.5 py-1 text-[11px] font-semibold text-[hsl(var(--primary))]">
+                本地处理
+              </span>
             </div>
-            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-gray-500 dark:text-gray-400">把需要披露的图片或视频拖进来，一键写入 Amazon 要求的 XMP 标记。不会识别人物，也不会上传媒体。</p>
+            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-gray-500 dark:text-gray-400">
+              把需要披露的图片或视频拖进来，一键写入 Amazon 要求的 XMP 标记。不会识别人物，也不会上传媒体。
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-white/[0.04] dark:text-gray-400">
             <TagIcon className="h-4 w-4 text-[hsl(var(--primary))]" />
-            <code className="font-mono text-[11px] text-gray-700 dark:text-gray-200">{SYNTHETIC_PERFORMER_KEYWORD}</code>
+            <code className="font-mono text-[11px] text-gray-700 dark:text-gray-200">
+              {SYNTHETIC_PERFORMER_KEYWORD}
+            </code>
           </div>
         </div>
       </section>
@@ -309,9 +380,18 @@ export default function SyntheticPerformerTaggerPage() {
             type="button"
             className={`group flex min-h-52 w-full flex-col items-center justify-center rounded-2xl border border-dashed px-6 text-center transition ${isDragging ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-400/10' : 'border-gray-300 bg-gray-50/70 hover:border-blue-400 hover:bg-blue-50/60 dark:border-white/15 dark:bg-white/[0.025] dark:hover:bg-blue-400/[0.06]'}`}
             onClick={() => fileInputRef.current?.click()}
-            onDragEnter={(event) => { event.preventDefault(); setIsDragging(true) }}
-            onDragOver={(event) => { event.preventDefault(); setIsDragging(true) }}
-            onDragLeave={(event) => { event.preventDefault(); setIsDragging(false) }}
+            onDragEnter={(event) => {
+              event.preventDefault()
+              setIsDragging(true)
+            }}
+            onDragOver={(event) => {
+              event.preventDefault()
+              setIsDragging(true)
+            }}
+            onDragLeave={(event) => {
+              event.preventDefault()
+              setIsDragging(false)
+            }}
             onDrop={(event) => {
               event.preventDefault()
               setIsDragging(false)
@@ -322,45 +402,84 @@ export default function SyntheticPerformerTaggerPage() {
               <TagIcon className="h-7 w-7" />
             </span>
             <span className="mt-4 text-base font-semibold text-gray-900 dark:text-gray-100">拖入图片或视频</span>
-            <span className="mt-1.5 text-xs leading-5 text-gray-500 dark:text-gray-400">或点击选择多个文件 · JPG、PNG、WebP、MP4、MOV</span>
-            <span className="mt-4 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-black/[0.06] dark:bg-white/[0.08] dark:text-gray-200 dark:ring-white/[0.08]">选择文件</span>
+            <span className="mt-1.5 text-xs leading-5 text-gray-500 dark:text-gray-400">
+              或点击选择多个文件 · JPG、PNG、WebP、MP4、MOV
+            </span>
+            <span className="mt-4 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-black/[0.06] dark:bg-white/[0.08] dark:text-gray-200 dark:ring-white/[0.08]">
+              选择文件
+            </span>
           </button>
 
           <div className="mt-5 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold tracking-wide text-gray-700 dark:text-gray-200">本次媒体</p>
-              <p className="mt-0.5 text-[11px] text-gray-400">{items.length > 0 ? `${items.length} 个文件 · ${formatBytes(totalBytes)}` : '尚未添加文件'}</p>
+              <p className="mt-0.5 text-[11px] text-gray-400">
+                {items.length > 0 ? `${items.length} 个文件 · ${formatBytes(totalBytes)}` : '尚未添加文件'}
+              </p>
             </div>
-            <button type="button" disabled={isRunning || items.length === 0} onClick={clearQueue} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-35 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-100">
-              <TrashIcon className="h-3.5 w-3.5" />清空列表
+            <button
+              type="button"
+              disabled={isRunning || items.length === 0}
+              onClick={clearQueue}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-35 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-100"
+            >
+              <TrashIcon className="h-3.5 w-3.5" />
+              清空列表
             </button>
           </div>
 
           {items.length === 0 ? (
-            <div className="mt-3 flex min-h-28 items-center justify-center rounded-xl bg-gray-50/70 px-4 text-center text-xs text-gray-400 dark:bg-white/[0.025] dark:text-gray-500">文件会在这里排队，原文件不会被覆盖。</div>
+            <div className="mt-3 flex min-h-28 items-center justify-center rounded-xl bg-gray-50/70 px-4 text-center text-xs text-gray-400 dark:bg-white/[0.025] dark:text-gray-500">
+              文件会在这里排队，原文件不会被覆盖。
+            </div>
           ) : (
             <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-100 bg-white/70 dark:divide-white/[0.06] dark:border-white/[0.08] dark:bg-white/[0.025]">
               {items.map((item) => {
                 const format = getSyntheticPerformerMediaFormat(item.file.name)
                 return (
-                  <div key={item.id} className={`flex min-w-0 items-center gap-3 px-3 py-3 sm:px-4 ${item.status === 'skipped' ? 'bg-blue-50/55 dark:bg-blue-400/[0.06]' : ''}`}>
+                  <div
+                    key={item.id}
+                    className={`flex min-w-0 items-center gap-3 px-3 py-3 sm:px-4 ${item.status === 'skipped' ? 'bg-blue-50/55 dark:bg-blue-400/[0.06]' : ''}`}
+                  >
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--ios-blue-tint))] text-[10px] font-bold text-[hsl(var(--primary))]">
                       {format ? FORMAT_LABELS[format] : '?'}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100" title={item.file.name}>{item.file.name}</p>
+                      <p
+                        className="truncate text-sm font-medium text-gray-800 dark:text-gray-100"
+                        title={item.file.name}
+                      >
+                        {item.file.name}
+                      </p>
                       <p className="mt-0.5 truncate text-[11px] text-gray-400">
-                        {formatBytes(item.file.size)} · <span className={item.status === 'skipped' ? 'font-semibold text-[hsl(var(--primary))]' : ''}>{statusLabel(item.status)}</span>{item.error ? ` · ${item.error}` : ''}
+                        {formatBytes(item.file.size)} ·{' '}
+                        <span className={item.status === 'skipped' ? 'font-semibold text-[hsl(var(--primary))]' : ''}>
+                          {statusLabel(item.status)}
+                        </span>
+                        {item.error ? ` · ${item.error}` : ''}
                       </p>
                     </div>
                     <FilePreview file={item.file} format={format} />
                     <StatusMark status={item.status} />
                     {item.status === 'success' && item.output && (
-                      <button type="button" aria-label={`下载 ${item.file.name}`} title="单独下载" onClick={() => downloadBlob(item.output!.blob, item.file.name)} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-[hsl(var(--ios-blue-tint))] hover:text-[hsl(var(--primary))]">
+                      <button
+                        type="button"
+                        aria-label={`下载 ${item.file.name}`}
+                        title="单独下载"
+                        onClick={() => downloadBlob(item.output!.blob, item.file.name)}
+                        className="rounded-lg p-1.5 text-gray-400 transition hover:bg-[hsl(var(--ios-blue-tint))] hover:text-[hsl(var(--primary))]"
+                      >
                         <DownloadIcon className="h-4 w-4" />
                       </button>
                     )}
-                    <button type="button" disabled={isRunning} aria-label={`移除 ${item.file.name}`} title="移除" onClick={() => removeItem(item.id)} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-white/[0.08] dark:hover:text-gray-200">
+                    <button
+                      type="button"
+                      disabled={isRunning}
+                      aria-label={`移除 ${item.file.name}`}
+                      title="移除"
+                      onClick={() => removeItem(item.id)}
+                      className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+                    >
                       <CloseIcon className="h-4 w-4" />
                     </button>
                   </div>
@@ -374,24 +493,55 @@ export default function SyntheticPerformerTaggerPage() {
           <p className="text-[10px] font-semibold tracking-[0.16em] text-gray-400">QUICK TAG</p>
           <h3 className="mt-2 text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">准备写入标记</h3>
           <dl className="mt-5 divide-y divide-gray-100 text-xs dark:divide-white/[0.07]">
-            <div className="flex items-center justify-between py-2.5"><dt className="text-gray-500 dark:text-gray-400">待处理</dt><dd className="font-semibold text-gray-800 dark:text-gray-100">{pendingCount}</dd></div>
-            <div className="flex items-center justify-between py-2.5"><dt className="text-gray-500 dark:text-gray-400">新增标记</dt><dd className="font-semibold text-emerald-600 dark:text-emerald-300">{successCount}</dd></div>
-            <div className="flex items-center justify-between py-2.5"><dt className="text-gray-500 dark:text-gray-400">已跳过</dt><dd className="font-semibold text-[hsl(var(--primary))]">{skippedCount}</dd></div>
-            <div className="flex items-center justify-between py-2.5"><dt className="text-gray-500 dark:text-gray-400">本批大小</dt><dd className="font-semibold text-gray-800 dark:text-gray-100">{formatBytes(totalBytes)}</dd></div>
+            <div className="flex items-center justify-between py-2.5">
+              <dt className="text-gray-500 dark:text-gray-400">待处理</dt>
+              <dd className="font-semibold text-gray-800 dark:text-gray-100">{pendingCount}</dd>
+            </div>
+            <div className="flex items-center justify-between py-2.5">
+              <dt className="text-gray-500 dark:text-gray-400">新增标记</dt>
+              <dd className="font-semibold text-emerald-600 dark:text-emerald-300">{successCount}</dd>
+            </div>
+            <div className="flex items-center justify-between py-2.5">
+              <dt className="text-gray-500 dark:text-gray-400">已跳过</dt>
+              <dd className="font-semibold text-[hsl(var(--primary))]">{skippedCount}</dd>
+            </div>
+            <div className="flex items-center justify-between py-2.5">
+              <dt className="text-gray-500 dark:text-gray-400">本批大小</dt>
+              <dd className="font-semibold text-gray-800 dark:text-gray-100">{formatBytes(totalBytes)}</dd>
+            </div>
           </dl>
 
           <div className="mt-4 rounded-xl bg-amber-50/80 p-3 text-[11px] leading-5 text-amber-800 dark:bg-amber-400/10 dark:text-amber-100/80">
             <p className="font-semibold">请确认媒体适用</p>
-            <p className="mt-1">本工具不会判断图片里是否有 AI 人物。点击后会直接写入标记，请只选择已确认需要披露的媒体。</p>
+            <p className="mt-1">
+              本工具不会判断图片里是否有 AI 人物。点击后会直接写入标记，请只选择已确认需要披露的媒体。
+            </p>
           </div>
 
-          <button type="button" disabled={isRunning || pendingCount === 0} onClick={() => { void startTagging() }} className="ios-button ios-button-filled mt-5 h-11 px-4 text-sm disabled:cursor-not-allowed">
+          <button
+            type="button"
+            disabled={isRunning || pendingCount === 0}
+            onClick={() => {
+              void startTagging()
+            }}
+            className="ios-button ios-button-filled mt-5 h-11 px-4 text-sm disabled:cursor-not-allowed"
+          >
             <TagIcon className="h-4 w-4" />
             {isRunning ? '正在逐个打标…' : '一键写入 XMP 标记'}
           </button>
           {isRunning && <p className="mt-2 text-center text-[11px] text-gray-400">正在本地处理，原文件不会被覆盖</p>}
-          {!isRunning && errorCount > 0 && <p className="mt-2 text-center text-[11px] text-red-500">{errorCount} 个文件失败，可修正后重试</p>}
-          {!isRunning && items.length > 0 && <button type="button" onClick={resetQueue} className="mt-2 inline-flex h-9 items-center justify-center rounded-xl px-3 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-100">重新选择</button>}
+          {!isRunning && errorCount > 0 && (
+            <p className="mt-2 text-center text-[11px] text-red-500">{errorCount} 个文件失败，可修正后重试</p>
+          )}
+          {!isRunning && items.length > 0 && (
+            <button
+              type="button"
+              onClick={resetQueue}
+              className="mt-2 inline-flex h-9 items-center justify-center rounded-xl px-3 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-100"
+            >
+              重新选择
+            </button>
+          )}
 
           <div className="mt-auto pt-5 text-[10px] leading-4 text-gray-400 dark:text-gray-500">
             <p>单文件上限 500 MB · 单批上限 1 GB</p>

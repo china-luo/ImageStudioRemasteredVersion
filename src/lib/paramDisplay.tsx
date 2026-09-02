@@ -20,13 +20,17 @@ interface ActualValueBadgeProps {
 export function ActualValueBadge({ value, className = '', variant = 'highlight' }: ActualValueBadgeProps) {
   const [tooltipVisible, setTooltipVisible] = useState(false)
   const touchTimerRef = useRef<number | null>(null)
-  const colorClass = variant === 'normal'
-    ? 'bg-gray-100 text-gray-500 dark:bg-white/[0.04] dark:text-gray-400'
-    : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-300'
+  const colorClass =
+    variant === 'normal'
+      ? 'bg-gray-100 text-gray-500 dark:bg-white/[0.04] dark:text-gray-400'
+      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-300'
 
-  useEffect(() => () => {
-    if (touchTimerRef.current != null) window.clearTimeout(touchTimerRef.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (touchTimerRef.current != null) window.clearTimeout(touchTimerRef.current)
+    },
+    [],
+  )
 
   const clearTouchTimer = () => {
     if (touchTimerRef.current != null) {
@@ -64,16 +68,11 @@ export function ActualValueBadge({ value, className = '', variant = 'highlight' 
 }
 
 export function getParamDisplay(task: TaskRecord, paramKey: ParamKey, actualParams = task.actualParams) {
-  const requestedValue = task.sourceMode === 'agent' && paramKey === 'n'
-    ? 'auto'
-    : task.params[paramKey]
+  const requestedValue = task.sourceMode === 'agent' && paramKey === 'n' ? 'auto' : task.params[paramKey]
   const actualValue = actualParams?.[paramKey]
   const hasActualValue = actualValue !== undefined && actualValue !== null
   const displayValue = hasActualValue ? actualValue : requestedValue
-  const isMismatch =
-    hasActualValue &&
-    requestedValue !== 'auto' &&
-    String(actualValue) !== String(requestedValue)
+  const isMismatch = hasActualValue && requestedValue !== 'auto' && String(actualValue) !== String(requestedValue)
 
   return {
     displayValue: String(displayValue),

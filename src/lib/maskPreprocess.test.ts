@@ -44,9 +44,8 @@ describe('replaceMaskTargetImage', () => {
   })
 
   it('deduplicates when the prepared working image is already present', () => {
-    expect(replaceMaskTargetImage([image('original'), image('working'), image('ref')], 'original', image('working'))).toEqual([
-      image('working'),
-      image('ref'),
-    ])
+    expect(
+      replaceMaskTargetImage([image('original'), image('working'), image('ref')], 'original', image('working')),
+    ).toEqual([image('working'), image('ref')])
   })
 })

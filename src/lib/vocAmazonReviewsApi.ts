@@ -1,8 +1,11 @@
 import type { ApiProfile } from '../types'
-import { DEFAULT_CHAT_MODEL, DEFAULT_RESPONSES_MODEL } from './apiProfiles'
-import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
-import { getApiErrorMessage } from './imageApiShared'
-import { isEventStreamResponse, looksLikeServerSentEvents, readJsonServerSentEvents, readJsonServerSentEventText } from './serverSentEvents'
+import { assertLlmResponseOk, postLlmRequest, readLlmResponseText, resolveLlmModel } from './llmTransport'
+import {
+  isEventStreamResponse,
+  looksLikeServerSentEvents,
+  readJsonServerSentEvents,
+  readJsonServerSentEventText,
+} from './serverSentEvents'
 
 export interface VocReview {
   rating: number
@@ -139,11 +142,36 @@ export const SHULEX_REALTIME_MAX_REVIEWS = 100
 const SHULEX_REALTIME_PAGE_SIZE = 10
 
 const PAIN_KEYWORDS = [
-  { label: '质量或耐用性问题', terms: ['broke', 'broken', 'defect', 'poor quality', 'cheap', 'durable', 'stopped working', 'fall apart', '裂', '坏', '质量', '耐用'] },
-  { label: '尺寸或适配不符', terms: ['small', 'large', 'size', 'fit', 'fits', 'too big', 'too small', '尺寸', '太小', '太大', '不合适'] },
-  { label: '使用体验复杂', terms: ['difficult', 'hard to', 'confusing', 'instruction', 'setup', 'install', '难用', '复杂', '安装'] },
+  {
+    label: '质量或耐用性问题',
+    terms: [
+      'broke',
+      'broken',
+      'defect',
+      'poor quality',
+      'cheap',
+      'durable',
+      'stopped working',
+      'fall apart',
+      '裂',
+      '坏',
+      '质量',
+      '耐用',
+    ],
+  },
+  {
+    label: '尺寸或适配不符',
+    terms: ['small', 'large', 'size', 'fit', 'fits', 'too big', 'too small', '尺寸', '太小', '太大', '不合适'],
+  },
+  {
+    label: '使用体验复杂',
+    terms: ['difficult', 'hard to', 'confusing', 'instruction', 'setup', 'install', '难用', '复杂', '安装'],
+  },
   { label: '包装或运输损坏', terms: ['package', 'shipping', 'damaged', 'arrived', 'box', '包装', '运输', '破损'] },
-  { label: '效果不符合预期', terms: ['does not work', "doesn't work", 'not work', 'weak', 'disappointed', 'waste', '没效果', '失望'] },
+  {
+    label: '效果不符合预期',
+    terms: ['does not work', "doesn't work", 'not work', 'weak', 'disappointed', 'waste', '没效果', '失望'],
+  },
 ]
 
 const SELLING_KEYWORDS = [
@@ -176,23 +204,34 @@ function normalizeShulexReview(review: Record<string, unknown>): VocReview {
   return {
     rating: readNumber(review.rating ?? review.starRating ?? review.star),
     title: readString(review.title) || readString(review.reviewTitle) || readString(review.review_title),
-    body: readString(review.body) || readString(review.content) || readString(review.reviewText) || readString(review.review_text) || readString(review.text),
+    body:
+      readString(review.body) ||
+      readString(review.content) ||
+      readString(review.reviewText) ||
+      readString(review.review_text) ||
+      readString(review.text),
     date: readString(review.reviewDate) || readString(review.review_date) || readString(review.date),
     verified: Boolean(review.verified || review.verifiedPurchase),
     variant: readString(review.variant) || readString(review.variation) || readString(review.variationInfo),
-    author: readString(review.author) || readString(review.reviewerName) || readString(review.userName) || readString(review.profileName),
+    author:
+      readString(review.author) ||
+      readString(review.reviewerName) ||
+      readString(review.userName) ||
+      readString(review.profileName),
     helpful: readNumber(review.helpfulVotes ?? review.helpful_votes ?? review.helpful),
     reviewId: readString(review.reviewId) || readString(review.review_id) || readString(review.id),
   }
 }
 
 function readObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
 function readObjectArray(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    ? value.filter(
+        (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+      )
     : []
 }
 
@@ -283,7 +322,10 @@ export async function fetchShulexReviews(options: {
   const asin = options.asin.trim().toUpperCase()
   if (!/^[A-Z0-9]{10}$/.test(asin)) throw new Error('ASIN 应为 10 位字母数字')
   const market = normalizeVocMarket(options.market)
-  const limit = Math.min(SHULEX_REALTIME_MAX_REVIEWS, Math.max(1, Math.trunc(Number(options.limit) || SHULEX_REALTIME_MAX_REVIEWS)))
+  const limit = Math.min(
+    SHULEX_REALTIME_MAX_REVIEWS,
+    Math.max(1, Math.trunc(Number(options.limit) || SHULEX_REALTIME_MAX_REVIEWS)),
+  )
   const apiKey = options.apiKey.trim()
   if (!apiKey) throw new Error('请先在系统设置里填写 Shulex API Key')
   const maxPage = Math.min(10, Math.max(1, Math.ceil(limit / SHULEX_REALTIME_PAGE_SIZE)))
@@ -304,7 +346,9 @@ export async function fetchShulexReviews(options: {
   const submitPayload = await readShulexJson<ShulexTaskResponse>(submitResponse)
   const taskId = submitPayload.data?.taskId || submitPayload.data?.task_id || ''
   if (!isShulexSuccessCode(submitPayload.code) || !taskId) {
-    throw new Error(`Shulex 提交失败：${submitPayload.message || submitPayload.msg || `code=${String(submitPayload.code)}`}`)
+    throw new Error(
+      `Shulex 提交失败：${submitPayload.message || submitPayload.msg || `code=${String(submitPayload.code)}`}`,
+    )
   }
 
   const queryPage = async (pageNo: number) => {
@@ -351,9 +395,7 @@ export async function fetchShulexReviews(options: {
   }
 
   let lastPayload: ShulexQueryResponse | null = null
-  let firstPage:
-    | Awaited<ReturnType<typeof queryPage>>
-    | null = null
+  let firstPage: Awaited<ReturnType<typeof queryPage>> | null = null
 
   for (let waited = 0; waited <= 120; waited += 5) {
     if (waited > 0) await new Promise((resolve) => setTimeout(resolve, 5000))
@@ -366,10 +408,13 @@ export async function fetchShulexReviews(options: {
       break
     }
     if (isShulexTaskFailure(status)) {
-      throw new Error(`Shulex 任务失败：${queryPayload.data?.errorMsg || queryPayload.data?.message || queryPayload.message || queryPayload.msg || 'unknown error'}`)
+      throw new Error(
+        `Shulex 任务失败：${queryPayload.data?.errorMsg || queryPayload.data?.message || queryPayload.message || queryPayload.msg || 'unknown error'}`,
+      )
     }
   }
-  if (!firstPage) throw new Error(`Shulex 任务超时：${lastPayload?.data?.message || lastPayload?.message || '120 秒内未完成'}`)
+  if (!firstPage)
+    throw new Error(`Shulex 任务超时：${lastPayload?.data?.message || lastPayload?.message || '120 秒内未完成'}`)
 
   const pages = [firstPage.diagnostics]
   const reviewMap = new Map<string, VocReview>()
@@ -389,7 +434,9 @@ export async function fetchShulexReviews(options: {
     const page = await queryPage(pageNo)
     pages.push(page.diagnostics)
     if (isShulexTaskFailure(page.payload.data?.status || '')) {
-      throw new Error(`Shulex 任务失败：${page.payload.data?.errorMsg || page.payload.data?.message || page.payload.message || page.payload.msg || 'unknown error'}`)
+      throw new Error(
+        `Shulex 任务失败：${page.payload.data?.errorMsg || page.payload.data?.message || page.payload.message || page.payload.msg || 'unknown error'}`,
+      )
     }
     addReviews(page.normalized)
     if (page.extracted.reviews.length === 0) break
@@ -429,7 +476,7 @@ export async function fetchShulexReviews(options: {
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
 function readArray(value: unknown): unknown[] {
@@ -494,7 +541,8 @@ function parseReviewRows(inputRows: unknown[][], source: ReviewImportSource, lab
   if (rows.length < 2) throw new Error(`${label} 至少需要表头和 1 行评论`)
   const headers = rows[0]
   const bodyIndex = findColumn(headers, ['内容', '评价', '正文', 'review', 'body', 'text', 'content', 'comment'])
-  if (bodyIndex < 0) throw new Error(`未识别评论内容列。支持列名包含：内容、评价、review、body、content。当前列：${headers.join(', ')}`)
+  if (bodyIndex < 0)
+    throw new Error(`未识别评论内容列。支持列名包含：内容、评价、review、body、content。当前列：${headers.join(', ')}`)
   const ratingIndex = findColumn(headers, ['星级', '打分', '评分', 'rating', 'star', 'score'])
   const dateIndex = findColumn(headers, ['时间', '日期', 'date', 'time'])
   const titleIndex = findColumn(headers, ['标题', 'title', 'subject'])
@@ -515,6 +563,10 @@ function parseReviewRows(inputRows: unknown[][], source: ReviewImportSource, lab
       reviewId: `${source}-${index + 1}`,
     })
   })
+
+  if (reviews.length === 0) {
+    throw new Error('没有可用的有效评论。请确认文件或数据源包含至少 1 条正文不少于 3 个字符的评论。')
+  }
 
   return {
     reviews,
@@ -575,7 +627,6 @@ export function createLocalVocSummary(envelope: VocReviewEnvelope): VocLocalSumm
   const total = Math.max(1, envelope.reviews.length)
   const positive = envelope.reviews.filter((review) => review.rating >= 4).length
   const negative = envelope.reviews.filter((review) => review.rating > 0 && review.rating <= 2).length
-  const neutral = Math.max(0, total - positive - negative)
   const positivePct = Math.round((positive / total) * 100)
   const negativePct = Math.round((negative / total) * 100)
   const neutralPct = Math.max(0, 100 - positivePct - negativePct)
@@ -587,14 +638,20 @@ export function createLocalVocSummary(envelope: VocReviewEnvelope): VocLocalSumm
     sellingPoints,
     tips: [
       painPoints[0] ? `优先在主图或五点中回应「${painPoints[0].label}」。` : '补充更多低星评论后再判断核心风险。',
-      sellingPoints[0] ? `把「${sellingPoints[0].label}」转成买家可感知的标题/卖点表达。` : '补充更多高星评论后再提炼主卖点。',
+      sellingPoints[0]
+        ? `把「${sellingPoints[0].label}」转成买家可感知的标题/卖点表达。`
+        : '补充更多高星评论后再提炼主卖点。',
       '区分真实产品能力和评论期望，避免用文案承诺无法交付的效果。',
     ],
     summary: `共分析 ${envelope.reviews.length} 条评论，正向 ${positivePct}%，中性 ${neutralPct}%，负向 ${negativePct}%。`,
   }
 }
 
-export function buildVocAnalysisPrompt(envelope: VocReviewEnvelope, productName: string, localSummary: VocLocalSummary): string {
+export function buildVocAnalysisPrompt(
+  envelope: VocReviewEnvelope,
+  productName: string,
+  localSummary: VocLocalSummary,
+): string {
   const sampledReviews = envelope.reviews.slice(0, 160).map((review) => ({
     rating: review.rating,
     title: review.title,
@@ -658,7 +715,11 @@ function readChatText(payload: unknown): string {
     const content = message.content
     if (typeof content === 'string' && content.trim()) return content.trim()
     if (Array.isArray(content)) {
-      const text = content.map((part) => readRecord(part).text).filter((part): part is string => typeof part === 'string').join('\n').trim()
+      const text = content
+        .map((part) => readRecord(part).text)
+        .filter((part): part is string => typeof part === 'string')
+        .join('\n')
+        .trim()
       if (text) return text
     }
   }
@@ -681,7 +742,7 @@ function appendStreamEvent(event: Record<string, unknown>, useChat: boolean, sta
   if (direct && (type.includes('done') || type.includes('completed'))) state.done = direct
 }
 
-async function readVocAiResponseText(response: Response, useChat: boolean): Promise<string> {
+async function _readVocAiResponseText(response: Response, useChat: boolean): Promise<string> {
   if (isEventStreamResponse(response)) {
     const state = { text: '', done: '' }
     await readJsonServerSentEvents(response, (event) => appendStreamEvent(event, useChat, state))
@@ -699,52 +760,49 @@ async function readVocAiResponseText(response: Response, useChat: boolean): Prom
 }
 
 export async function callVocAnalysisApi(profile: ApiProfile, prompt: string, signal?: AbortSignal): Promise<string> {
-  const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
   const useChat = profile.apiMode === 'chat'
-  const model = profile.model.trim() || (useChat ? DEFAULT_CHAT_MODEL : DEFAULT_RESPONSES_MODEL)
-  const response = await fetch(
-    useChat
-      ? buildApiUrl(profile.baseUrl, 'chat/completions', proxyConfig, useApiProxy, { prefixV1: false })
-      : buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy),
-    {
-      method: 'POST',
-      signal,
-      headers: {
-        Authorization: `Bearer ${profile.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      body: JSON.stringify(useChat
-        ? {
-            model,
-            messages: [
-              { role: 'system', content: '你是资深跨境电商 VOC 评论分析师，输出必须基于评论证据，避免编造。' },
-              { role: 'user', content: prompt },
-            ],
-            stream: false,
-          }
-        : {
-            model,
-            instructions: '你是资深跨境电商 VOC 评论分析师，输出必须基于评论证据，避免编造。',
-            input: prompt,
-            stream: false,
-          }),
-    },
-  )
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await getApiErrorMessage(response)}`)
-  const text = await readVocAiResponseText(response, useChat)
+  const model = resolveLlmModel(profile, useChat)
+  const response = await postLlmRequest({
+    profile,
+    signal,
+    useChatCompletions: useChat,
+    body: useChat
+      ? {
+          model,
+          messages: [
+            { role: 'system', content: '你是资深跨境电商 VOC 评论分析师，输出必须基于评论证据，避免编造。' },
+            { role: 'user', content: prompt },
+          ],
+          stream: false,
+        }
+      : {
+          model,
+          instructions: '你是资深跨境电商 VOC 评论分析师，输出必须基于评论证据，避免编造。',
+          input: prompt,
+          stream: false,
+        },
+  })
+  await assertLlmResponseOk(response)
+  const text = await readLlmResponseText(response, useChat, { emptyError: 'VOC AI 没有返回可解析文本' })
   if (!text.trim()) throw new Error('VOC AI 没有返回可解析文本')
   return text.trim()
 }
 
 function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char))
+  return value.replace(
+    /[&<>"']/g,
+    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char,
+  )
 }
 
 function renderItems(items: VocInsightItem[]) {
   return items.length
-    ? items.map((item) => `<li><strong>${escapeHtml(item.label)}</strong><span>${item.count} mentions</span><p>${escapeHtml(item.quote)}</p></li>`).join('')
+    ? items
+        .map(
+          (item) =>
+            `<li><strong>${escapeHtml(item.label)}</strong><span>${item.count} mentions</span><p>${escapeHtml(item.quote)}</p></li>`,
+        )
+        .join('')
     : '<li><strong>No clear signal</strong><span>0 mentions</span><p>Add more reviews for stronger signal.</p></li>'
 }
 

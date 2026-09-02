@@ -4,8 +4,17 @@ import type { AmazonMarketplaceId } from './lib/amazonMarketplaces'
 
 export type ApiMode = 'images' | 'responses' | 'chat'
 // `agent` is retained only for legacy persisted data and old import/export payloads.
+/** `agent` is retained only for persisted/imported legacy data. `setAppMode('agent')` always stores `gallery`. */
 export type AppMode = 'gallery' | 'agent' | 'sop' | 'voc'
-export type TaskWorkflow = 'amazon-listing' | 'amazon-aplus' | 'tiktok-main' | 'tiktok-detail' | 'seedream-edit' | 'gallery' | 'agent' | 'unknown'
+export type TaskWorkflow =
+  | 'amazon-listing'
+  | 'amazon-aplus'
+  | 'tiktok-main'
+  | 'tiktok-detail'
+  | 'seedream-edit'
+  | 'gallery'
+  | 'agent'
+  | 'unknown'
 export type TaskAspect = 'square' | 'landscape' | 'portrait'
 export type HistoryWorkflowFilter = 'all' | TaskWorkflow
 export type HistoryAspectFilter = 'all' | TaskAspect
@@ -73,7 +82,12 @@ export interface ApiProfile {
   codexCli: boolean
   apiProxy: boolean
   responseFormatB64Json?: boolean
-  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json'>>>>
+  providerDrafts?: Partial<
+    Record<
+      ApiProvider,
+      Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json'>>
+    >
+  >
 }
 
 export interface AppSettings {
@@ -301,7 +315,9 @@ export interface AmazonPlannerSession {
   tiktokDesignType?: 'main' | 'detail'
   mode: 'listing' | 'aplus'
   aPlusType: 'standard' | 'standard-large' | 'premium' | 'mobile'
-  aPlusModuleSpecs?: Partial<Record<'standard' | 'standard-large' | 'premium' | 'mobile', AmazonPlannerSessionAPlusModuleSpec[]>>
+  aPlusModuleSpecs?: Partial<
+    Record<'standard' | 'standard-large' | 'premium' | 'mobile', AmazonPlannerSessionAPlusModuleSpec[]>
+  >
   resolution: '2k' | '4k'
   listingText: string
   referenceImageIds: string[]
@@ -464,11 +480,13 @@ export interface ResponsesOutputItem {
       title?: string
     }>
   }>
-  result?: string | {
-    b64_json?: string
-    image?: string
-    data?: string
-  }
+  result?:
+    | string
+    | {
+        b64_json?: string
+        image?: string
+        data?: string
+      }
   size?: string
   quality?: string
   output_format?: string
@@ -520,26 +538,56 @@ export interface ExportData {
   agentConversations?: AgentConversation[]
   amazonPlannerSessions?: AmazonPlannerSession[]
   /** imageId → 图片信息 */
-  imageFiles?: Record<string, {
-    path: string
-    createdAt?: number
-    source?: 'upload' | 'generated' | 'mask' | 'preset'
-    width?: number
-    height?: number
-  }>
+  imageFiles?: Record<
+    string,
+    {
+      path: string
+      createdAt?: number
+      source?: 'upload' | 'generated' | 'mask' | 'preset'
+      width?: number
+      height?: number
+    }
+  >
   /** imageId → 缩略图信息 */
-  thumbnailFiles?: Record<string, {
-    path: string
-    width?: number
-    height?: number
-    thumbnailVersion?: number
-  }>
+  thumbnailFiles?: Record<
+    string,
+    {
+      path: string
+      width?: number
+      height?: number
+      thumbnailVersion?: number
+    }
+  >
 }
 
 export type SeedreamEditorResolution = '2k' | '4k'
 export type ImageEditorEngine = 'home' | 'seedream'
 export type SeedreamAnnotationKind = 'brush' | 'rectangle' | 'ellipse' | 'arrow'
-export interface SeedreamAnnotationPoint { x: number; y: number }
-export interface SeedreamAnnotation { id: string; kind: SeedreamAnnotationKind; color: string; width: number; points: SeedreamAnnotationPoint[] }
-export interface SeedreamEditorDraft { engine: ImageEditorEngine; sourceImageId: string | null; referenceImageIds: string[]; instruction: string; annotations: SeedreamAnnotation[]; resolution: SeedreamEditorResolution; latestTaskId: string | null; updatedAt: number }
-export interface TaskImageEditContext { engine?: ImageEditorEngine; sourceImageId: string; visualGuideImageId?: string | null; referenceImageIds: string[]; userInstruction: string }
+export interface SeedreamAnnotationPoint {
+  x: number
+  y: number
+}
+export interface SeedreamAnnotation {
+  id: string
+  kind: SeedreamAnnotationKind
+  color: string
+  width: number
+  points: SeedreamAnnotationPoint[]
+}
+export interface SeedreamEditorDraft {
+  engine: ImageEditorEngine
+  sourceImageId: string | null
+  referenceImageIds: string[]
+  instruction: string
+  annotations: SeedreamAnnotation[]
+  resolution: SeedreamEditorResolution
+  latestTaskId: string | null
+  updatedAt: number
+}
+export interface TaskImageEditContext {
+  engine?: ImageEditorEngine
+  sourceImageId: string
+  visualGuideImageId?: string | null
+  referenceImageIds: string[]
+  userInstruction: string
+}

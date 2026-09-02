@@ -37,34 +37,42 @@ describe('Aliyun Qwen-Image native API', () => {
   })
 
   it('builds a native endpoint from DashScope and workspace base URLs', () => {
-    expect(createAliyunQwenImageEndpoint('https://dashscope.aliyuncs.com/api/v1'))
-      .toBe('https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation')
-    expect(createAliyunQwenImageEndpoint('https://workspace.cn-beijing.maas.aliyuncs.com/v1'))
-      .toBe('https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation')
-    expect(createAliyunQwenImageEndpoint('https://dashscope.aliyuncs.com/compatible-mode/v1'))
-      .toBe('https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation')
+    expect(createAliyunQwenImageEndpoint('https://dashscope.aliyuncs.com/api/v1')).toBe(
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    )
+    expect(createAliyunQwenImageEndpoint('https://workspace.cn-beijing.maas.aliyuncs.com/v1')).toBe(
+      'https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    )
+    expect(createAliyunQwenImageEndpoint('https://dashscope.aliyuncs.com/compatible-mode/v1')).toBe(
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    )
   })
 
   it('sends Qwen native messages and keeps prompt_extend enabled', () => {
     const profile = createProfile()
-    const body = createAliyunQwenImageRequestBody({
-      settings: createSettings(profile),
-      prompt: 'edit prompt',
-      params: { ...DEFAULT_PARAMS, size: '1024x1536', n: 2 },
-      inputImageDataUrls: ['data:image/png;base64,aW1hZ2Ux', 'data:image/png;base64,aW1hZ2Uy'],
-    }, profile)
+    const body = createAliyunQwenImageRequestBody(
+      {
+        settings: createSettings(profile),
+        prompt: 'edit prompt',
+        params: { ...DEFAULT_PARAMS, size: '1024x1536', n: 2 },
+        inputImageDataUrls: ['data:image/png;base64,aW1hZ2Ux', 'data:image/png;base64,aW1hZ2Uy'],
+      },
+      profile,
+    )
 
     expect(body).toEqual({
       model: 'qwen-image-3.0-pro',
       input: {
-        messages: [{
-          role: 'user',
-          content: [
-            { image: 'data:image/png;base64,aW1hZ2Ux' },
-            { image: 'data:image/png;base64,aW1hZ2Uy' },
-            { text: 'edit prompt' },
-          ],
-        }],
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { image: 'data:image/png;base64,aW1hZ2Ux' },
+              { image: 'data:image/png;base64,aW1hZ2Uy' },
+              { text: 'edit prompt' },
+            ],
+          },
+        ],
       },
       parameters: {
         prompt_extend: true,
@@ -77,23 +85,30 @@ describe('Aliyun Qwen-Image native API', () => {
 
   it('routes the request through the native endpoint and parses PNG output', async () => {
     const profile = createProfile()
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
-      output: {
-        choices: [{
-          message: {
-            content: [{ image: 'data:image/png;base64,aW1hZ2U=' }],
-          },
-        }],
-      },
-      usage: { output_width: 1024, output_height: 1536 },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        output: {
+          choices: [
+            {
+              message: {
+                content: [{ image: 'data:image/png;base64,aW1hZ2U=' }],
+              },
+            },
+          ],
+        },
+        usage: { output_width: 1024, output_height: 1536 },
+      }),
+    )
 
-    const result = await callAliyunQwenImageApi({
-      settings: createSettings(profile),
-      prompt: 'prompt',
-      params: { ...DEFAULT_PARAMS, size: '1024x1536' },
-      inputImageDataUrls: [],
-    }, profile)
+    const result = await callAliyunQwenImageApi(
+      {
+        settings: createSettings(profile),
+        prompt: 'prompt',
+        params: { ...DEFAULT_PARAMS, size: '1024x1536' },
+        inputImageDataUrls: [],
+      },
+      profile,
+    )
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
@@ -106,22 +121,30 @@ describe('Aliyun Qwen-Image native API', () => {
   it('falls back to the same-origin proxy for Alibaba result URLs blocked by CORS', async () => {
     const profile = createProfile()
     const resultUrl = 'https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/result.png'
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({
-        output: { choices: [{ message: { content: [{ image: resultUrl }] } }] },
-      }))
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        jsonResponse({
+          output: { choices: [{ message: { content: [{ image: resultUrl }] } }] },
+        }),
+      )
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValueOnce(new Response(new Blob(['image'], { type: 'image/png' }), {
-        status: 200,
-        headers: { 'Content-Type': 'image/png', 'X-Image-Proxy': '1' },
-      }))
+      .mockResolvedValueOnce(
+        new Response(new Blob(['image'], { type: 'image/png' }), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png', 'X-Image-Proxy': '1' },
+        }),
+      )
 
-    const result = await callAliyunQwenImageApi({
-      settings: createSettings(profile),
-      prompt: 'prompt',
-      params: { ...DEFAULT_PARAMS },
-      inputImageDataUrls: [],
-    }, profile)
+    const result = await callAliyunQwenImageApi(
+      {
+        settings: createSettings(profile),
+        prompt: 'prompt',
+        params: { ...DEFAULT_PARAMS },
+        inputImageDataUrls: [],
+      },
+      profile,
+    )
 
     expect(fetchMock.mock.calls[2][0]).toBe('/image-proxy/')
     expect((fetchMock.mock.calls[2][1] as RequestInit).headers).toEqual({ 'X-Image-Url': resultUrl })
@@ -138,18 +161,27 @@ describe('Aliyun Qwen-Image native API', () => {
       params: { ...DEFAULT_PARAMS },
     }
 
-    await expect(callAliyunQwenImageApi({
-      ...baseOptions,
-      inputImageDataUrls: ['data:image/png;base64,aW1hZ2U='],
-      maskDataUrl: 'data:image/png;base64,bWFzaw==',
-    }, profile)).rejects.toThrow('暂不支持遮罩编辑')
+    await expect(
+      callAliyunQwenImageApi(
+        {
+          ...baseOptions,
+          inputImageDataUrls: ['data:image/png;base64,aW1hZ2U='],
+          maskDataUrl: 'data:image/png;base64,bWFzaw==',
+        },
+        profile,
+      ),
+    ).rejects.toThrow('暂不支持遮罩编辑')
 
-    await expect(callAliyunQwenImageApi({
-      ...baseOptions,
-      inputImageDataUrls: ['1', '2', '3', '4'],
-    }, profile)).rejects.toThrow('最多支持 3 张参考图')
+    await expect(
+      callAliyunQwenImageApi(
+        {
+          ...baseOptions,
+          inputImageDataUrls: ['1', '2', '3', '4'],
+        },
+        profile,
+      ),
+    ).rejects.toThrow('最多支持 3 张参考图')
 
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
-

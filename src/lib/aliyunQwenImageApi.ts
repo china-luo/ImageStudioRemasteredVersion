@@ -40,9 +40,7 @@ function parseBaseUrl(value: string): URL | null {
   const trimmed = value.trim()
   if (!trimmed) return null
 
-  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`
+  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`
 
   try {
     return new URL(input)
@@ -84,9 +82,10 @@ export function createAliyunQwenImageEndpoint(baseUrl: string): string {
 }
 
 function roundToMultiple(value: number, mode: 'floor' | 'ceil' = 'floor'): number {
-  const rounded = mode === 'ceil'
-    ? Math.ceil(value / SIZE_MULTIPLE) * SIZE_MULTIPLE
-    : Math.floor(value / SIZE_MULTIPLE) * SIZE_MULTIPLE
+  const rounded =
+    mode === 'ceil'
+      ? Math.ceil(value / SIZE_MULTIPLE) * SIZE_MULTIPLE
+      : Math.floor(value / SIZE_MULTIPLE) * SIZE_MULTIPLE
   return Math.max(SIZE_MULTIPLE, rounded)
 }
 
@@ -133,10 +132,7 @@ export function normalizeAliyunQwenImageSize(size: string): string {
 
 export function createAliyunQwenImageRequestBody(opts: CallApiOptions, profile: ApiProfile): Record<string, unknown> {
   const n = Math.min(MAX_OUTPUT_IMAGES, Math.max(1, Math.trunc(opts.params.n || 1)))
-  const content = [
-    ...opts.inputImageDataUrls.map((image) => ({ image })),
-    { text: opts.prompt },
-  ]
+  const content = [...opts.inputImageDataUrls.map((image) => ({ image })), { text: opts.prompt }]
   const parameters: Record<string, unknown> = {
     prompt_extend: true,
     n,
@@ -148,10 +144,12 @@ export function createAliyunQwenImageRequestBody(opts: CallApiOptions, profile: 
   return {
     model: getAliyunQwenImageModel(profile.model),
     input: {
-      messages: [{
-        role: 'user',
-        content,
-      }],
+      messages: [
+        {
+          role: 'user',
+          content,
+        },
+      ],
     },
     parameters,
   }
@@ -204,28 +202,30 @@ export async function parseAliyunQwenImageResponse(
   requestedParams: TaskParams,
   signal?: AbortSignal,
 ): Promise<CallApiResult> {
-  const typedPayload = isRecord(payload) ? payload as AliyunQwenResponse : {}
+  const typedPayload = isRecord(payload) ? (payload as AliyunQwenResponse) : {}
   const imageUrls = getResultImageUrls(typedPayload)
   const rawImageUrls = imageUrls.filter(isHttpUrl)
   if (!imageUrls.length) {
     const err = new Error('阿里云 Qwen-Image 没有返回可识别的图片数据')
-    ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
+    ;(err as Error & { rawResponsePayload?: string }).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
 
   const images: string[] = []
   try {
     for (const imageUrl of imageUrls) {
-      images.push(await fetchImageUrlAsDataUrl(
-        imageUrl,
-        MIME_MAP.png,
-        signal,
-        isHttpUrl(imageUrl) && isAliyunImageResultUrl(imageUrl) ? createAliyunImageProxy(imageUrl) : undefined,
-      ))
+      images.push(
+        await fetchImageUrlAsDataUrl(
+          imageUrl,
+          MIME_MAP.png,
+          signal,
+          isHttpUrl(imageUrl) && isAliyunImageResultUrl(imageUrl) ? createAliyunImageProxy(imageUrl) : undefined,
+        ),
+      )
     }
   } catch (err) {
     if (rawImageUrls.length > 0 && err instanceof Error) {
-      ;(err as any).rawImageUrls = rawImageUrls
+      ;(err as Error & { rawImageUrls?: string[] }).rawImageUrls = rawImageUrls
     }
     throw err
   }

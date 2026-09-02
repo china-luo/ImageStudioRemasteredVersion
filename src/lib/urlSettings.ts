@@ -12,7 +12,9 @@ import {
 
 const URL_SETTING_KEYS = ['settings', 'apiUrl', 'apiKey', 'codexCli', 'apiMode', 'model']
 
-function getProfileDedupKey(profile: Pick<AppSettings['profiles'][number], 'provider' | 'baseUrl' | 'apiKey' | 'model' | 'apiMode'>) {
+function getProfileDedupKey(
+  profile: Pick<AppSettings['profiles'][number], 'provider' | 'baseUrl' | 'apiKey' | 'model' | 'apiMode'>,
+) {
   return JSON.stringify([
     profile.provider,
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
@@ -60,16 +62,17 @@ function activateFirstImportedProfile(settings: AppSettings, importedSettings: u
   const record = importedSettings as Record<string, unknown>
   if (!Array.isArray(record.profiles) || record.profiles.length === 0) return settings
 
-  const imported = normalizeSettings({
-    customProviders: record.customProviders,
-    profiles: record.profiles,
-  }, { splitDefaultProfiles: false })
+  const imported = normalizeSettings(
+    {
+      customProviders: record.customProviders,
+      profiles: record.profiles,
+    },
+    { splitDefaultProfiles: false },
+  )
   const importedProfile = imported.profiles[0]
   const activeProfile = findEquivalentApiProfile(settings, importedProfile, imported.customProviders)
 
-  return activeProfile
-    ? normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
-    : settings
+  return activeProfile ? normalizeSettings({ ...settings, activeProfileId: activeProfile.id }) : settings
 }
 
 export function hasUrlSettingParams(searchParams: URLSearchParams) {
@@ -80,19 +83,29 @@ export function clearUrlSettingParams(searchParams: URLSearchParams) {
   for (const key of URL_SETTING_KEYS) searchParams.delete(key)
 }
 
-export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings> | unknown, searchParams: URLSearchParams): Partial<AppSettings> {
+export function buildSettingsFromUrlParams(
+  currentSettings: Partial<AppSettings> | unknown,
+  searchParams: URLSearchParams,
+): Partial<AppSettings> {
   const importedSettings = getUrlSettingsPayload(searchParams)
   const apiUrlParam = searchParams.get('apiUrl')
   const apiKeyParam = searchParams.get('apiKey')
   const codexCliParam = searchParams.get('codexCli')
   const apiModeParam = searchParams.get('apiMode')
   const modelParam = searchParams.get('model')
-  const apiMode: ApiMode | undefined = apiModeParam === 'images' || apiModeParam === 'responses' || apiModeParam === 'chat' ? apiModeParam : undefined
+  const apiMode: ApiMode | undefined =
+    apiModeParam === 'images' || apiModeParam === 'responses' || apiModeParam === 'chat' ? apiModeParam : undefined
 
-  const hasLegacyOpenAIParams = apiUrlParam !== null || apiKeyParam !== null || codexCliParam !== null || apiMode !== undefined || modelParam !== null
-  const settings = importedSettings == null
-    ? normalizeSettings(currentSettings)
-    : activateFirstImportedProfile(mergeImportedSettings(currentSettings, importedSettings), importedSettings)
+  const hasLegacyOpenAIParams =
+    apiUrlParam !== null ||
+    apiKeyParam !== null ||
+    codexCliParam !== null ||
+    apiMode !== undefined ||
+    modelParam !== null
+  const settings =
+    importedSettings == null
+      ? normalizeSettings(currentSettings)
+      : activateFirstImportedProfile(mergeImportedSettings(currentSettings, importedSettings), importedSettings)
 
   if (hasLegacyOpenAIParams) {
     const profileApiMode = apiMode ?? 'images'
@@ -100,11 +113,12 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
       id: createUrlProfileId(new Set(settings.profiles.map((item) => item.id))),
       name: 'URL 参数配置',
       apiMode: profileApiMode,
-      model: profileApiMode === 'responses'
-        ? DEFAULT_RESPONSES_MODEL
-        : profileApiMode === 'chat'
-          ? DEFAULT_CHAT_MODEL
-          : DEFAULT_IMAGES_MODEL,
+      model:
+        profileApiMode === 'responses'
+          ? DEFAULT_RESPONSES_MODEL
+          : profileApiMode === 'chat'
+            ? DEFAULT_CHAT_MODEL
+            : DEFAULT_IMAGES_MODEL,
     })
     if (apiUrlParam !== null) profile.baseUrl = normalizeBaseUrl(apiUrlParam.trim())
     if (apiKeyParam !== null) profile.apiKey = apiKeyParam.trim()

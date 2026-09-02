@@ -4,44 +4,15 @@ import { useStore } from '../store'
 import { getSopReverseProfile, validateApiProfile } from '../lib/apiProfiles'
 import { callSopReverseApi } from '../lib/sopReverseApi'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
+import { storeImage } from '../lib/db'
+import { extractEnglishImagePrompt, type SopForm } from '../lib/workspaceDrafts'
 import Select from './Select'
 import { CloseIcon, CopyIcon, EditIcon, EyeIcon, ImportIcon, RefreshIcon, SettingsIcon } from './icons'
 
-type SopForm = {
-  competitorDescription: string
-  targetPlatform: string
-  imageRole: string
-  productName: string
-  category: string
-  sellingPoints: string
-  audience: string
-  evidence: string
-  forbidden: string
-  ratio: string
-}
-
-type SopReferenceImage = {
-  id: string
-  name: string
-  dataUrl: string
-}
-
-const FIELD_CLASS = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
+const FIELD_CLASS =
+  'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
 const LABEL_CLASS = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400'
 const MAX_REFERENCE_IMAGES = 8
-
-const DEFAULT_FORM: SopForm = {
-  competitorDescription: '',
-  targetPlatform: 'TikTok Shop',
-  imageRole: '卖点图',
-  productName: '',
-  category: '',
-  sellingPoints: '',
-  audience: '',
-  evidence: '',
-  forbidden: '',
-  ratio: '1:1',
-}
 
 const platformOptions = [
   { label: 'TikTok Shop', value: 'TikTok Shop' },
@@ -109,7 +80,10 @@ function getPlatformGuard(platform: string, role: string) {
 function buildSopPrompt(form: SopForm, imageCount: number) {
   const missing = buildMissingFields(form, imageCount)
   const evidence = normalizeValue(form.evidence, '无')
-  const forbidden = normalizeValue(form.forbidden, '不要出现竞品品牌、未经证实的数据、医疗功效、绝对化承诺、乱码中文、假证书、假报告、假 logo')
+  const forbidden = normalizeValue(
+    form.forbidden,
+    '不要出现竞品品牌、未经证实的数据、医疗功效、绝对化承诺、乱码中文、假证书、假报告、假 logo',
+  )
 
   return `请根据我提供的竞品图片、图片说明和自家产品资料，按“电商图片拆解反推 SOP”完成真实 AI 分析，而不是套固定模板。
 
@@ -180,22 +154,13 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-function extractEnglishPrompt(text: string) {
-  const promptMatch = text.match(/(?:^|\n)#{1,3}\s*(?:9[.、]?\s*)?(?:English\s+AI\s+Image\s+Prompt|英文\s*AI\s*图片提示词)[^\n]*\n([\s\S]*?)(?=\n#{1,3}\s*(?:10|English\s+Negative\s+Prompt|负面)|$)/i)
-  const direct = promptMatch?.[1]?.trim()
-  if (direct) return direct.replace(/^```[a-z]*\s*/i, '').replace(/```$/i, '').trim()
-  return text.trim()
-}
-
-function createImageId() {
-  return `sop-img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
-}
-
 export default function SopReverseWorkspace() {
-  const [form, setForm] = useState<SopForm>(DEFAULT_FORM)
-  const [referenceImages, setReferenceImages] = useState<SopReferenceImage[]>([])
-  const [output, setOutput] = useState('')
-  const [error, setError] = useState('')
+  const form = useStore((s) => s.sopDraft.form)
+  const referenceImages = useStore((s) => s.sopDraft.referenceImages)
+  const output = useStore((s) => s.sopDraft.output)
+  const error = useStore((s) => s.sopDraft.error)
+  const setSopDraft = useStore((s) => s.setSopDraft)
+  const resetSopDraft = useStore((s) => s.resetSopDraft)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [showPromptModal, setShowPromptModal] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -204,11 +169,13 @@ export default function SopReverseWorkspace() {
   const settings = useStore((s) => s.settings)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const showToast = useStore((s) => s.showToast)
+  const setForm = (nextForm: SopForm) => setSopDraft({ form: nextForm })
+  const setError = (nextError: string) => setSopDraft({ error: nextError })
 
   const reverseProfile = getSopReverseProfile(settings)
   const profileValidation = (reverseProfile ? validateApiProfile(reverseProfile) : '未选择拆图反推 AI 配置') ?? ''
   const generatedPrompt = useMemo(() => buildSopPrompt(form, referenceImages.length), [form, referenceImages.length])
-  const englishPrompt = useMemo(() => output ? extractEnglishPrompt(output) : '', [output])
+  const englishPrompt = useMemo(() => (output ? extractEnglishImagePrompt(output) : ''), [output])
 
   const addImages = async (files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'))
@@ -220,17 +187,19 @@ export default function SopReverseWorkspace() {
       return
     }
 
-    const nextImages = await Promise.all(selected.map(async (file) => ({
-      id: createImageId(),
-      name: file.name,
-      dataUrl: await fileToDataUrl(file),
-    })))
-    setReferenceImages((current) => [...current, ...nextImages])
+    const nextImages = await Promise.all(
+      selected.map(async (file) => {
+        const dataUrl = await fileToDataUrl(file)
+        const id = await storeImage(dataUrl, 'upload')
+        return { id, name: file.name, dataUrl }
+      }),
+    )
+    setSopDraft({ referenceImages: [...referenceImages, ...nextImages] })
     if (imageFiles.length > selected.length) showToast(`已保留前 ${MAX_REFERENCE_IMAGES} 张图片`, 'info')
   }
 
   const removeImage = (id: string) => {
-    setReferenceImages((current) => current.filter((image) => image.id !== id))
+    setSopDraft({ referenceImages: referenceImages.filter((image) => image.id !== id) })
   }
 
   const analyzeWithAi = async () => {
@@ -254,7 +223,7 @@ export default function SopReverseWorkspace() {
         images: referenceImages.map((image) => ({ dataUrl: image.dataUrl, name: image.name })),
         signal: controller.signal,
       })
-      setOutput(result)
+      setSopDraft({ output: result, error: '' })
       showToast('AI 拆解反推已完成', 'success')
     } catch (err) {
       if (controller.signal.aborted) return
@@ -276,7 +245,7 @@ export default function SopReverseWorkspace() {
 
   const openEnglishPromptModal = () => {
     if (!englishPrompt.trim()) {
-      showToast('请先完成 AI 拆解反推，并确认结果中包含英文提示词', 'error')
+      showToast('模型未输出英文提示词章节，请先确认分析结果后再复制', 'error')
       return
     }
 
@@ -285,7 +254,7 @@ export default function SopReverseWorkspace() {
 
   const copyEnglishPrompt = async () => {
     if (!englishPrompt.trim()) {
-      showToast('请先完成 AI 拆解反推，再复制英文提示词', 'error')
+      showToast('模型未输出英文提示词章节，不能复制整份中文分析', 'error')
       return
     }
     try {
@@ -299,17 +268,17 @@ export default function SopReverseWorkspace() {
   const resetForm = () => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
-    setForm(DEFAULT_FORM)
-    setReferenceImages([])
-    setOutput('')
-    setError('')
+    resetSopDraft()
     setIsAnalyzing(false)
     setShowPromptModal(false)
     showToast('SOP 表单已重置', 'info')
   }
 
   return (
-    <section data-no-drag-select className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-gray-900">
+    <section
+      data-no-drag-select
+      className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-gray-900"
+    >
       <div className="border-b border-gray-200 bg-gray-50/80 p-4 dark:border-white/[0.08] dark:bg-gray-950/70 sm:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -320,13 +289,18 @@ export default function SopReverseWorkspace() {
               电商图片拆解反推 SOP
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-              竞品图、商品资料和 SOP 会一起发送给拆图反推模型，由 AI 输出中文拆解、迁移方案、英文生图提示词和英文负面提示词。
+              竞品图、商品资料和 SOP 会一起发送给拆图反推模型，由 AI
+              输出中文拆解、迁移方案、英文生图提示词和英文负面提示词。
             </p>
           </div>
           <div className="grid min-w-[240px] gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-gray-900">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-gray-700 dark:text-gray-200">拆图 AI</span>
-              <span className={profileValidation ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300'}>
+              <span
+                className={
+                  profileValidation ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300'
+                }
+              >
                 {profileValidation ? '待配置' : '已连接'}
               </span>
             </div>
@@ -362,7 +336,9 @@ export default function SopReverseWorkspace() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">竞品图</div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">可上传多张，AI 会直接看图拆解；没有图片时可填写图片说明。</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  可上传多张，AI 会直接看图拆解；没有图片时可填写图片说明。
+                </div>
               </div>
               <button
                 type="button"
@@ -376,7 +352,10 @@ export default function SopReverseWorkspace() {
             {referenceImages.length > 0 && (
               <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
                 {referenceImages.map((image) => (
-                  <div key={image.id} className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/[0.08] dark:bg-gray-900">
+                  <div
+                    key={image.id}
+                    className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/[0.08] dark:bg-gray-900"
+                  >
                     <img src={image.dataUrl} alt={image.name} className="aspect-square w-full object-cover" />
                     <button
                       type="button"
@@ -397,7 +376,7 @@ export default function SopReverseWorkspace() {
               <span className={LABEL_CLASS}>竞品图片说明</span>
               <textarea
                 value={form.competitorDescription}
-                onChange={(event) => setForm((current) => updateForm(current, 'competitorDescription', event.target.value))}
+                onChange={(event) => setForm(updateForm(form, 'competitorDescription', event.target.value))}
                 className={`${FIELD_CLASS} min-h-[112px] resize-y`}
                 placeholder="可补充图片中难以识别的文字、卖点、证书、场景、价格、品牌风险等。"
               />
@@ -408,7 +387,7 @@ export default function SopReverseWorkspace() {
                 <span className={LABEL_CLASS}>目标平台</span>
                 <Select
                   value={form.targetPlatform}
-                  onChange={(value) => setForm((current) => updateForm(current, 'targetPlatform', String(value)))}
+                  onChange={(value) => setForm(updateForm(form, 'targetPlatform', String(value)))}
                   options={platformOptions}
                   className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
                 />
@@ -417,7 +396,7 @@ export default function SopReverseWorkspace() {
                 <span className={LABEL_CLASS}>目标图位</span>
                 <Select
                   value={form.imageRole}
-                  onChange={(value) => setForm((current) => updateForm(current, 'imageRole', String(value)))}
+                  onChange={(value) => setForm(updateForm(form, 'imageRole', String(value)))}
                   options={roleOptions}
                   className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
                 />
@@ -426,7 +405,7 @@ export default function SopReverseWorkspace() {
                 <span className={LABEL_CLASS}>生成比例</span>
                 <Select
                   value={form.ratio}
-                  onChange={(value) => setForm((current) => updateForm(current, 'ratio', String(value)))}
+                  onChange={(value) => setForm(updateForm(form, 'ratio', String(value)))}
                   options={ratioOptions}
                   className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
                 />
@@ -437,7 +416,7 @@ export default function SopReverseWorkspace() {
               <span className={LABEL_CLASS}>自家产品名称</span>
               <input
                 value={form.productName}
-                onChange={(event) => setForm((current) => updateForm(current, 'productName', event.target.value))}
+                onChange={(event) => setForm(updateForm(form, 'productName', event.target.value))}
                 className={FIELD_CLASS}
                 placeholder="例如 便携式宠物饮水杯"
               />
@@ -446,7 +425,7 @@ export default function SopReverseWorkspace() {
               <span className={LABEL_CLASS}>自家产品品类</span>
               <input
                 value={form.category}
-                onChange={(event) => setForm((current) => updateForm(current, 'category', event.target.value))}
+                onChange={(event) => setForm(updateForm(form, 'category', event.target.value))}
                 className={FIELD_CLASS}
                 placeholder="例如 宠物外出用品"
               />
@@ -456,7 +435,7 @@ export default function SopReverseWorkspace() {
               <span className={LABEL_CLASS}>自家产品核心卖点</span>
               <textarea
                 value={form.sellingPoints}
-                onChange={(event) => setForm((current) => updateForm(current, 'sellingPoints', event.target.value))}
+                onChange={(event) => setForm(updateForm(form, 'sellingPoints', event.target.value))}
                 className={`${FIELD_CLASS} min-h-[92px] resize-y`}
                 placeholder="逐条写真卖点，例如材质、尺寸、结构、套装内容、使用场景。"
               />
@@ -465,7 +444,7 @@ export default function SopReverseWorkspace() {
               <span className={LABEL_CLASS}>目标人群</span>
               <textarea
                 value={form.audience}
-                onChange={(event) => setForm((current) => updateForm(current, 'audience', event.target.value))}
+                onChange={(event) => setForm(updateForm(form, 'audience', event.target.value))}
                 className={`${FIELD_CLASS} min-h-[92px] resize-y`}
                 placeholder="例如 美国养小型犬的通勤用户，关注便携、防漏、易清洗。"
               />
@@ -475,7 +454,7 @@ export default function SopReverseWorkspace() {
               <span className={LABEL_CLASS}>真实证据</span>
               <textarea
                 value={form.evidence}
-                onChange={(event) => setForm((current) => updateForm(current, 'evidence', event.target.value))}
+                onChange={(event) => setForm(updateForm(form, 'evidence', event.target.value))}
                 className={`${FIELD_CLASS} min-h-[76px] resize-y`}
                 placeholder="检测报告、认证、规格、材质、使用数据。没有就写无。"
               />
@@ -484,7 +463,7 @@ export default function SopReverseWorkspace() {
               <span className={LABEL_CLASS}>不能出现的表达</span>
               <textarea
                 value={form.forbidden}
-                onChange={(event) => setForm((current) => updateForm(current, 'forbidden', event.target.value))}
+                onChange={(event) => setForm(updateForm(form, 'forbidden', event.target.value))}
                 className={`${FIELD_CLASS} min-h-[76px] resize-y`}
                 placeholder="平台禁词、医疗功效、绝对化承诺、竞品品牌、价格、未经证实数据。"
               />
@@ -542,60 +521,64 @@ export default function SopReverseWorkspace() {
             </button>
           </div>
           {error && (
-            <div data-selectable-text className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-600 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">
+            <div
+              data-selectable-text
+              className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-600 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200"
+            >
               {error}
             </div>
           )}
         </div>
-
       </div>
-      {showPromptModal && englishPrompt && createPortal(
-        <div className="fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-6">
-          <div
-            className="absolute inset-0 bg-black/35 backdrop-blur-md"
-            onClick={() => setShowPromptModal(false)}
-          />
-          <div
-            className="relative z-10 flex h-[72vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl ring-1 ring-black/10 dark:border-white/[0.08] dark:bg-gray-900 dark:ring-white/10"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex min-h-0 w-full flex-col bg-white dark:bg-gray-900">
-              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-white/[0.08]">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">英文提示词</div>
-                  <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                    可复制到图片生成输入框，配合参考图使用
+      {showPromptModal &&
+        englishPrompt &&
+        createPortal(
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-6">
+            <div className="absolute inset-0 bg-black/35 backdrop-blur-md" onClick={() => setShowPromptModal(false)} />
+            <div
+              className="relative z-10 flex h-[72vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl ring-1 ring-black/10 dark:border-white/[0.08] dark:bg-gray-900 dark:ring-white/10"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex min-h-0 w-full flex-col bg-white dark:bg-gray-900">
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-white/[0.08]">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">英文提示词</div>
+                    <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                      可复制到图片生成输入框，配合参考图使用
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void copyEnglishPrompt()}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                    >
+                      <CopyIcon className="h-3.5 w-3.5" />
+                      复制
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowPromptModal(false)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                      aria-label="关闭英文提示词窗口"
+                    >
+                      <CloseIcon className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void copyEnglishPrompt()}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                <div className="min-h-0 flex-1 overflow-auto p-4 custom-scrollbar">
+                  <pre
+                    data-selectable-text
+                    className="whitespace-pre-wrap break-words font-sans text-[13px] leading-7 text-gray-800 dark:text-gray-100"
                   >
-                    <CopyIcon className="h-3.5 w-3.5" />
-                    复制
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowPromptModal(false)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-                    aria-label="关闭英文提示词窗口"
-                  >
-                    <CloseIcon className="h-4 w-4" />
-                  </button>
+                    {englishPrompt}
+                  </pre>
                 </div>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto p-4 custom-scrollbar">
-                <pre data-selectable-text className="whitespace-pre-wrap break-words font-sans text-[13px] leading-7 text-gray-800 dark:text-gray-100">
-                  {englishPrompt}
-                </pre>
-              </div>
             </div>
-          </div>
-        </div>,
-        document.body,
-      )}
+          </div>,
+          document.body,
+        )}
     </section>
   )
 }

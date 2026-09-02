@@ -1,4 +1,4 @@
-import { ensureImageCached } from '../store'
+import { ensureImageCached } from './imageCache'
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -78,8 +78,12 @@ export async function downloadImageIds(imageIds: string[], fileNameBase = 'image
 
 async function getImageBlob(imageIdOrUrl: string): Promise<Blob> {
   let src = imageIdOrUrl
-  if (!imageIdOrUrl.startsWith('data:') && !imageIdOrUrl.startsWith('http://') && !imageIdOrUrl.startsWith('https://')) {
-    src = await ensureImageCached(imageIdOrUrl) ?? imageIdOrUrl
+  if (
+    !imageIdOrUrl.startsWith('data:') &&
+    !imageIdOrUrl.startsWith('http://') &&
+    !imageIdOrUrl.startsWith('https://')
+  ) {
+    src = (await ensureImageCached(imageIdOrUrl)) ?? imageIdOrUrl
   }
 
   const res = await fetch(src)
@@ -105,4 +109,3 @@ function getBlobExtension(blob: Blob): string {
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
-

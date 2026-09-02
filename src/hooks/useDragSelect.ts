@@ -15,7 +15,12 @@ export function useDragSelect({
   onSelectionChange,
   initialSelectedIds = [],
 }: UseDragSelectOptions) {
-  const [selectionBox, setSelectionBox] = useState<{ startPageX: number; startPageY: number; currentPageX: number; currentPageY: number } | null>(null)
+  const [selectionBox, setSelectionBox] = useState<{
+    startPageX: number
+    startPageY: number
+    currentPageX: number
+    currentPageY: number
+  } | null>(null)
   const isDragging = useRef(false)
   const dragStart = useRef<{ pageX: number; pageY: number } | null>(null)
   const lastClientPoint = useRef<{ x: number; y: number } | null>(null)
@@ -27,74 +32,82 @@ export function useDragSelect({
   const initialSelection = useRef<string[]>([])
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
-  const getPagePoint = useCallback((clientX: number, clientY: number) => ({
-    pageX: clientX + window.scrollX,
-    pageY: clientY + window.scrollY,
-  }), [])
+  const getPagePoint = useCallback(
+    (clientX: number, clientY: number) => ({
+      pageX: clientX + window.scrollX,
+      pageY: clientY + window.scrollY,
+    }),
+    [],
+  )
 
-  const beginSelection = useCallback((target: HTMLElement, clientX: number, clientY: number, isCtrl: boolean) => {
-    const point = getPagePoint(clientX, clientY)
+  const beginSelection = useCallback(
+    (target: HTMLElement, clientX: number, clientY: number, isCtrl: boolean) => {
+      const point = getPagePoint(clientX, clientY)
 
-    startedOnItem.current = Boolean(target.closest(itemSelector))
-    startedWithCtrl.current = isCtrl
-    initialSelection.current = [...initialSelectedIds]
+      startedOnItem.current = Boolean(target.closest(itemSelector))
+      startedWithCtrl.current = isCtrl
+      initialSelection.current = [...initialSelectedIds]
 
-    isDragging.current = true
-    hasDragged.current = false
-    dragStart.current = point
-    lastClientPoint.current = { x: clientX, y: clientY }
-    document.body.classList.add('select-none')
-    document.body.classList.add('drag-selecting')
-    setSelectionBox({
-      startPageX: point.pageX,
-      startPageY: point.pageY,
-      currentPageX: point.pageX,
-      currentPageY: point.pageY,
-    })
-  }, [getPagePoint, initialSelectedIds, itemSelector])
-
-  const updateSelectionFromPoint = useCallback((pageX: number, pageY: number) => {
-    const start = dragStart.current
-    if (!start) return
-
-    const minX = Math.min(start.pageX, pageX)
-    const maxX = Math.max(start.pageX, pageX)
-    const minY = Math.min(start.pageY, pageY)
-    const maxY = Math.max(start.pageY, pageY)
-
-    const containers = document.querySelectorAll(containerSelector)
-    const newSelected = new Set(initialSelection.current)
-    const initialSelected = new Set(initialSelection.current)
-
-    containers.forEach((container) => {
-      const items = container.querySelectorAll(itemSelector)
-      items.forEach((item) => {
-        const rect = item.getBoundingClientRect()
-        const id = getItemId(item)
-        if (!id) return
-
-        const itemLeft = rect.left + window.scrollX
-        const itemRight = rect.right + window.scrollX
-        const itemTop = rect.top + window.scrollY
-        const itemBottom = rect.bottom + window.scrollY
-
-        const isIntersecting =
-          minX < itemRight && maxX > itemLeft && minY < itemBottom && maxY > itemTop
-
-        if (isIntersecting) {
-          if (initialSelected.has(id)) {
-            newSelected.delete(id)
-          } else {
-            newSelected.add(id)
-          }
-        } else if (!initialSelected.has(id)) {
-          newSelected.delete(id)
-        }
+      isDragging.current = true
+      hasDragged.current = false
+      dragStart.current = point
+      lastClientPoint.current = { x: clientX, y: clientY }
+      document.body.classList.add('select-none')
+      document.body.classList.add('drag-selecting')
+      setSelectionBox({
+        startPageX: point.pageX,
+        startPageY: point.pageY,
+        currentPageX: point.pageX,
+        currentPageY: point.pageY,
       })
-    })
+    },
+    [getPagePoint, initialSelectedIds, itemSelector],
+  )
 
-    onSelectionChange(Array.from(newSelected))
-  }, [containerSelector, getItemId, itemSelector, onSelectionChange])
+  const updateSelectionFromPoint = useCallback(
+    (pageX: number, pageY: number) => {
+      const start = dragStart.current
+      if (!start) return
+
+      const minX = Math.min(start.pageX, pageX)
+      const maxX = Math.max(start.pageX, pageX)
+      const minY = Math.min(start.pageY, pageY)
+      const maxY = Math.max(start.pageY, pageY)
+
+      const containers = document.querySelectorAll(containerSelector)
+      const newSelected = new Set(initialSelection.current)
+      const initialSelected = new Set(initialSelection.current)
+
+      containers.forEach((container) => {
+        const items = container.querySelectorAll(itemSelector)
+        items.forEach((item) => {
+          const rect = item.getBoundingClientRect()
+          const id = getItemId(item)
+          if (!id) return
+
+          const itemLeft = rect.left + window.scrollX
+          const itemRight = rect.right + window.scrollX
+          const itemTop = rect.top + window.scrollY
+          const itemBottom = rect.bottom + window.scrollY
+
+          const isIntersecting = minX < itemRight && maxX > itemLeft && minY < itemBottom && maxY > itemTop
+
+          if (isIntersecting) {
+            if (initialSelected.has(id)) {
+              newSelected.delete(id)
+            } else {
+              newSelected.add(id)
+            }
+          } else if (!initialSelected.has(id)) {
+            newSelected.delete(id)
+          }
+        })
+      })
+
+      onSelectionChange(Array.from(newSelected))
+    },
+    [containerSelector, getItemId, itemSelector, onSelectionChange],
+  )
 
   useEffect(() => {
     const stopDragScroll = () => {
@@ -114,12 +127,18 @@ export function useDragSelect({
       }, 16)
     }
 
-    const endSelection = (clearEmptySurfaceClick = false, suppressClick = false) => {
+    const endSelection = (clearEmptySurfaceClick = false, _suppressClick = false) => {
       if (isDragging.current) {
         document.body.classList.remove('select-none')
         document.body.classList.remove('drag-selecting')
       }
-      if (isDragging.current && clearEmptySurfaceClick && !hasDragged.current && !startedOnItem.current && !startedWithCtrl.current) {
+      if (
+        isDragging.current &&
+        clearEmptySurfaceClick &&
+        !hasDragged.current &&
+        !startedOnItem.current &&
+        !startedWithCtrl.current
+      ) {
         onSelectionChange([])
       }
       // Note: TaskGrid had suppressClick logic here. The caller should manage it if needed.
@@ -142,14 +161,14 @@ export function useDragSelect({
       if (!target.closest(containerSelector)) return
       if (target.closest('[data-input-bar]')) return
       if (target.closest('[data-no-drag-select], [data-lightbox-root]')) return
-      
+
       const closestInteractive = target.closest('button, a, input, textarea, select, [draggable="true"]')
-      
+
       // If we clicked on an interactive element (like a button or draggable thumb)
       if (closestInteractive) {
         // If it's the ReferenceThumb button itself, don't start box selection, allow native drag and drop
         if (closestInteractive.closest('.reference-thumb-wrapper')) return
-        
+
         // If it's a button/link inside TaskCard (like delete/reuse), don't start selection
         // Wait, if it's the TaskCard wrapper itself (which is not a button), closestInteractive would be null.
         // If the user clicked a real button inside TaskCard, closestInteractive is the button.

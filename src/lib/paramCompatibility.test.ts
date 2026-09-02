@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
-import { createApiProfileRequestSettings, createDefaultFalProfile, createDefaultOpenAIProfile, createDefaultVolcengineProfile, DEFAULT_SETTINGS, normalizeSettings } from './apiProfiles'
-import { getInputImageLimitForSettings, getOutputImageLimitForSettings, normalizeParamsForSettings } from './paramCompatibility'
+import {
+  createApiProfileRequestSettings,
+  createDefaultFalProfile,
+  createDefaultOpenAIProfile,
+  createDefaultVolcengineProfile,
+  DEFAULT_SETTINGS,
+  normalizeSettings,
+} from './apiProfiles'
+import {
+  getInputImageLimitForSettings,
+  getOutputImageLimitForSettings,
+  normalizeParamsForSettings,
+} from './paramCompatibility'
 
 describe('parameter compatibility', () => {
   it('limits OpenAI output count to 10', () => {
@@ -76,15 +87,20 @@ describe('parameter compatibility', () => {
     expect(settings.profiles[0]?.provider).toBe('openai')
     expect(getOutputImageLimitForSettings(settings)).toBe(6)
     expect(getInputImageLimitForSettings(settings)).toBe(3)
-    expect(normalizeParamsForSettings({
-      ...DEFAULT_PARAMS,
-      size: '4096x4096',
-      output_format: 'jpeg',
-      quality: 'high',
-      moderation: 'low',
-      output_compression: 70,
-      n: 10,
-    }, settings)).toMatchObject({
+    expect(
+      normalizeParamsForSettings(
+        {
+          ...DEFAULT_PARAMS,
+          size: '4096x4096',
+          output_format: 'jpeg',
+          quality: 'high',
+          moderation: 'low',
+          output_compression: 70,
+          n: 10,
+        },
+        settings,
+      ),
+    ).toMatchObject({
       size: '2048x2048',
       output_format: 'png',
       quality: 'auto',
@@ -103,7 +119,9 @@ describe('parameter compatibility', () => {
     })
 
     expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: 'auto' }, settings).size).toBe('1360x1024')
-    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: 'auto' }, settings, { hasInputImages: true }).size).toBe('auto')
+    expect(
+      normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: 'auto' }, settings, { hasInputImages: true }).size,
+    ).toBe('auto')
   })
 
   it('defaults JPEG/WebP output compression to 70 for OpenAI requests', () => {
@@ -114,8 +132,14 @@ describe('parameter compatibility', () => {
       activeProfileId: openAIProfile.id,
     })
 
-    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'jpeg', output_compression: null }, settings).output_compression).toBe(70)
-    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'webp', output_compression: null }, settings).output_compression).toBe(70)
+    expect(
+      normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'jpeg', output_compression: null }, settings)
+        .output_compression,
+    ).toBe(70)
+    expect(
+      normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'webp', output_compression: null }, settings)
+        .output_compression,
+    ).toBe(70)
   })
 
   it('clears unsupported output compression for PNG and fal.ai', () => {
@@ -132,8 +156,14 @@ describe('parameter compatibility', () => {
       activeProfileId: openAIProfile.id,
     })
 
-    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'png', output_compression: 70 }, openAISettings).output_compression).toBeNull()
-    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'jpeg', output_compression: 70 }, falSettings).output_compression).toBeNull()
+    expect(
+      normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'png', output_compression: 70 }, openAISettings)
+        .output_compression,
+    ).toBeNull()
+    expect(
+      normalizeParamsForSettings({ ...DEFAULT_PARAMS, output_format: 'jpeg', output_compression: 70 }, falSettings)
+        .output_compression,
+    ).toBeNull()
   })
 
   it('normalizes unsupported Volcengine parameters', () => {
@@ -145,14 +175,19 @@ describe('parameter compatibility', () => {
     })
     const settings = createApiProfileRequestSettings(normalized, volcengineProfile.id)!
 
-    expect(normalizeParamsForSettings({
-      ...DEFAULT_PARAMS,
-      size: 'auto',
-      output_format: 'webp',
-      output_compression: 70,
-      quality: 'high',
-      moderation: 'low',
-    }, settings)).toMatchObject({
+    expect(
+      normalizeParamsForSettings(
+        {
+          ...DEFAULT_PARAMS,
+          size: 'auto',
+          output_format: 'webp',
+          output_compression: 70,
+          quality: 'high',
+          moderation: 'low',
+        },
+        settings,
+      ),
+    ).toMatchObject({
       size: '2048x2048',
       output_format: 'jpeg',
       output_compression: null,

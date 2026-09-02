@@ -206,7 +206,9 @@ export function matchesTaskHistoryFilters(task: TaskRecord, filters: TaskHistory
     getAspectLabel(category.aspect),
     category.amazonSlot,
     category.aPlusType,
-  ].join(' ').toLowerCase()
+  ]
+    .join(' ')
+    .toLowerCase()
 
   return searchable.includes(query)
 }

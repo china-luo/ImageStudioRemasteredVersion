@@ -1,6 +1,11 @@
 import { useCallback, useMemo } from 'react'
 import { removeMultipleTasks, useStore } from '../store'
-import { ALL_PRODUCT_FILTER, UNCATEGORIZED_PRODUCT_FILTER, getTaskProductFilterOptions, matchesTaskHistoryFilters } from '../lib/taskHistory'
+import {
+  ALL_PRODUCT_FILTER,
+  UNCATEGORIZED_PRODUCT_FILTER,
+  getTaskProductFilterOptions,
+  matchesTaskHistoryFilters,
+} from '../lib/taskHistory'
 import type { HistoryAspectFilter, HistoryWorkflowFilter } from '../types'
 import Select from './Select'
 import { TrashIcon } from './icons'
@@ -44,27 +49,30 @@ export default function SearchBar() {
     () => tasks.some((task) => task.sourceMode === 'agent' || Boolean(task.agentConversationId || task.agentRoundId)),
     [tasks],
   )
-  const workflowOptions = useMemo(() => [
-    { label: '全部来源', value: 'all' },
-    { label: 'Listing 图', value: 'amazon-listing' },
-    { label: 'A+ 图', value: 'amazon-aplus' },
-    { label: 'TikTok 商品主图', value: 'tiktok-main' },
-    { label: 'TikTok 商品详情图', value: 'tiktok-detail' },
-    { label: '普通生图', value: 'gallery' },
-    ...((hasAgentTasks || filterWorkflow === 'agent')
-      ? [{ label: 'Agent (legacy)', value: 'agent' }]
-      : []),
-  ], [filterWorkflow, hasAgentTasks])
+  const workflowOptions = useMemo(
+    () => [
+      { label: '全部来源', value: 'all' },
+      { label: 'Listing 图', value: 'amazon-listing' },
+      { label: 'A+ 图', value: 'amazon-aplus' },
+      { label: 'TikTok 商品主图', value: 'tiktok-main' },
+      { label: 'TikTok 商品详情图', value: 'tiktok-detail' },
+      { label: '普通生图', value: 'gallery' },
+      ...(hasAgentTasks || filterWorkflow === 'agent' ? [{ label: 'Agent (legacy)', value: 'agent' }] : []),
+    ],
+    [filterWorkflow, hasAgentTasks],
+  )
 
   const filteredTasks = useMemo(() => {
-    return tasks.filter((task) => matchesTaskHistoryFilters(task, {
-      searchQuery,
-      filterStatus,
-      filterFavorite,
-      filterProductTitle,
-      filterWorkflow,
-      filterAspect,
-    }))
+    return tasks.filter((task) =>
+      matchesTaskHistoryFilters(task, {
+        searchQuery,
+        filterStatus,
+        filterFavorite,
+        filterProductTitle,
+        filterWorkflow,
+        filterAspect,
+      }),
+    )
   }, [tasks, searchQuery, filterStatus, filterFavorite, filterProductTitle, filterWorkflow, filterAspect])
 
   const hasActiveFilters = Boolean(
@@ -77,15 +85,23 @@ export default function SearchBar() {
   )
   const productFilterActive = Boolean(filterProductTitle)
   const clearLabel = productFilterActive
-    ? filterProductTitle === UNCATEGORIZED_PRODUCT_FILTER ? '清空未识别' : '清空该商品'
-    : hasActiveFilters ? '清空筛选结果' : '清空历史'
+    ? filterProductTitle === UNCATEGORIZED_PRODUCT_FILTER
+      ? '清空未识别'
+      : '清空该商品'
+    : hasActiveFilters
+      ? '清空筛选结果'
+      : '清空历史'
 
   const handleClearHistory = useCallback(() => {
     if (!filteredTasks.length) return
     const taskIds = filteredTasks.map((task) => task.id)
     const scopeText = productFilterActive
-      ? filterProductTitle === UNCATEGORIZED_PRODUCT_FILTER ? '未识别商品' : `商品「${filterProductTitle}」`
-      : hasActiveFilters ? '当前筛选结果' : '全部历史记录'
+      ? filterProductTitle === UNCATEGORIZED_PRODUCT_FILTER
+        ? '未识别商品'
+        : `商品「${filterProductTitle}」`
+      : hasActiveFilters
+        ? '当前筛选结果'
+        : '全部历史记录'
 
     setConfirmDialog({
       title: clearLabel,
@@ -109,14 +125,24 @@ export default function SearchBar() {
           }`}
           title={filterFavorite ? '取消只看收藏' : '只看收藏'}
         >
-          <svg className="w-5 h-5" fill={filterFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+          <svg
+            className="w-5 h-5"
+            fill={filterFavorite ? 'currentColor' : 'none'}
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+            />
           </svg>
         </button>
         <div className="relative w-28">
           <Select
             value={filterStatus}
-            onChange={(val) => setFilterStatus(val as any)}
+            onChange={(val) => setFilterStatus(val as typeof filterStatus)}
             options={[
               { label: '全部状态', value: 'all' },
               { label: '已完成', value: 'done' },

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
+import { DEFAULT_DROPDOWN_MAX_HEIGHT } from '../lib/dropdown'
 import { ChevronDownIcon, EditIcon, PlusIcon, TrashIcon, DragHandleIcon } from './icons'
 
 interface Option {
@@ -17,7 +17,7 @@ interface Option {
 
 interface SelectProps {
   value: string | number
-  onChange: (value: any) => void
+  onChange: (value: string | number) => void
   onReorder?: (sourceValue: string | number, targetValue: string | number, position: 'before' | 'after' | null) => void
   options: Option[]
   disabled?: boolean
@@ -40,7 +40,7 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
     offsetX: number
     offsetY: number
   } | null>(null)
-  const touchDragRef = useRef<{ value: string | number, startX: number, startY: number, moved: boolean } | null>(null)
+  const touchDragRef = useRef<{ value: string | number; startX: number; startY: number; moved: boolean } | null>(null)
   const dragScrollIntervalRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLDivElement>(null)
@@ -91,10 +91,10 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
       if (!triggerRef.current) return
       const trigger = triggerRef.current
       const rect = trigger.getBoundingClientRect()
-      
+
       let availableBelow = window.innerHeight - rect.bottom - 8
       let availableAbove = rect.top - 8
-      
+
       let parent = trigger.parentElement
       while (parent && parent !== document.body) {
         const style = window.getComputedStyle(parent)
@@ -105,10 +105,10 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
         }
         parent = parent.parentElement
       }
-      
+
       let newPlacement: 'bottom' | 'top' = 'bottom'
       let maxHeight = DEFAULT_DROPDOWN_MAX_HEIGHT
-      
+
       if (availableBelow < 120 && availableAbove > availableBelow) {
         newPlacement = 'top'
         maxHeight = Math.min(DEFAULT_DROPDOWN_MAX_HEIGHT, Math.floor(availableAbove))
@@ -116,7 +116,7 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
         newPlacement = 'bottom'
         maxHeight = Math.min(DEFAULT_DROPDOWN_MAX_HEIGHT, Math.floor(availableBelow))
       }
-      
+
       setPlacement(newPlacement)
       setMenuMaxHeight(Math.max(0, maxHeight))
     }
@@ -160,7 +160,9 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
         }`}
       >
         <span className="truncate">{selectedOption?.label ?? value}</span>
-        <ChevronDownIcon className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDownIcon
+          className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+        />
       </div>
 
       {isOpen && (
@@ -221,7 +223,7 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 setDragDropPosition(null)
 
                 const sourceValue = e.dataTransfer.getData('text/plain')
-                const sourceOption = options.find(o => String(o.value) === sourceValue)
+                const sourceOption = options.find((o) => String(o.value) === sourceValue)
                 if (sourceOption && sourceOption.value !== option.value) {
                   onReorder(sourceOption.value, option.value, dragDropPosition)
                 }
@@ -236,7 +238,12 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 // Do not prevent default here, as it blocks scrolling
                 // e.preventDefault()
                 e.stopPropagation()
-                touchDragRef.current = { value: option.value, startX: touch.clientX, startY: touch.clientY, moved: false }
+                touchDragRef.current = {
+                  value: option.value,
+                  startX: touch.clientX,
+                  startY: touch.clientY,
+                  moved: false,
+                }
                 setDraggedValue(option.value)
                 setTouchDragPreview({
                   label: option.label,
@@ -262,7 +269,9 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 }
 
                 e.preventDefault() // prevent scrolling
-                setTouchDragPreview((current) => current ? { ...current, x: touch.clientX, y: touch.clientY } : current)
+                setTouchDragPreview((current) =>
+                  current ? { ...current, x: touch.clientX, y: touch.clientY } : current,
+                )
 
                 // Hide preview visually so elementFromPoint works correctly
                 const previewEl = document.getElementById('touch-drag-preview')
@@ -273,7 +282,7 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 if (targetDiv) {
                   const targetValueStr = targetDiv.getAttribute('data-option-value')
                   if (targetValueStr) {
-                    const targetOption = options.find(o => String(o.value) === targetValueStr)
+                    const targetOption = options.find((o) => String(o.value) === targetValueStr)
                     if (targetOption && targetOption.draggable) {
                       const rect = targetDiv.getBoundingClientRect()
                       const position = touch.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
@@ -332,12 +341,12 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 draggedValue === option.value
                   ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]'
                   : option.variant === 'action'
-                  ? 'font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10'
-                  : option.variant === 'danger'
-                  ? 'font-semibold text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
-                  : option.value === value
-                  ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                    ? 'font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10'
+                    : option.variant === 'danger'
+                      ? 'font-semibold text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
+                      : option.value === value
+                        ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
               }`}
             >
               {dragOverValue === option.value && dragDropPosition === 'before' && draggedValue !== option.value && (
@@ -375,9 +384,11 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                         action.onClick()
                         setIsOpen(false)
                       }}
-                      className={`rounded-md p-1.5 transition flex items-center justify-center ${action.variant === 'danger'
-                        ? 'text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
-                        : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200'}`}
+                      className={`rounded-md p-1.5 transition flex items-center justify-center ${
+                        action.variant === 'danger'
+                          ? 'text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
+                          : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200'
+                      }`}
                     >
                       {action.label === '编辑' ? (
                         <EditIcon className="w-3.5 h-3.5" />
@@ -400,24 +411,25 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
         </div>
       )}
 
-      {touchDragPreview && createPortal(
-        <div
-          id="touch-drag-preview"
-          className="fixed pointer-events-none z-[110] flex items-center justify-between gap-2 rounded-xl bg-white/95 px-3 py-2 text-xs text-gray-700 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:bg-gray-900/95 dark:text-gray-300 dark:ring-white/10"
-          style={{
-            left: touchDragPreview.x - touchDragPreview.offsetX,
-            top: touchDragPreview.y - touchDragPreview.offsetY,
-            width: touchDragPreview.width,
-            minHeight: touchDragPreview.height,
-          }}
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
-            <DragHandleIcon className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
-            <span className="min-w-0 truncate">{touchDragPreview.label}</span>
-          </div>
-        </div>,
-        document.body
-      )}
+      {touchDragPreview &&
+        createPortal(
+          <div
+            id="touch-drag-preview"
+            className="fixed pointer-events-none z-[110] flex items-center justify-between gap-2 rounded-xl bg-white/95 px-3 py-2 text-xs text-gray-700 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:bg-gray-900/95 dark:text-gray-300 dark:ring-white/10"
+            style={{
+              left: touchDragPreview.x - touchDragPreview.offsetX,
+              top: touchDragPreview.y - touchDragPreview.offsetY,
+              width: touchDragPreview.width,
+              minHeight: touchDragPreview.height,
+            }}
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
+              <DragHandleIcon className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
+              <span className="min-w-0 truncate">{touchDragPreview.label}</span>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

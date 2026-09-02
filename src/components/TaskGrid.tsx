@@ -18,7 +18,12 @@ export default function TaskGrid() {
   const clearSelection = useStore((s) => s.clearSelection)
   const rootRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
-  const [selectionBox, setSelectionBox] = useState<{ startPageX: number; startPageY: number; currentPageX: number; currentPageY: number } | null>(null)
+  const [selectionBox, setSelectionBox] = useState<{
+    startPageX: number
+    startPageY: number
+    currentPageX: number
+    currentPageY: number
+  } | null>(null)
   const dragStart = useRef<{ pageX: number; pageY: number } | null>(null)
   const lastClientPoint = useRef<{ x: number; y: number } | null>(null)
   const hasDragged = useRef(false)
@@ -34,18 +39,20 @@ export default function TaskGrid() {
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
-    
-    return sorted.filter((task) => matchesTaskHistoryFilters(task, {
-      searchQuery,
-      filterStatus,
-      filterFavorite,
-      filterProductTitle,
-      filterWorkflow,
-      filterAspect,
-    }))
+
+    return sorted.filter((task) =>
+      matchesTaskHistoryFilters(task, {
+        searchQuery,
+        filterStatus,
+        filterFavorite,
+        filterProductTitle,
+        filterWorkflow,
+        filterAspect,
+      }),
+    )
   }, [tasks, searchQuery, filterStatus, filterFavorite, filterProductTitle, filterWorkflow, filterAspect])
 
-  const handleDelete = (task: typeof tasks[0]) => {
+  const handleDelete = (task: (typeof tasks)[0]) => {
     setConfirmDialog({
       title: '删除记录',
       message: '确定要删除这条记录吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
@@ -102,8 +109,7 @@ export default function TaskGrid() {
       const cardTop = rect.top + window.scrollY
       const cardBottom = rect.bottom + window.scrollY
 
-      const isIntersecting =
-        minX < cardRight && maxX > cardLeft && minY < cardBottom && maxY > cardTop
+      const isIntersecting = minX < cardRight && maxX > cardLeft && minY < cardBottom && maxY > cardTop
 
       if (isIntersecting) {
         if (initialSelected.has(taskId)) {
@@ -142,7 +148,13 @@ export default function TaskGrid() {
         document.body.classList.remove('select-none')
         document.body.classList.remove('drag-selecting')
       }
-      if (isDragging.current && clearEmptySurfaceClick && !hasDragged.current && !startedOnCard.current && !startedWithCtrl.current) {
+      if (
+        isDragging.current &&
+        clearEmptySurfaceClick &&
+        !hasDragged.current &&
+        !startedOnCard.current &&
+        !startedWithCtrl.current
+      ) {
         clearSelection()
       }
       if (isDragging.current && suppressClick && hasDragged.current) {
@@ -257,12 +269,17 @@ export default function TaskGrid() {
   if (!filteredTasks.length) {
     return (
       <div className="text-center py-20 text-gray-400 dark:text-gray-500">
-        {searchQuery || filterFavorite || filterStatus !== 'all' || filterProductTitle || filterWorkflow !== 'all' || filterAspect !== 'all' ? (
+        {searchQuery ||
+        filterFavorite ||
+        filterStatus !== 'all' ||
+        filterProductTitle ||
+        filterWorkflow !== 'all' ||
+        filterAspect !== 'all' ? (
           <p className="text-sm">没有找到匹配的记录</p>
         ) : (
           <>
             <svg
-              className="w-16 h-16 mx-auto mb-4 text-gray-200 dark:text-gray-700"
+              className="empty-state-mark w-16 h-16 mx-auto mb-4 text-gray-200 dark:text-gray-700"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -282,12 +299,11 @@ export default function TaskGrid() {
   }
 
   return (
-    <div 
-      ref={rootRef}
-      data-task-grid-root
-      className="relative min-h-[50vh]"
-    >
-      <div ref={gridRef} className="grid grid-cols-1 gap-4 pb-10 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3">
+    <div ref={rootRef} data-task-grid-root className="relative min-h-[50vh]">
+      <div
+        ref={gridRef}
+        className="grid grid-cols-1 gap-4 pb-10 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3"
+      >
         {filteredTasks.map((task) => (
           <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
             <TaskCard

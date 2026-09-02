@@ -1,7 +1,22 @@
 // Legacy experimental Agent API. Main image generation should use api.ts instead.
-import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
+import {
+  DEFAULT_AGENT_MAX_TOOL_ROUNDS,
+  type ApiProfile,
+  type AppSettings,
+  type ResponsesApiResponse,
+  type ResponsesOutputItem,
+  type TaskParams,
+} from '../types'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
-import { appendOutputResolutionToPrompt, getApiErrorMessage, getPromptOutputResolution, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
+import { createLlmAuthHeaders } from './llmTransport'
+import {
+  appendOutputResolutionToPrompt,
+  getApiErrorMessage,
+  getPromptOutputResolution,
+  MIME_MAP,
+  normalizeBase64Image,
+  pickActualParams,
+} from './imageApiShared'
 import { prepareReferenceImageAndMaskPayload, prepareReferenceImagePayload } from './referenceImagePayload'
 
 export interface AgentApiMessage {
@@ -41,7 +56,7 @@ const AGENT_IMAGE_INSTRUCTIONS = [
   '- One image_generation call per distinct image. Never collage.',
   '- Dependent images (a later image needs to reference an earlier one) → generate the prerequisite first, then call continue_generation. The next round will have the result available as `<ref id="..." />`.',
   '- Only generate when explicitly requested; otherwise reply with text.',
-  '- Preserve the user\'s original intent faithfully. Never substitute requested subjects for copyright/trademark reasons.',
+  "- Preserve the user's original intent faithfully. Never substitute requested subjects for copyright/trademark reasons.",
   '',
   '## Reference tags',
   'NEVER output `<ref>`, `<available_refs>`, or any XML reference tags in visible assistant text — the system injects them automatically and your raw output will be shown directly to the user.',
@@ -86,10 +101,7 @@ const AGENT_TITLE_INSTRUCTIONS = [
 const AGENT_TITLE_MAX_LENGTH = 28
 
 function createHeaders(profile: ApiProfile): Record<string, string> {
-  return {
-    Authorization: `Bearer ${profile.apiKey}`,
-    'Content-Type': 'application/json',
-  }
+  return createLlmAuthHeaders(profile.apiKey)
 }
 
 function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: string): Record<string, unknown> {
@@ -116,7 +128,12 @@ function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: 
   return tool
 }
 
-function createAgentTools(params: TaskParams, profile: ApiProfile, settings: AppSettings, maskDataUrl?: string): Array<Record<string, unknown>> {
+function createAgentTools(
+  params: TaskParams,
+  profile: ApiProfile,
+  settings: AppSettings,
+  maskDataUrl?: string,
+): Array<Record<string, unknown>> {
   const tools: Array<Record<string, unknown>> = [createImageTool(params, profile, maskDataUrl)]
 
   // generate_image_batch: custom function tool for concurrent multi-image generation
@@ -146,12 +163,14 @@ function createAgentTools(params: TaskParams, profile: ApiProfile, settings: App
               },
               prompt: {
                 type: 'string',
-                description: 'Complete image generation prompt with all visual details. If reference_ids is non-empty, mention each referenced image using the matching XML tag, e.g. <ref id="round-1-image-1" />.',
+                description:
+                  'Complete image generation prompt with all visual details. If reference_ids is non-empty, mention each referenced image using the matching XML tag, e.g. <ref id="round-1-image-1" />.',
               },
               reference_ids: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Ref ids of previously generated images to use as visual reference (e.g. ["round-1-image-1"]). Pass empty array if no references needed.',
+                description:
+                  'Ref ids of previously generated images to use as visual reference (e.g. ["round-1-image-1"]). Pass empty array if no references needed.',
               },
             },
             required: ['id', 'prompt', 'reference_ids'],
@@ -214,7 +233,11 @@ function collectResponsesInputImageDataUrls(value: unknown, output: string[] = [
   return output
 }
 
-function replaceResponsesInputImageDataUrls(value: unknown, replacements: string[], cursor: { index: number }): unknown {
+function replaceResponsesInputImageDataUrls(
+  value: unknown,
+  replacements: string[],
+  cursor: { index: number },
+): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => replaceResponsesInputImageDataUrls(item, replacements, cursor))
   }
@@ -241,15 +264,16 @@ type ResponseTextAnnotation = NonNullable<NonNullable<ResponsesOutputItem['conte
 
 function applyUrlCitations(text: string, annotations: ResponseTextAnnotation[] | undefined) {
   const citations = (annotations ?? [])
-    .filter((annotation) =>
-      annotation.type === 'url_citation' &&
-      typeof annotation.url === 'string' &&
-      annotation.url.trim() &&
-      typeof annotation.start_index === 'number' &&
-      typeof annotation.end_index === 'number' &&
-      annotation.start_index >= 0 &&
-      annotation.end_index > annotation.start_index &&
-      annotation.end_index <= text.length,
+    .filter(
+      (annotation) =>
+        annotation.type === 'url_citation' &&
+        typeof annotation.url === 'string' &&
+        annotation.url.trim() &&
+        typeof annotation.start_index === 'number' &&
+        typeof annotation.end_index === 'number' &&
+        annotation.start_index >= 0 &&
+        annotation.end_index > annotation.start_index &&
+        annotation.end_index <= text.length,
     )
     .sort((a, b) => (a.start_index ?? 0) - (b.start_index ?? 0))
 
@@ -281,7 +305,7 @@ function throwIfAborted(...signals: Array<AbortSignal | undefined>) {
   throw signal.reason instanceof Error ? signal.reason : new DOMException('请求已停止', 'AbortError')
 }
 
-function createInput(messages: AgentApiMessage[]) {
+function _createInput(messages: AgentApiMessage[]) {
   return messages.map((message) => {
     const content: Array<Record<string, string>> = [
       { type: message.role === 'user' ? 'input_text' : 'output_text', text: message.text },
@@ -316,18 +340,27 @@ function extractText(payload: ResponsesApiResponse) {
 }
 
 function decodeXmlText(text: string) {
-  return text.replace(/&(?:#(\d+)|#x([\da-fA-F]+)|amp|lt|gt|quot|apos);/g, (entity, decimal: string | undefined, hex: string | undefined) => {
-    if (decimal) return String.fromCodePoint(Number(decimal))
-    if (hex) return String.fromCodePoint(Number.parseInt(hex, 16))
-    switch (entity) {
-      case '&amp;': return '&'
-      case '&lt;': return '<'
-      case '&gt;': return '>'
-      case '&quot;': return '"'
-      case '&apos;': return "'"
-      default: return entity
-    }
-  })
+  return text.replace(
+    /&(?:#(\d+)|#x([\da-fA-F]+)|amp|lt|gt|quot|apos);/g,
+    (entity, decimal: string | undefined, hex: string | undefined) => {
+      if (decimal) return String.fromCodePoint(Number(decimal))
+      if (hex) return String.fromCodePoint(Number.parseInt(hex, 16))
+      switch (entity) {
+        case '&amp;':
+          return '&'
+        case '&lt;':
+          return '<'
+        case '&gt;':
+          return '>'
+        case '&quot;':
+          return '"'
+        case '&apos;':
+          return "'"
+        default:
+          return entity
+      }
+    },
+  )
 }
 
 function parseAgentConversationTitleXml(text: string) {
@@ -357,13 +390,14 @@ function extractImages(payload: ResponsesApiResponse, fallbackMime: string): Age
     }
 
     if (result && typeof result === 'object') {
-      const b64 = typeof result.b64_json === 'string'
-        ? result.b64_json
-        : typeof result.image === 'string'
-        ? result.image
-        : typeof result.data === 'string'
-        ? result.data
-        : ''
+      const b64 =
+        typeof result.b64_json === 'string'
+          ? result.b64_json
+          : typeof result.image === 'string'
+            ? result.image
+            : typeof result.data === 'string'
+              ? result.data
+              : ''
       if (b64.trim()) {
         images.push({
           toolCallId: typeof item.id === 'string' ? item.id : undefined,
@@ -379,21 +413,22 @@ function extractImages(payload: ResponsesApiResponse, fallbackMime: string): Age
   return images
 }
 
-function extractImageFromOutputItem(item: ResponsesOutputItem, fallbackMime: string): AgentApiResultImage | null {
+function _extractImageFromOutputItem(item: ResponsesOutputItem, fallbackMime: string): AgentApiResultImage | null {
   if (item.type !== 'image_generation_call') return null
 
   const result = item.result
-  const b64 = typeof result === 'string'
-    ? result
-    : result && typeof result === 'object'
-    ? typeof result.b64_json === 'string'
-      ? result.b64_json
-      : typeof result.image === 'string'
-      ? result.image
-      : typeof result.data === 'string'
-      ? result.data
-      : ''
-    : ''
+  const b64 =
+    typeof result === 'string'
+      ? result
+      : result && typeof result === 'object'
+        ? typeof result.b64_json === 'string'
+          ? result.b64_json
+          : typeof result.image === 'string'
+            ? result.image
+            : typeof result.data === 'string'
+              ? result.data
+              : ''
+        : ''
 
   if (!b64.trim()) return null
   return {
@@ -417,7 +452,18 @@ export async function callAgentResponsesApi(opts: {
   onImageToolStarted?: (event: { toolCallId: string; outputIndex?: number }) => void | Promise<void>
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<AgentApiResult> {
-  const { settings, profile, params, input, maskDataUrl, signal, onTextDelta, onOutputItems, onImageToolStarted, onImageToolCompleted } = opts
+  const {
+    settings,
+    profile,
+    params,
+    input,
+    maskDataUrl,
+    signal,
+    onTextDelta: _onTextDelta,
+    onOutputItems: _onOutputItems,
+    onImageToolStarted: _onImageToolStarted,
+    onImageToolCompleted: _onImageToolCompleted,
+  } = opts
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
@@ -429,7 +475,9 @@ export async function callAgentResponsesApi(opts: {
 
   try {
     const inputImageDataUrls = collectResponsesInputImageDataUrls(input)
-    const preparedPayload = await prepareReferenceImageAndMaskPayload(inputImageDataUrls, maskDataUrl, { signal: controller.signal })
+    const preparedPayload = await prepareReferenceImageAndMaskPayload(inputImageDataUrls, maskDataUrl, {
+      signal: controller.signal,
+    })
     const preparedInput = preparedPayload.dataUrls.length
       ? replaceResponsesInputImageDataUrls(input, preparedPayload.dataUrls, { index: 0 })
       : input
@@ -453,7 +501,7 @@ export async function callAgentResponsesApi(opts: {
       throw new Error(await getApiErrorMessage(response))
     }
 
-    const payload = await response.json() as ResponsesApiResponse
+    const payload = (await response.json()) as ResponsesApiResponse
     throwIfAborted(controller.signal, signal)
     return {
       responseId: payload.id,
@@ -487,7 +535,10 @@ export async function callAgentConversationTitleApi(opts: {
   try {
     const preparedPayload = await prepareReferenceImagePayload(imageDataUrls ?? [], { signal: controller.signal })
     const content: Array<Record<string, string>> = [
-      { type: 'input_text', text: `The following is the first message the user sent in a conversation. Generate a title for this conversation.\n\n${prompt}` },
+      {
+        type: 'input_text',
+        text: `The following is the first message the user sent in a conversation. Generate a title for this conversation.\n\n${prompt}`,
+      },
     ]
     for (const dataUrl of preparedPayload.dataUrls) {
       content.push({ type: 'input_image', image_url: dataUrl })
@@ -510,7 +561,7 @@ export async function callAgentConversationTitleApi(opts: {
       throw new Error(await getApiErrorMessage(response))
     }
 
-    const payload = await response.json() as ResponsesApiResponse
+    const payload = (await response.json()) as ResponsesApiResponse
     return parseAgentConversationTitleXml(extractText(payload))
   } finally {
     clearTimeout(timeoutId)
@@ -551,7 +602,17 @@ export async function callBatchImageSingle(opts: {
   onImageToolStarted?: () => void | Promise<void>
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<BatchImageCallResult> {
-  const { profile, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onImageToolCompleted } = opts
+  const {
+    profile,
+    params,
+    batchItemId,
+    prompt,
+    referenceImageDataUrls,
+    referenceIds,
+    signal,
+    onImageToolStarted: _onImageToolStarted,
+    onImageToolCompleted,
+  } = opts
   const promptWithOutputResolution = appendOutputResolutionToPrompt(prompt, params.size)
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
@@ -563,25 +624,32 @@ export async function callBatchImageSingle(opts: {
   signal?.addEventListener('abort', abortFromCaller, { once: true })
 
   try {
-    const preparedReferencePayload = await prepareReferenceImagePayload(referenceImageDataUrls, { signal: controller.signal })
+    const preparedReferencePayload = await prepareReferenceImagePayload(referenceImageDataUrls, {
+      signal: controller.signal,
+    })
     const apiReferenceImageDataUrls = preparedReferencePayload.dataUrls
     // Build input: reference id mapping + prompt-rewrite guard + reference images.
-    const referenceMapping = apiReferenceImageDataUrls.length > 0
-      ? `Attached reference images correspond to these ids, in order: ${(referenceIds ?? []).map((id) => `<ref id="${id}" />`).join(', ') || 'reference images'}.`
-      : ''
-    const guardedPrompt = [referenceMapping, `${PROMPT_REWRITE_GUARD_PREFIX}\n${promptWithOutputResolution}`].filter(Boolean).join('\n\n')
+    const referenceMapping =
+      apiReferenceImageDataUrls.length > 0
+        ? `Attached reference images correspond to these ids, in order: ${(referenceIds ?? []).map((id) => `<ref id="${id}" />`).join(', ') || 'reference images'}.`
+        : ''
+    const guardedPrompt = [referenceMapping, `${PROMPT_REWRITE_GUARD_PREFIX}\n${promptWithOutputResolution}`]
+      .filter(Boolean)
+      .join('\n\n')
     let input: unknown
     if (apiReferenceImageDataUrls.length > 0) {
-      input = [{
-        role: 'user',
-        content: [
-          { type: 'input_text', text: guardedPrompt },
-          ...apiReferenceImageDataUrls.map((dataUrl) => ({
-            type: 'input_image',
-            image_url: dataUrl,
-          })),
-        ],
-      }]
+      input = [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: guardedPrompt },
+            ...apiReferenceImageDataUrls.map((dataUrl) => ({
+              type: 'input_image',
+              image_url: dataUrl,
+            })),
+          ],
+        },
+      ]
     } else {
       input = guardedPrompt
     }
@@ -619,7 +687,7 @@ export async function callBatchImageSingle(opts: {
       return { batchItemId, image: null, error: errorMsg }
     }
 
-    const payload = await response.json() as ResponsesApiResponse
+    const payload = (await response.json()) as ResponsesApiResponse
     const images = extractImages(payload, mime)
     const image = images[0] ?? null
     if (image) await onImageToolCompleted?.(image)
@@ -641,7 +709,9 @@ export async function callBatchImageSingle(opts: {
 }
 
 /** Parse the arguments of a generate_image_batch function call */
-export function parseBatchImageCallArguments(args: string): Array<{ id: string; prompt: string; reference_ids: string[] }> | null {
+export function parseBatchImageCallArguments(
+  args: string,
+): Array<{ id: string; prompt: string; reference_ids: string[] }> | null {
   try {
     const parsed = JSON.parse(args) as { images?: unknown }
     if (!parsed || !Array.isArray(parsed.images)) return null

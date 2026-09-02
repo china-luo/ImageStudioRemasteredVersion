@@ -9,16 +9,21 @@ describe('callAgentResponsesApi', () => {
   })
 
   it('uses the standard JSON response path for Agent image generation', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      id: 'resp_1',
-      output: [
-        { type: 'message', content: [{ type: 'output_text', text: 'Hello' }] },
-        { type: 'image_generation_call', id: 'ig_1', result: 'ZmluYWw=', size: '1024x1024' },
-      ],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'resp_1',
+          output: [
+            { type: 'message', content: [{ type: 'output_text', text: 'Hello' }] },
+            { type: 'image_generation_call', id: 'ig_1', result: 'ZmluYWw=', size: '1024x1024' },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
       apiMode: 'responses',
@@ -46,15 +51,22 @@ describe('callAgentResponsesApi', () => {
   })
 
   it('passes mask data to the Agent image tool', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      output: [{
-        type: 'message',
-        content: [{ type: 'output_text', text: 'OK' }],
-      }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'OK' }],
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
       apiMode: 'responses',
@@ -74,15 +86,22 @@ describe('callAgentResponsesApi', () => {
   })
 
   it('generates a short conversation title without image tools', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      output: [{
-        type: 'message',
-        content: [{ type: 'output_text', text: '<title>生成猫咪头像</title>' }],
-      }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: '<title>生成猫咪头像</title>' }],
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
       apiMode: 'responses',
@@ -103,16 +122,23 @@ describe('callAgentResponsesApi', () => {
   })
 
   it('appends explicit output resolution to batch image prompts', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      output: [{
-        type: 'image_generation_call',
-        id: 'ig_batch',
-        result: 'ZmluYWw=',
-      }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: 'image_generation_call',
+              id: 'ig_batch',
+              result: 'ZmluYWw=',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
       apiMode: 'responses',
@@ -127,43 +153,54 @@ describe('callAgentResponsesApi', () => {
     })
 
     const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))
-    expect(body.input).toBe([
-      'Use the following text as the complete prompt. Do not rewrite it:',
-      'batch prompt',
-      '',
-      'Technical output requirement (not visible text): expected image resolution 2048x2048 px.',
-    ].join('\n'))
+    expect(body.input).toBe(
+      [
+        'Use the following text as the complete prompt. Do not rewrite it:',
+        'batch prompt',
+        '',
+        'Technical output requirement (not visible text): expected image resolution 2048x2048 px.',
+      ].join('\n'),
+    )
   })
 
   it('requests web search and applies citations', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      id: 'resp_search',
-      output: [
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'resp_search',
+          output: [
+            {
+              type: 'web_search_call',
+              id: 'ws_1',
+              status: 'completed',
+              action: { type: 'search', query: 'OpenAI web search docs' },
+            },
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'See OpenAI docs.',
+                  annotations: [
+                    {
+                      type: 'url_citation',
+                      start_index: 4,
+                      end_index: 15,
+                      url: 'https://platform.openai.com/docs',
+                      title: 'OpenAI Docs',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
         {
-          type: 'web_search_call',
-          id: 'ws_1',
-          status: 'completed',
-          action: { type: 'search', query: 'OpenAI web search docs' },
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
         },
-        {
-          type: 'message',
-          content: [{
-            type: 'output_text',
-            text: 'See OpenAI docs.',
-            annotations: [{
-              type: 'url_citation',
-              start_index: 4,
-              end_index: 15,
-              url: 'https://platform.openai.com/docs',
-              title: 'OpenAI Docs',
-            }],
-          }],
-        },
-      ],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+      ),
+    )
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
       apiMode: 'responses',

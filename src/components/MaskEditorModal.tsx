@@ -155,11 +155,14 @@ export default function MaskEditorModal() {
   useCloseOnEscape(Boolean(imageId), close)
   usePreventBackgroundScroll(Boolean(imageId))
 
-  useEffect(() => () => {
-    if (maskInfoTimerRef.current != null) {
-      window.clearTimeout(maskInfoTimerRef.current)
-    }
-  }, [])
+  useEffect(
+    () => () => {
+      if (maskInfoTimerRef.current != null) {
+        window.clearTimeout(maskInfoTimerRef.current)
+      }
+    },
+    [],
+  )
 
   const showMaskInfoPopover = () => setShowMaskInfo(true)
 
@@ -213,11 +216,13 @@ export default function MaskEditorModal() {
       return
     }
 
-    commitViewTransform(getComfortableInitialTransform(
-      { width: frame.clientWidth, height: frame.clientHeight },
-      { width: stage.clientWidth, height: stage.clientHeight },
-      isCompactLayout,
-    ))
+    commitViewTransform(
+      getComfortableInitialTransform(
+        { width: frame.clientWidth, height: frame.clientHeight },
+        { width: stage.clientWidth, height: stage.clientHeight },
+        isCompactLayout,
+      ),
+    )
   }
 
   function cancelActiveStroke() {
@@ -255,17 +260,19 @@ export default function MaskEditorModal() {
 
     const rect = frame.getBoundingClientRect()
     const nextCentroid = centroid(pointers[0], pointers[1])
-    commitViewTransform(getPinchTransform({
-      startTransform: gesture.startTransform,
-      startCentroid: gesture.startCentroid,
-      nextCentroid: {
-        x: nextCentroid.x - rect.left,
-        y: nextCentroid.y - rect.top,
-      },
-      startDistance: gesture.startDistance,
-      nextDistance: distance(pointers[0], pointers[1]),
-      viewportSize: { width: frame.clientWidth, height: frame.clientHeight },
-    }))
+    commitViewTransform(
+      getPinchTransform({
+        startTransform: gesture.startTransform,
+        startCentroid: gesture.startCentroid,
+        nextCentroid: {
+          x: nextCentroid.x - rect.left,
+          y: nextCentroid.y - rect.top,
+        },
+        startDistance: gesture.startDistance,
+        nextDistance: distance(pointers[0], pointers[1]),
+        viewportSize: { width: frame.clientWidth, height: frame.clientHeight },
+      }),
+    )
   }
 
   function syncHistoryState() {
@@ -334,12 +341,12 @@ export default function MaskEditorModal() {
     ctx.arc(x, y, radius, 0, Math.PI * 2)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
     ctx.stroke()
-    
+
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
     ctx.beginPath()
     ctx.arc(x, y, radius + 1, 0, Math.PI * 2)
     ctx.stroke()
-    
+
     ctx.beginPath()
     ctx.arc(x, y, Math.max(0, radius - 1), 0, Math.PI * 2)
     ctx.stroke()
@@ -718,12 +725,12 @@ export default function MaskEditorModal() {
       y: event.clientY - rect.top,
     }
     const scaleFactor = Math.exp(-event.deltaY * 0.002)
-    commitViewTransform(zoomAtPoint(
-      viewTransformRef.current,
-      point,
-      viewTransformRef.current.scale * scaleFactor,
-      { width: frame.clientWidth, height: frame.clientHeight },
-    ))
+    commitViewTransform(
+      zoomAtPoint(viewTransformRef.current, point, viewTransformRef.current.scale * scaleFactor, {
+        width: frame.clientWidth,
+        height: frame.clientHeight,
+      }),
+    )
   }
 
   const finishStroke = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -796,7 +803,8 @@ export default function MaskEditorModal() {
         saveTokenRef.current !== token ||
         activeSessionIdRef.current !== savingSessionId ||
         useStore.getState().maskEditorImageId !== savingImageId
-      ) return
+      )
+        return
 
       const latestStore = useStore.getState()
       latestStore.setInputImages(
@@ -818,7 +826,8 @@ export default function MaskEditorModal() {
         saveTokenRef.current !== token ||
         activeSessionIdRef.current !== savingSessionId ||
         useStore.getState().maskEditorImageId !== savingImageId
-      ) return
+      )
+        return
       showToast(err instanceof Error ? err.message : String(err), 'error')
     } finally {
       if (saveTokenRef.current === token) setIsSaving(false)
@@ -842,68 +851,96 @@ export default function MaskEditorModal() {
 
   return (
     <>
-      <div data-no-drag-select className="fixed inset-0 z-[80] flex flex-col bg-gray-50 dark:bg-gray-900 animate-modal-in">
-      {/* Header */}
-      <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 z-20">
-        <div className="flex items-center gap-3">
-          <button onClick={close} disabled={isSaving} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg dark:text-gray-400 dark:hover:bg-gray-800 transition" title="取消">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
-          <div className="relative flex items-center gap-1.5">
-            <h2 className="text-sm font-medium text-gray-700 dark:text-gray-200" id="mask-editor-title">编辑遮罩</h2>
+      <div
+        data-no-drag-select
+        className="fixed inset-0 z-[80] flex flex-col bg-gray-50 dark:bg-gray-900 animate-modal-in"
+      >
+        {/* Header */}
+        <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 z-20">
+          <div className="flex items-center gap-3">
             <button
-              type="button"
-              onClick={showMaskInfoPopover}
-              onMouseEnter={showMaskInfoPopover}
-              onMouseLeave={hideMaskInfoPopover}
-              onTouchStart={startMaskInfoTouch}
-              onTouchEnd={clearMaskInfoTimer}
-              onTouchCancel={hideMaskInfoPopover}
-              className="flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
-              aria-label="遮罩编辑说明"
+              onClick={close}
+              disabled={isSaving}
+              className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg dark:text-gray-400 dark:hover:bg-gray-800 transition"
+              title="取消"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            {showMaskInfo && (
-              <div className="absolute left-0 top-full mt-2 w-64 rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-xs leading-5 text-gray-600 shadow-lg dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300">
-                <div className="absolute -top-1.5 left-16 h-3 w-3 rotate-45 border-l border-t border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-900" />
-                <p>根据官方文档说明，此功能仅基于提示词，无法完全控制模型编辑区域。</p>
-                <p className="mt-2">建议附加类似“只编辑遮罩区域”的提示词以提升模型指令遵循程度。</p>
-              </div>
+            <div className="relative flex items-center gap-1.5">
+              <h2 className="text-sm font-medium text-gray-700 dark:text-gray-200" id="mask-editor-title">
+                编辑遮罩
+              </h2>
+              <button
+                type="button"
+                onClick={showMaskInfoPopover}
+                onMouseEnter={showMaskInfoPopover}
+                onMouseLeave={hideMaskInfoPopover}
+                onTouchStart={startMaskInfoTouch}
+                onTouchEnd={clearMaskInfoTimer}
+                onTouchCancel={hideMaskInfoPopover}
+                className="flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                aria-label="遮罩编辑说明"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </button>
+              {showMaskInfo && (
+                <div className="absolute left-0 top-full mt-2 w-64 rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-xs leading-5 text-gray-600 shadow-lg dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300">
+                  <div className="absolute -top-1.5 left-16 h-3 w-3 rotate-45 border-l border-t border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-900" />
+                  <p>根据官方文档说明，此功能仅基于提示词，无法完全控制模型编辑区域。</p>
+                  <p className="mt-2">建议附加类似“只编辑遮罩区域”的提示词以提升模型指令遵循程度。</p>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {maskDraft?.targetImageId === imageId && (
+              <button
+                onClick={handleRemoveMask}
+                className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition"
+              >
+                移除遮罩
+              </button>
             )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {maskDraft?.targetImageId === imageId && (
-            <button onClick={handleRemoveMask} className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition">
-              移除遮罩
+            <button
+              onClick={handleSave}
+              disabled={!isReady || isSaving}
+              className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 transition"
+            >
+              {isSaving ? '保存中...' : '保存'}
             </button>
-          )}
-          <button onClick={handleSave} disabled={!isReady || isSaving} className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 transition">
-            {isSaving ? '保存中...' : '保存'}
-          </button>
-        </div>
-      </div>
-
-      {/* Workspace */}
-      <div ref={stageRef} className="flex-1 relative flex items-center justify-center overflow-hidden bg-gray-100/50 dark:bg-black/50 p-0 pb-[76px] sm:p-6 sm:pb-[100px]" style={{ containerType: 'size' }}>
-        {isLoading && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/50 text-sm text-gray-500 backdrop-blur-sm dark:bg-gray-900/50 dark:text-gray-300">
-            正在载入图片...
           </div>
-        )}
+        </div>
+
+        {/* Workspace */}
         <div
-          ref={baseFrameRef}
-          className="relative max-h-full max-w-full sm:rounded-xl shadow-inner sm:ring-1 ring-black/5 touch-none dark:bg-black/50 dark:ring-white/5"
-          onWheel={handleWheel}
-          style={{
-            aspectRatio: size ? `${size.width} / ${size.height}` : '1 / 1',
-            width: size ? `min(100%, 100cqh * ${size.width / size.height})` : '520px',
-            maxHeight: '100%',
-          }}
+          ref={stageRef}
+          className="flex-1 relative flex items-center justify-center overflow-hidden bg-gray-100/50 dark:bg-black/50 p-0 pb-[76px] sm:p-6 sm:pb-[100px]"
+          style={{ containerType: 'size' }}
         >
+          {isLoading && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/50 text-sm text-gray-500 backdrop-blur-sm dark:bg-gray-900/50 dark:text-gray-300">
+              正在载入图片...
+            </div>
+          )}
+          <div
+            ref={baseFrameRef}
+            className="relative max-h-full max-w-full sm:rounded-xl shadow-inner sm:ring-1 ring-black/5 touch-none dark:bg-black/50 dark:ring-white/5"
+            onWheel={handleWheel}
+            style={{
+              aspectRatio: size ? `${size.width} / ${size.height}` : '1 / 1',
+              width: size ? `min(100%, 100cqh * ${size.width / size.height})` : '520px',
+              maxHeight: '100%',
+            }}
+          >
             <div
               className="absolute inset-0 will-change-transform"
               style={{
@@ -916,7 +953,9 @@ export default function MaskEditorModal() {
               <canvas
                 ref={maskCanvasRef}
                 className="absolute inset-0 h-full w-full touch-none select-none opacity-0"
-                style={{ cursor: isPanning ? 'grabbing' : isAltKeyPressed ? 'grab' : hoverPoint ? 'none' : 'crosshair' }}
+                style={{
+                  cursor: isPanning ? 'grabbing' : isAltKeyPressed ? 'grab' : hoverPoint ? 'none' : 'crosshair',
+                }}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={finishStroke}
@@ -941,7 +980,12 @@ export default function MaskEditorModal() {
                   title="画笔"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                    />
                   </svg>
                 </button>
                 <button
@@ -950,7 +994,15 @@ export default function MaskEditorModal() {
                   disabled={!isReady || isSaving}
                   title="橡皮"
                 >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    className="w-5 h-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <g transform="translate(0, 1) rotate(-45 12 12)">
                       <path fill="currentColor" d="M4 10a2 2 0 0 1 2-2h7v8H6a2 2 0 0 1-2-2z" />
                       <rect x="4" y="8" width="16" height="8" rx="2" />
@@ -959,7 +1011,7 @@ export default function MaskEditorModal() {
                   </svg>
                 </button>
               </div>
-              
+
               <div ref={brushSizeControlRef} className="relative flex items-center justify-center">
                 <button
                   ref={brushSizeButtonRef}
@@ -974,60 +1026,114 @@ export default function MaskEditorModal() {
             </div>
 
             <div className="flex items-center gap-0.5 sm:gap-2 sm:ml-1">
-              <button onClick={handleUndo} disabled={!canUndo} className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all" title="撤销">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <button
+                onClick={handleUndo}
+                disabled={!canUndo}
+                className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all"
+                title="撤销"
+              >
+                <svg
+                  className="w-5 h-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M3 7v6h6" />
                   <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
                 </svg>
               </button>
-              <button onClick={handleRedo} disabled={!canRedo} className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all" title="重做">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <button
+                onClick={handleRedo}
+                disabled={!canRedo}
+                className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all"
+                title="重做"
+              >
+                <svg
+                  className="w-5 h-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M21 7v6h-6" />
                   <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
                 </svg>
               </button>
               <div className="w-px h-4 sm:h-5 bg-gray-300 dark:bg-[#323338] mx-1"></div>
-              <button onClick={resetViewTransform} disabled={!isReady || isSaving || !isZoomed} className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all" title="重置视图">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 14h6v6"/>
-                  <path d="M20 10h-6V4"/>
-                  <path d="M14 10l7-7"/>
-                  <path d="M3 21l7-7"/>
+              <button
+                onClick={resetViewTransform}
+                disabled={!isReady || isSaving || !isZoomed}
+                className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all"
+                title="重置视图"
+              >
+                <svg
+                  className="w-5 h-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 14h6v6" />
+                  <path d="M20 10h-6V4" />
+                  <path d="M14 10l7-7" />
+                  <path d="M3 21l7-7" />
                 </svg>
               </button>
-              <button onClick={handleClear} disabled={!isReady || isSaving} className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all" title="清空遮罩">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 6h18"/>
-                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+              <button
+                onClick={handleClear}
+                disabled={!isReady || isSaving}
+                className="p-2 sm:p-2.5 text-gray-500 hover:bg-gray-100 rounded-lg sm:rounded-xl disabled:opacity-30 dark:text-[#8a8a8e] dark:hover:bg-white/10 dark:hover:text-gray-200 transition-all"
+                title="清空遮罩"
+              >
+                <svg
+                  className="w-5 h-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
                 </svg>
               </button>
             </div>
           </div>
         </div>
       </div>
-      {showBrushControls && sliderAnchor && createPortal(
-        <div
-          ref={brushSizePanelRef}
-          className="fixed z-[100] h-44 w-14 -translate-x-1/2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700"
-          style={{ left: sliderAnchor.left, bottom: sliderAnchor.bottom }}
-        >
-          <input
-            type="range"
-            min={8}
-            max={220}
-            value={brushSize}
-            onChange={(e) => {
-              const nextSize = Number(e.target.value)
-              setBrushSize(nextSize)
-              if (!isPointerOverCanvas && size) updateCursor(getViewportCenterCanvasPoint())
-            }}
-            className="absolute left-1/2 top-1/2 h-5 w-32 -translate-x-1/2 -translate-y-1/2 -rotate-90 accent-blue-500 cursor-ns-resize"
-            disabled={!isReady || isSaving}
-          />
-        </div>,
-        document.body,
-      )}
+      {showBrushControls &&
+        sliderAnchor &&
+        createPortal(
+          <div
+            ref={brushSizePanelRef}
+            className="fixed z-[100] h-44 w-14 -translate-x-1/2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700"
+            style={{ left: sliderAnchor.left, bottom: sliderAnchor.bottom }}
+          >
+            <input
+              type="range"
+              min={8}
+              max={220}
+              value={brushSize}
+              onChange={(e) => {
+                const nextSize = Number(e.target.value)
+                setBrushSize(nextSize)
+                if (!isPointerOverCanvas && size) updateCursor(getViewportCenterCanvasPoint())
+              }}
+              className="absolute left-1/2 top-1/2 h-5 w-32 -translate-x-1/2 -translate-y-1/2 -rotate-90 accent-blue-500 cursor-ns-resize"
+              disabled={!isReady || isSaving}
+            />
+          </div>,
+          document.body,
+        )}
     </>
   )
 }

@@ -22,9 +22,7 @@ function parseJsonError(text: string): ParsedProviderError | null {
     if (!payload || typeof payload !== 'object') return null
     const record = payload as Record<string, unknown>
     const rawError = record.error
-    const errorRecord = rawError && typeof rawError === 'object'
-      ? rawError as Record<string, unknown>
-      : record
+    const errorRecord = rawError && typeof rawError === 'object' ? (rawError as Record<string, unknown>) : record
     const message = typeof errorRecord.message === 'string' ? errorRecord.message : undefined
     const type = typeof errorRecord.type === 'string' ? errorRecord.type : undefined
     const code = typeof errorRecord.code === 'string' ? errorRecord.code : undefined

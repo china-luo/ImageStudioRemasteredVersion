@@ -59,7 +59,12 @@ function sumDataUrlBytes(dataUrls: string[]) {
   return dataUrls.reduce((sum, dataUrl) => sum + getDataUrlEncodedByteSize(dataUrl), 0)
 }
 
-function createNotice(compressedCount: number, originalBytes: number, payloadBytes: number, pass: PlannerReferenceImagePayloadPass) {
+function createNotice(
+  compressedCount: number,
+  originalBytes: number,
+  payloadBytes: number,
+  pass: PlannerReferenceImagePayloadPass,
+) {
   if (compressedCount <= 0 || pass === 'none') return ''
   const suffix = pass === 'fallback' ? '，已自动降级压缩' : ''
   return `本次已压缩 ${compressedCount} 张参考图：${formatMiB(originalBytes)} -> ${formatMiB(payloadBytes)}${suffix}`
@@ -106,7 +111,11 @@ function canvasToTypedBlob(canvas: HTMLCanvasElement, type: string, quality: num
   })
 }
 
-async function encodeCanvas(canvas: HTMLCanvasElement, type: 'image/webp' | 'image/jpeg', quality: number): Promise<Blob | null> {
+async function encodeCanvas(
+  canvas: HTMLCanvasElement,
+  type: 'image/webp' | 'image/jpeg',
+  quality: number,
+): Promise<Blob | null> {
   const blob = await canvasToTypedBlob(canvas, type, quality)
   if (!blob || blob.size <= 0) return null
   return blob.type === type ? blob : null
@@ -323,7 +332,9 @@ export async function prepareReferenceImagePayload(
     }
   }
 
-  throw new Error(`参考图压缩后仍过大：${formatMiB(fallbackBytes)}，上限为 ${formatMiB(maxPayloadBytes)}。请删除部分参考图或换更小图片后重试。`)
+  throw new Error(
+    `参考图压缩后仍过大：${formatMiB(fallbackBytes)}，上限为 ${formatMiB(maxPayloadBytes)}。请删除部分参考图或换更小图片后重试。`,
+  )
 }
 
 export async function prepareReferenceImageAndMaskPayload(
@@ -391,7 +402,9 @@ export async function prepareReferenceImageAndMaskPayload(
     }
   }
 
-  throw new Error(`参考图压缩后仍过大：${formatMiB(fallbackBytes)}，上限为 ${formatMiB(maxPayloadBytes)}。请删除部分参考图或换更小图片后重试。`)
+  throw new Error(
+    `参考图压缩后仍过大：${formatMiB(fallbackBytes)}，上限为 ${formatMiB(maxPayloadBytes)}。请删除部分参考图或换更小图片后重试。`,
+  )
 }
 
 export const preparePlannerReferenceImagePayload = prepareReferenceImagePayload

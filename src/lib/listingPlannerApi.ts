@@ -1,13 +1,7 @@
 import type { ApiProfile } from '../types'
-import { DEFAULT_CHAT_MODEL, DEFAULT_RESPONSES_MODEL } from './apiProfiles'
 import { formatAmazonAPlusReferenceMaterial, formatAmazonListingReferenceMaterial } from './amazonKnowledge'
-import {
-  getAmazonMarketplace,
-  normalizeAmazonMarketplaceId,
-  type AmazonMarketplaceId,
-} from './amazonMarketplaces'
-import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
-import { getApiErrorMessage } from './imageApiShared'
+import { getAmazonMarketplace, normalizeAmazonMarketplaceId, type AmazonMarketplaceId } from './amazonMarketplaces'
+import { assertLlmResponseOk, postLlmRequest, readLlmResponseText, resolveLlmModel } from './llmTransport'
 import type { AmazonPromptDraft } from './amazonPrompt'
 import {
   getAPlusContentTypeLabel,
@@ -24,7 +18,6 @@ import {
   type ListingParseResult,
   type TiktokDesignType,
 } from './listingPlanner'
-import { isEventStreamResponse, looksLikeServerSentEvents, readJsonServerSentEvents, readJsonServerSentEventText } from './serverSentEvents'
 import type { SizeTier } from './size'
 
 interface PlannerApiPayload {
@@ -82,11 +75,6 @@ const CHINESE_LABEL_SCHEMA = {
   description: 'Concise Simplified Chinese label for UI display.',
 } as const
 
-const ENGLISH_ON_IMAGE_COPY_SCHEMA = {
-  type: 'string',
-  description: 'Short natural US-English on-image copy only, or an empty string. The image model should render it consistently when the final prompt includes it; never include Chinese characters.',
-} as const
-
 const ENGLISH_IMAGE_PROMPT_SCHEMA = {
   type: 'string',
   description: 'Professional English image-generation prompt only. Never include Chinese characters.',
@@ -94,7 +82,8 @@ const ENGLISH_IMAGE_PROMPT_SCHEMA = {
 
 const PLAN_MARKDOWN_SCHEMA = {
   type: 'string',
-  description: 'Detailed Simplified Chinese planning write-up for this slot, similar to a ChatGPT agent response. Markdown is allowed.',
+  description:
+    'Detailed Simplified Chinese planning write-up for this slot, similar to a ChatGPT agent response. Markdown is allowed.',
 } as const
 
 const NEGATIVE_PROMPT_SCHEMA = {
@@ -131,7 +120,8 @@ const STYLE_CANDIDATE_SCHEMA = {
     description: { type: 'string', description: 'Simplified Chinese explanation of the visual style option.' },
     prompt: {
       ...ENGLISH_IMAGE_PROMPT_SCHEMA,
-      description: 'Professional English prompt for a 1024x1024 visual style reference board. Never include Chinese characters.',
+      description:
+        'Professional English prompt for a 1024x1024 visual style reference board. Never include Chinese characters.',
     },
     negativePrompt: NEGATIVE_PROMPT_SCHEMA,
   },
@@ -268,67 +258,21 @@ function createAPlusPlannerSchema(specs: AmazonAPlusModuleSpec[], marketplaceId?
             prompt: createAmazonImagePromptSchema(marketplaceId),
             negativePrompt: NEGATIVE_PROMPT_SCHEMA,
           },
-          required: ['slot', 'label', 'moduleType', 'planMarkdown', 'textTitle', 'textBody', 'prompt', 'negativePrompt'],
+          required: [
+            'slot',
+            'label',
+            'moduleType',
+            'planMarkdown',
+            'textTitle',
+            'textBody',
+            'prompt',
+            'negativePrompt',
+          ],
         },
       },
     },
     required: ['product', 'sellingPoints', 'seriesStyleGuide', 'styleCandidates', 'aPlusPlans'],
   } as const
-}
-
-function extractResponseText(payload: unknown): string {
-  if (!payload || typeof payload !== 'object') return ''
-  const record = payload as Record<string, unknown>
-  if (typeof record.output_text === 'string') return record.output_text
-
-  const choices = Array.isArray(record.choices) ? record.choices : []
-  const chatChunks: string[] = []
-  for (const choice of choices) {
-    if (!choice || typeof choice !== 'object') continue
-    const choiceRecord = choice as Record<string, unknown>
-    const message = choiceRecord.message
-    if (message && typeof message === 'object') {
-      const messageRecord = message as Record<string, unknown>
-      const content = messageRecord.content
-      if (typeof content === 'string') chatChunks.push(content)
-      else if (Array.isArray(content)) {
-        for (const part of content) {
-          if (!part || typeof part !== 'object') continue
-          const partRecord = part as Record<string, unknown>
-          if (typeof partRecord.text === 'string') chatChunks.push(partRecord.text)
-        }
-      }
-    }
-    const delta = choiceRecord.delta
-    if (delta && typeof delta === 'object') {
-      const content = (delta as Record<string, unknown>).content
-      if (typeof content === 'string') chatChunks.push(content)
-    }
-  }
-  if (chatChunks.length) return chatChunks.join('\n').trim()
-
-  const output = Array.isArray(record.output) ? record.output : []
-  const chunks: string[] = []
-  for (const item of output) {
-    if (!item || typeof item !== 'object') continue
-    const itemRecord = item as Record<string, unknown>
-    const content = Array.isArray(itemRecord.content) ? itemRecord.content : []
-    for (const part of content) {
-      if (!part || typeof part !== 'object') continue
-      const partRecord = part as Record<string, unknown>
-      if (typeof partRecord.text === 'string') chunks.push(partRecord.text)
-    }
-  }
-  return chunks.join('\n').trim()
-}
-
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function getStringValue(source: Record<string, unknown>, key: string): string | undefined {
-  const value = source[key]
-  return typeof value === 'string' && value ? value : undefined
 }
 
 function parsePlannerPayload(text: string): PlannerApiPayload {
@@ -337,126 +281,11 @@ function parsePlannerPayload(text: string): PlannerApiPayload {
   return JSON.parse(fenced ?? trimmed) as PlannerApiPayload
 }
 
-function getPlannerPayloadFromEvent(event: Record<string, unknown>): unknown {
-  if (isRecordValue(event.response)) return event.response
-  if (isRecordValue(event.item)) return { output: [event.item] }
-  return null
-}
-
-function getPlannerTextFromEvent(event: Record<string, unknown>): string {
-  const directText = extractResponseText(event)
-  if (directText) return directText
-
-  const payloadText = extractResponseText(getPlannerPayloadFromEvent(event))
-  if (payloadText) return payloadText
-
-  const text = getStringValue(event, 'text')
-  if (text) return text
-
-  const part = event.part
-  if (isRecordValue(part)) {
-    const partText = getStringValue(part, 'text')
-    if (partText) return partText
-  }
-
-  return ''
-}
-
-async function readPlannerTextFromSseResponse(response: Response): Promise<string> {
-  let completedText = ''
-  let outputItemText = ''
-  let doneText = ''
-  let deltaText = ''
-
-  await readJsonServerSentEvents(response, (event) => {
-    const type = getStringValue(event, 'type')
-    if (type === 'response.output_text.delta') {
-      deltaText += getStringValue(event, 'delta') ?? ''
-      return
-    }
-
-    const text = getPlannerTextFromEvent(event)
-    if (!text) return
-
-    if (type === 'response.completed') completedText = text
-    else if (type === 'response.output_item.done') outputItemText = text
-    else if (type === 'response.output_text.done' || type === 'response.content_part.done') doneText = text
-    else if (!type) deltaText += text
-  })
-
-  return completedText.trim() || outputItemText.trim() || doneText.trim() || deltaText.trim()
-}
-
-async function readPlannerTextFromSseText(rawText: string): Promise<string> {
-  let completedText = ''
-  let outputItemText = ''
-  let doneText = ''
-  let deltaText = ''
-
-  await readJsonServerSentEventText(rawText, (event) => {
-    const type = getStringValue(event, 'type')
-    if (type === 'response.output_text.delta') {
-      deltaText += getStringValue(event, 'delta') ?? ''
-      return
-    }
-
-    const text = getPlannerTextFromEvent(event)
-    if (!text) return
-
-    if (type === 'response.completed') completedText = text
-    else if (type === 'response.output_item.done') outputItemText = text
-    else if (type === 'response.output_text.done' || type === 'response.content_part.done') doneText = text
-    else if (!type) deltaText += text
-  })
-
-  return completedText.trim() || outputItemText.trim() || doneText.trim() || deltaText.trim()
-}
-
-function isJsonContentType(contentType: string): boolean {
-  return contentType.includes('application/json') || contentType.includes('+json')
-}
-
-function truncateForError(text: string): string {
-  const trimmed = text.trim()
-  if (trimmed.length <= 1200) return trimmed
-  return `${trimmed.slice(0, 1200)}...`
-}
-
-async function readPlannerResponseText(response: Response): Promise<string> {
-  if (isEventStreamResponse(response)) {
-    const text = await readPlannerTextFromSseResponse(response)
-    if (!text) throw new Error('AI 策划流式接口未返回文本内容')
-    return text
-  }
-
-  const rawText = await response.text()
-  if (!rawText.trim()) throw new Error('AI 策划接口返回空内容')
-
-  if (looksLikeServerSentEvents(rawText)) {
-    const text = await readPlannerTextFromSseText(rawText)
-    if (!text) throw new Error('AI 策划流式接口未返回文本内容')
-    return text
-  }
-
-  const contentType = response.headers.get('Content-Type')?.toLowerCase() ?? ''
-  if (!isJsonContentType(contentType) && !/^[{\[]/.test(rawText.trimStart())) {
-    throw new Error(`AI 策划接口返回了非 JSON 内容：${truncateForError(rawText)}`)
-  }
-
-  let payload: unknown
-  try {
-    payload = JSON.parse(rawText)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw new Error(`AI 策划接口返回了无法解析的 JSON：${message}\n\n${truncateForError(rawText)}`)
-  }
-
-  const text = extractResponseText(payload)
-  if (!text) throw new Error('AI 策划接口未返回文本内容')
-  return text
-}
-
-function normalizePlan(plan: Partial<AmazonImagePlan>, index: number, slots = ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06']): AmazonImagePlan {
+function normalizePlan(
+  plan: Partial<AmazonImagePlan>,
+  index: number,
+  slots = ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06'],
+): AmazonImagePlan {
   return {
     slot: plan.slot || slots[index] || `PT${String(index).padStart(2, '0')}`,
     label: plan.label || '图片方案',
@@ -470,7 +299,9 @@ function normalizePlan(plan: Partial<AmazonImagePlan>, index: number, slots = ['
 function normalizeParsedListing(payload: PlannerApiPayload): ListingParseResult {
   const product = payload.product ?? {}
   const sellingPoints = Array.isArray(payload.sellingPoints)
-    ? payload.sellingPoints.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 5)
+    ? payload.sellingPoints
+        .filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
+        .slice(0, 5)
     : []
 
   if (!product.title?.trim()) throw new Error('AI 策划结果缺少商品标题')
@@ -508,12 +339,19 @@ function normalizeSeriesStyleGuide(payload: PlannerApiPayload): string {
   return typeof payload.seriesStyleGuide === 'string' ? payload.seriesStyleGuide.trim() : ''
 }
 
-function normalizeListingPlannerApiPayload(payload: PlannerApiPayload, slots = ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06'], marketplaceId?: AmazonMarketplaceId): PlannerApiResult {
+function normalizeListingPlannerApiPayload(
+  payload: PlannerApiPayload,
+  slots = ['MAIN', 'PT01', 'PT02', 'PT03', 'PT04', 'PT05', 'PT06'],
+  marketplaceId?: AmazonMarketplaceId,
+): PlannerApiResult {
   const parsed = normalizeParsedListing(payload)
   const seriesStyleGuide = normalizeSeriesStyleGuide(payload)
   const styleCandidates = normalizeStyleCandidates(payload)
   const plans = Array.isArray(payload.imagePlans)
-    ? payload.imagePlans.map((plan, index) => normalizePlan(plan, index, slots)).filter((plan) => plan.prompt.trim() && plan.planMarkdown.trim()).slice(0, slots.length)
+    ? payload.imagePlans
+        .map((plan, index) => normalizePlan(plan, index, slots))
+        .filter((plan) => plan.prompt.trim() && plan.planMarkdown.trim())
+        .slice(0, slots.length)
     : []
 
   if (plans.length !== slots.length) throw new Error(`AI 策划结果不是 ${slots.length} 张图`)
@@ -552,7 +390,13 @@ function normalizeAPlusPlan(
   }
 }
 
-function normalizeAPlusPlannerApiPayload(payload: PlannerApiPayload, aPlusType: APlusContentType, tier: SizeTier, specs: AmazonAPlusModuleSpec[], marketplaceId?: AmazonMarketplaceId): PlannerApiResult {
+function normalizeAPlusPlannerApiPayload(
+  payload: PlannerApiPayload,
+  aPlusType: APlusContentType,
+  tier: SizeTier,
+  specs: AmazonAPlusModuleSpec[],
+  marketplaceId?: AmazonMarketplaceId,
+): PlannerApiResult {
   const parsed = normalizeParsedListing(payload)
   const seriesStyleGuide = normalizeSeriesStyleGuide(payload)
   const styleCandidates = normalizeStyleCandidates(payload)
@@ -591,7 +435,10 @@ function buildMarketplaceInstructionBlock(marketplaceId?: AmazonMarketplaceId) {
   ].join('\n')
 }
 
-function buildFieldLanguageRules(marketplaceId?: AmazonMarketplaceId, options: { includeAPlusExternalText?: boolean } = {}) {
+function buildFieldLanguageRules(
+  marketplaceId?: AmazonMarketplaceId,
+  options: { includeAPlusExternalText?: boolean } = {},
+) {
   const marketplace = getAmazonMarketplace(marketplaceId)
   const externalTextRule = options.includeAPlusExternalText
     ? ` textTitle/textBody must be natural ${marketplace.copyLanguage} for ${marketplace.domain} or empty;`
@@ -625,7 +472,9 @@ function buildListingPlannerInstructions(baseDraft: AmazonPromptDraft, marketpla
     buildFieldLanguageRules(marketplaceId),
     'Do not generate images. Only return JSON matching the schema.',
     baseDraft.category ? `Known category: ${baseDraft.category}` : '',
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function getAPlusPlannerTypeName(aPlusType: APlusContentType) {
@@ -641,12 +490,18 @@ function getAPlusPlannerTypeName(aPlusType: APlusContentType) {
   }
 }
 
-function buildAPlusPlannerInstructions(baseDraft: AmazonPromptDraft, aPlusType: APlusContentType, specs: AmazonAPlusModuleSpec[], marketplaceId?: AmazonMarketplaceId) {
+function buildAPlusPlannerInstructions(
+  baseDraft: AmazonPromptDraft,
+  aPlusType: APlusContentType,
+  specs: AmazonAPlusModuleSpec[],
+  marketplaceId?: AmazonMarketplaceId,
+) {
   const typeLabel = getAPlusPlannerTypeName(aPlusType)
   const marketplace = getAmazonMarketplace(marketplaceId)
-  const mobileGuidance = aPlusType === 'mobile'
-    ? `For Mobile A+ modules, design every 600x450 image for compact mobile screens: one clear message per module, large product evidence, short mobile-readable ${marketplace.onImageCopyLanguage} copy, and no dense multi-column layouts.`
-    : ''
+  const mobileGuidance =
+    aPlusType === 'mobile'
+      ? `For Mobile A+ modules, design every 600x450 image for compact mobile screens: one clear message per module, large product evidence, short mobile-readable ${marketplace.onImageCopyLanguage} copy, and no dense multi-column layouts.`
+      : ''
   return [
     'You are an Amazon A+ Content image-planning agent. The user provides listing copy, optional brand notes, and optional product reference images.',
     buildMarketplaceInstructionBlock(marketplaceId),
@@ -669,7 +524,9 @@ function buildAPlusPlannerInstructions(baseDraft: AmazonPromptDraft, aPlusType: 
     `For modules that need external A+ text outside the image, write textTitle and textBody in natural ${marketplace.copyLanguage}. Otherwise return empty strings.`,
     buildFieldLanguageRules(marketplaceId, { includeAPlusExternalText: true }),
     baseDraft.category ? `Known category: ${baseDraft.category}` : '',
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function buildTiktokPlannerInstructions(baseDraft: AmazonPromptDraft, designType: TiktokDesignType) {
@@ -699,17 +556,40 @@ function buildTiktokPlannerInstructions(baseDraft: AmazonPromptDraft, designType
     'Field language rules: label and planMarkdown must be Simplified Chinese; seriesStyleGuide, prompt, and negativePrompt must be English.',
     'Do not generate images. Only return JSON matching the schema.',
     baseDraft.category ? `Known category: ${baseDraft.category}` : '',
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
-function buildPlannerInstructions(baseDraft: AmazonPromptDraft, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId, aPlusModuleSpecs?: AmazonAPlusModuleSpec[]) {
+function buildPlannerInstructions(
+  baseDraft: AmazonPromptDraft,
+  mode: AmazonPlannerMode,
+  aPlusType: APlusContentType,
+  platform: CommercePlannerPlatform,
+  tiktokDesignType: TiktokDesignType,
+  marketplaceId?: AmazonMarketplaceId,
+  aPlusModuleSpecs?: AmazonAPlusModuleSpec[],
+) {
   if (platform === 'tiktok') return buildTiktokPlannerInstructions(baseDraft, tiktokDesignType)
   return mode === 'aplus'
-    ? buildAPlusPlannerInstructions(baseDraft, aPlusType, normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecs), marketplaceId)
+    ? buildAPlusPlannerInstructions(
+        baseDraft,
+        aPlusType,
+        normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecs),
+        marketplaceId,
+      )
     : buildListingPlannerInstructions(baseDraft, marketplaceId)
 }
 
-function buildPlannerInputText(listingText: string, mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId, aPlusModuleSpecs?: AmazonAPlusModuleSpec[]) {
+function buildPlannerInputText(
+  listingText: string,
+  mode: AmazonPlannerMode,
+  aPlusType: APlusContentType,
+  platform: CommercePlannerPlatform,
+  tiktokDesignType: TiktokDesignType,
+  marketplaceId?: AmazonMarketplaceId,
+  aPlusModuleSpecs?: AmazonAPlusModuleSpec[],
+) {
   if (platform === 'tiktok') {
     const slots = getTikTokSlots(tiktokDesignType)
     return [
@@ -776,7 +656,14 @@ function buildResponsesPlannerInput(text: string, referenceImageDataUrls: string
   ]
 }
 
-function buildChatPlannerSchemaGuide(mode: AmazonPlannerMode, aPlusType: APlusContentType, platform: CommercePlannerPlatform, tiktokDesignType: TiktokDesignType, marketplaceId?: AmazonMarketplaceId, aPlusModuleSpecs?: AmazonAPlusModuleSpec[]) {
+function buildChatPlannerSchemaGuide(
+  mode: AmazonPlannerMode,
+  aPlusType: APlusContentType,
+  platform: CommercePlannerPlatform,
+  tiktokDesignType: TiktokDesignType,
+  marketplaceId?: AmazonMarketplaceId,
+  aPlusModuleSpecs?: AmazonAPlusModuleSpec[],
+) {
   const productFields = 'product { title, category, color, material, audience, packageIncludes }'
   const styleFields = 'seriesStyleGuide string, styleCandidates array of exactly 3 style options'
   if (platform === 'tiktok') {
@@ -839,7 +726,8 @@ export async function callAmazonPlannerApi(options: {
   aPlusGenerationTier?: SizeTier
   signal?: AbortSignal
 }): Promise<PlannerApiResult> {
-  const model = options.model?.trim() || options.profile.model.trim() || (options.profile.apiMode === 'chat' ? DEFAULT_CHAT_MODEL : DEFAULT_RESPONSES_MODEL)
+  const useChatCompletions = options.profile.apiMode === 'chat'
+  const model = options.model?.trim() || resolveLlmModel(options.profile, useChatCompletions)
   const mode = options.mode ?? 'listing'
   const platform = options.platform ?? 'amazon'
   const marketplaceId = normalizeAmazonMarketplaceId(options.marketplaceId)
@@ -847,33 +735,38 @@ export async function callAmazonPlannerApi(options: {
   const aPlusType = options.aPlusType ?? 'standard-large'
   const aPlusModuleSpecs = normalizeAPlusModuleSpecs(aPlusType, options.aPlusModuleSpecs)
   const aPlusGenerationTier = options.aPlusGenerationTier ?? '2K'
-  const schema = platform === 'tiktok'
-    ? createTiktokPlannerSchema(tiktokDesignType)
-    : mode === 'aplus' ? createAPlusPlannerSchema(aPlusModuleSpecs, marketplaceId) : createListingPlannerSchema(marketplaceId)
-  const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(options.profile.apiProxy, proxyConfig, options.profile.baseUrl)
-  const useChatCompletions = options.profile.apiMode === 'chat'
-  const inputText = buildPlannerInputText(options.listingText, mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs)
+  const schema =
+    platform === 'tiktok'
+      ? createTiktokPlannerSchema(tiktokDesignType)
+      : mode === 'aplus'
+        ? createAPlusPlannerSchema(aPlusModuleSpecs, marketplaceId)
+        : createListingPlannerSchema(marketplaceId)
+  const inputText = buildPlannerInputText(
+    options.listingText,
+    mode,
+    aPlusType,
+    platform,
+    tiktokDesignType,
+    marketplaceId,
+    aPlusModuleSpecs,
+  )
   const referenceImageDataUrls = options.referenceImageDataUrls ?? []
-  const response = await fetch(
-    useChatCompletions
-      ? buildApiUrl(options.profile.baseUrl, 'chat/completions', proxyConfig, useApiProxy, { prefixV1: false })
-      : buildApiUrl(options.profile.baseUrl, 'responses', proxyConfig, useApiProxy),
-    {
-    method: 'POST',
-    signal: options.signal,
-    headers: {
-      Authorization: `Bearer ${options.profile.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store',
-    body: JSON.stringify(useChatCompletions
+  const createRequestBody = (useChat: boolean) =>
+    useChat
       ? {
           model,
           messages: [
             {
               role: 'system',
-              content: buildChatPlannerSystemPrompt(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs),
+              content: buildChatPlannerSystemPrompt(
+                options.baseDraft,
+                mode,
+                aPlusType,
+                platform,
+                tiktokDesignType,
+                marketplaceId,
+                aPlusModuleSpecs,
+              ),
             },
             {
               role: 'user',
@@ -885,27 +778,56 @@ export async function callAmazonPlannerApi(options: {
         }
       : {
           model,
-          instructions: buildPlannerInstructions(options.baseDraft, mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs),
+          instructions: buildPlannerInstructions(
+            options.baseDraft,
+            mode,
+            aPlusType,
+            platform,
+            tiktokDesignType,
+            marketplaceId,
+            aPlusModuleSpecs,
+          ),
           input: buildResponsesPlannerInput(inputText, referenceImageDataUrls),
           text: {
             format: {
               type: 'json_schema',
-              name: platform === 'tiktok' ? `tiktok_${tiktokDesignType}_image_plan` : mode === 'aplus' ? 'amazon_aplus_image_plan' : 'amazon_listing_image_plan',
+              name:
+                platform === 'tiktok'
+                  ? `tiktok_${tiktokDesignType}_image_plan`
+                  : mode === 'aplus'
+                    ? 'amazon_aplus_image_plan'
+                    : 'amazon_listing_image_plan',
               strict: true,
               schema,
             },
           },
           stream: false,
-        },
-    ),
-    },
-  )
+        }
+  const sendRequest = (useChat: boolean) =>
+    postLlmRequest({
+      profile: options.profile,
+      signal: options.signal,
+      useChatCompletions: useChat,
+      body: createRequestBody(useChat),
+    })
 
-  if (!response.ok) {
-    const message = await getApiErrorMessage(response)
-    throw new Error(`HTTP ${response.status}: ${message}`)
+  let response = await sendRequest(useChatCompletions)
+  let retriedAsChat = false
+  if (!useChatCompletions && response.status === 524) {
+    retriedAsChat = true
+    response = await sendRequest(true)
   }
-  const text = await readPlannerResponseText(response)
+
+  await assertLlmResponseOk(
+    response,
+    response.status === 524
+      ? `HTTP 524：上游策划接口处理超时${retriedAsChat ? '，并已自动改用 Chat Completions 重试' : ''}。请稍后重试，或在 AI 策划配置中直接选择 Chat Completions。`
+      : undefined,
+  )
+  const text = await readLlmResponseText(response, retriedAsChat || useChatCompletions, {
+    emptyError: 'AI 策划接口未返回文本内容',
+    allowNonJsonText: false,
+  })
   const payload = parsePlannerPayload(text)
   if (platform === 'tiktok') return normalizeListingPlannerApiPayload(payload, [...getTikTokSlots(tiktokDesignType)])
   return mode === 'aplus'

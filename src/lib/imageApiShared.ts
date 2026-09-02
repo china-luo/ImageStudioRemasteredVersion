@@ -68,7 +68,10 @@ export function appendOutputResolutionToPrompt(prompt: string, size: string): st
   return `${trimmedPrompt}\n\n${requirement}`
 }
 
-export function createLinkedAbortController(timeoutSeconds: number, signal?: AbortSignal): {
+export function createLinkedAbortController(
+  timeoutSeconds: number,
+  signal?: AbortSignal,
+): {
   controller: AbortController
   clearTimeout: () => void
   cleanup: () => void
@@ -178,7 +181,11 @@ async function probeNoCorsReachability(url: string, timeoutMs = 8000): Promise<'
   }
 }
 
-async function fetchImageViaProxy(proxy: ImageProxyFetchOptions, fallbackMime: string, signal?: AbortSignal): Promise<string> {
+async function fetchImageViaProxy(
+  proxy: ImageProxyFetchOptions,
+  fallbackMime: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const response = await fetch(proxy.proxyUrl, { cache: 'no-store', headers: proxy.headers, signal })
   if (!response.ok) throw new Error(`图片代理下载失败：HTTP ${response.status}`)
   if (response.headers.get('X-Image-Proxy') !== '1') throw new Error('当前部署未启用图片代理')
@@ -234,7 +241,10 @@ export async function getApiErrorMessage(response: Response): Promise<string> {
     const errJson = await response.json()
     if (errJson.error?.message) errorMsg = errJson.error.message
     else if (typeof errJson.detail === 'string') errorMsg = errJson.detail
-    else if (Array.isArray(errJson.detail)) errorMsg = errJson.detail.map((item: unknown) => typeof item === 'string' ? item : JSON.stringify(item)).join('\n')
+    else if (Array.isArray(errJson.detail))
+      errorMsg = errJson.detail
+        .map((item: unknown) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join('\n')
     else if (typeof errJson.error === 'string') errorMsg = errJson.error
     else if (errJson.message) errorMsg = errJson.message
   } catch {
@@ -253,7 +263,12 @@ export function pickActualParams(source: unknown): Partial<TaskParams> {
   const actualParams: Partial<TaskParams> = {}
 
   if (typeof record.size === 'string') actualParams.size = record.size
-  if (record.quality === 'auto' || record.quality === 'low' || record.quality === 'medium' || record.quality === 'high') {
+  if (
+    record.quality === 'auto' ||
+    record.quality === 'low' ||
+    record.quality === 'medium' ||
+    record.quality === 'high'
+  ) {
     actualParams.quality = record.quality
   }
   if (record.output_format === 'png' || record.output_format === 'jpeg' || record.output_format === 'webp') {

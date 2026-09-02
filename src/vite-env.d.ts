@@ -10,6 +10,28 @@ interface Window {
     readonly selectImageSaveDirectory?: () => Promise<boolean>
     readonly saveImageFile?: (file: { fileName: string; data: Uint8Array }) => Promise<string>
     readonly finishImageSave?: () => Promise<void>
+    readonly fetch?: (payload: {
+      url: string
+      method?: string
+      headers?: Record<string, string>
+      body?: number[]
+      allowedHosts?: string[]
+    }) => Promise<{
+      status: number
+      statusText: string
+      headers: Record<string, string>
+      body: number[]
+    }>
+    readonly getSecrets?: () => Promise<{
+      vocApiKey: string
+      apiKey: string
+      profiles: Record<string, string>
+    }>
+    readonly setSecrets?: (payload: {
+      vocApiKey: string
+      apiKey: string
+      profiles: Record<string, string>
+    }) => Promise<boolean>
   }
 }
 

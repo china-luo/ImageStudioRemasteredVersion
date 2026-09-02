@@ -145,7 +145,9 @@ export function buildAmazonPrompt(draft: AmazonPromptDraft) {
     '',
     'Product facts:',
     productFacts.length ? productFacts.join('\n') : '- Product title: [fill in exact product name]',
-    ...(sellingPoints.length ? ['', 'Key selling points to communicate visually:', ...sellingPoints.map((item) => `- ${item}`)] : []),
+    ...(sellingPoints.length
+      ? ['', 'Key selling points to communicate visually:', ...sellingPoints.map((item) => `- ${item}`)]
+      : []),
     '',
     `Image type: ${preset.label} (${preset.goal}).`,
     ...preset.guidance.map((item) => `- ${item}`),
@@ -158,7 +160,9 @@ export function buildAmazonPrompt(draft: AmazonPromptDraft) {
     '- No customer reviews, five-star ratings, free shipping claims, seller-specific claims, pricing, coupons, or discount text.',
     '- No Amazon, Prime, Alexa, Amazon Choice, Best Seller, hot sale, marketplace badges, or lookalike marks.',
     '- No watermark, border, placeholder, mock UI, or graphic overlay that is not physically part of the product.',
-    ...(forbidden.length ? ['- Exclude these specific items or visual risks:', ...forbidden.map((item) => `  - ${item}`)] : []),
+    ...(forbidden.length
+      ? ['- Exclude these specific items or visual risks:', ...forbidden.map((item) => `  - ${item}`)]
+      : []),
     '',
     'Rendering requirements:',
     '- Photorealistic commercial product photography, sharp edges, clean lighting, high resolution, no pixelation, no artifacts.',

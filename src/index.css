@@ -578,3 +578,191 @@ input[type="number"] {
   isolation: isolate;
   -webkit-mask-image: -webkit-radial-gradient(white, black);
 }
+
+/* Motion accents from OriginKit / Vault / NameThatUI.
+   Keep the existing product skin; only add interaction motion. */
+.task-card-wrapper {
+  animation: studio-card-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.task-card-wrapper:nth-child(1) { animation-delay: 0ms; }
+.task-card-wrapper:nth-child(2) { animation-delay: 40ms; }
+.task-card-wrapper:nth-child(3) { animation-delay: 80ms; }
+.task-card-wrapper:nth-child(4) { animation-delay: 120ms; }
+.task-card-wrapper:nth-child(5) { animation-delay: 160ms; }
+.task-card-wrapper:nth-child(6) { animation-delay: 200ms; }
+.task-card-wrapper:nth-child(n+7) { animation-delay: 240ms; }
+
+@keyframes studio-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.generating {
+  animation: pulse-border 1.8s ease-in-out infinite;
+}
+
+.generating::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 18%,
+    rgb(255 255 255 / 0.34) 48%,
+    transparent 72%
+  );
+  transform: translateX(-120%);
+  animation: studio-shimmer 1.6s ease-in-out infinite;
+}
+
+.dark .generating::after,
+:is(.dark) .generating::after {
+  background: linear-gradient(
+    105deg,
+    transparent 18%,
+    rgb(147 197 253 / 0.16) 48%,
+    transparent 72%
+  );
+}
+
+@keyframes studio-shimmer {
+  to { transform: translateX(120%); }
+}
+
+.media-reveal {
+  animation: studio-media-reveal 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes studio-media-reveal {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+.progress-ring {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 9999px;
+  background: conic-gradient(#60a5fa 0 28%, rgb(147 197 253 / 0.18) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  animation: studio-ring 1.05s linear infinite;
+}
+
+@keyframes studio-ring {
+  to { transform: rotate(360deg); }
+}
+
+.empty-state-mark {
+  animation: studio-empty-float 4.8s ease-in-out infinite;
+}
+
+@keyframes studio-empty-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.lightbox-scrim {
+  background:
+    radial-gradient(circle at 50% 42%, rgb(15 23 42 / 0.18), rgb(0 0 0 / 0.72)),
+    rgb(0 0 0 / 0.5);
+}
+
+.animate-zoom-in {
+  animation: studio-lightbox-spring 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes studio-lightbox-spring {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.carousel-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 9999px;
+  background: rgb(0 0 0 / 0.42);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.carousel-dot {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.38);
+  transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease;
+}
+
+.carousel-dot.is-active {
+  width: 16px;
+  background: white;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-card-wrapper,
+  .generating,
+  .generating::after,
+  .media-reveal,
+  .progress-ring,
+  .empty-state-mark,
+  .animate-zoom-in {
+    animation: none !important;
+    filter: none !important;
+    transform: none !important;
+  }
+}
+
+
+
+.studio-vortex-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  mix-blend-mode: screen;
+}
+
+/* The image is the visual foundation; keep the optional effect from washing
+   out the product surface when it is enabled in a custom build. */
+.studio-vortex-layer + #root,
+.studio-vortex-layer ~ #root {
+  isolation: isolate;
+}
+
+.studio-vortex-layer canvas {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-vortex-layer {
+    display: none;
+  }
+}

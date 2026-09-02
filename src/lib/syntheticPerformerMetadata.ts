@@ -69,11 +69,7 @@ const ADOBE_XMP_EXTENSION_SIGNATURE = UTF8.encode('http://ns.adobe.com/xmp/exten
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const PNG_XMP_KEYWORD = 'XML:com.adobe.xmp'
 const ADOBE_XMP_UUID = new Uint8Array([
-  0xbe, 0x7a, 0xcf, 0xcb,
-  0x97, 0xa9,
-  0x42, 0xe8,
-  0x9c, 0x71,
-  0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac,
+  0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac,
 ])
 
 type JpegSegment = {
@@ -174,7 +170,7 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function escapeXml(value: string): string {
+function _escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -223,15 +219,18 @@ export function getSyntheticPerformerMediaMimeType(fileName: string): string | n
 }
 
 export function getSyntheticPerformerMediaValidationError(file: Pick<File, 'name' | 'size'>): string | null {
-  if (!isSupportedSyntheticPerformerMedia(file)) return `不支持「${file.name || '未命名文件'}」的格式，仅支持 JPG、PNG、WebP、MP4、MOV`
+  if (!isSupportedSyntheticPerformerMedia(file))
+    return `不支持「${file.name || '未命名文件'}」的格式，仅支持 JPG、PNG、WebP、MP4、MOV`
   if (file.size <= 0) return `「${file.name || '未命名文件'}」是空文件`
-  if (file.size > MAX_SYNTHETIC_PERFORMER_FILE_BYTES) return `「${file.name}」超过单文件 500 MB 限制，请使用本地桌面版处理`
+  if (file.size > MAX_SYNTHETIC_PERFORMER_FILE_BYTES)
+    return `「${file.name}」超过单文件 500 MB 限制，请使用本地桌面版处理`
   return null
 }
 
 function isBasicWellFormedXml(xml: string): boolean {
   const stack: string[] = []
-  const token = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<\/?([A-Za-z_][\w:.-]*)(?:\s[^<>]*?)?\s*\/?\s*>/g
+  const token =
+    /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<\/?([A-Za-z_][\w:.-]*)(?:\s[^<>]*?)?\s*\/?\s*>/g
   let match: RegExpExecArray | null
   while ((match = token.exec(xml))) {
     const full = match[0]
@@ -253,7 +252,8 @@ function assertValidXmpPacket(packet: string) {
 
   if (typeof DOMParser !== 'undefined') {
     const document = new DOMParser().parseFromString(packet, 'application/xml')
-    if (document.getElementsByTagName('parsererror').length > 0) throw makeError('现有 XMP XML 无法解析，已停止处理以保护原文件')
+    if (document.getElementsByTagName('parsererror').length > 0)
+      throw makeError('现有 XMP XML 无法解析，已停止处理以保护原文件')
     return
   }
 
@@ -267,7 +267,7 @@ function getNamespacePrefix(packet: string, namespace: string): string | null {
 
 function startTagWithAttribute(tag: string, attribute: string): string {
   const isSelfClosing = /\/\s*>$/.test(tag)
-  const suffixLength = isSelfClosing ? tag.match(/\/\s*>$/)?.[0].length ?? 2 : 1
+  const suffixLength = isSelfClosing ? (tag.match(/\/\s*>$/)?.[0].length ?? 2) : 1
   return `${tag.slice(0, -suffixLength)} ${attribute}${isSelfClosing ? '/>' : '>'}`
 }
 
@@ -316,9 +316,17 @@ function updateXmpPacket(existingPacket: string | null): string {
     if (!description || description.index == null) throw makeError('无法更新 XMP 命名空间')
   }
 
-  const subjectExpression = new RegExp(`<${escapeRegex(dcPrefix)}:subject\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(dcPrefix)}:subject\\s*>`, 'g')
-  const bagExpression = new RegExp(`<${escapeRegex(rdfPrefix)}:Bag\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(rdfPrefix)}:Bag\\s*>`)
-  const liExpression = new RegExp(`<${escapeRegex(rdfPrefix)}:li\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegex(rdfPrefix)}:li\\s*>`, 'g')
+  const subjectExpression = new RegExp(
+    `<${escapeRegex(dcPrefix)}:subject\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(dcPrefix)}:subject\\s*>`,
+    'g',
+  )
+  const bagExpression = new RegExp(
+    `<${escapeRegex(rdfPrefix)}:Bag\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(rdfPrefix)}:Bag\\s*>`,
+  )
+  const liExpression = new RegExp(
+    `<${escapeRegex(rdfPrefix)}:li\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegex(rdfPrefix)}:li\\s*>`,
+    'g',
+  )
   let foundSubject = false
   let foundBag = false
   let inserted = false
@@ -333,9 +341,9 @@ function updateXmpPacket(existingPacket: string | null): string {
     const closingStart = bag.lastIndexOf(`</${rdfPrefix}:Bag`)
     if (openingEnd <= 0 || closingStart < openingEnd) throw makeError('现有 XMP 的 rdf:Bag 结构无效')
 
-    const cleanedItems = bag.slice(openingEnd, closingStart).replace(liExpression, (item, value: string) => (
-      xmlText(value) === SYNTHETIC_PERFORMER_KEYWORD ? '' : item
-    ))
+    const cleanedItems = bag
+      .slice(openingEnd, closingStart)
+      .replace(liExpression, (item, value: string) => (xmlText(value) === SYNTHETIC_PERFORMER_KEYWORD ? '' : item))
     const nextItems = inserted
       ? cleanedItems
       : `${cleanedItems}${cleanedItems.includes('\n') ? '\n  ' : ''}<${rdfPrefix}:li>${SYNTHETIC_PERFORMER_KEYWORD}</${rdfPrefix}:li>`
@@ -366,9 +374,17 @@ function countKeywordInXmp(packet: string): number {
   const dcPrefix = getNamespacePrefix(packet, DC_NAMESPACE)
   if (!rdfPrefix || !dcPrefix) return 0
 
-  const subjectExpression = new RegExp(`<${escapeRegex(dcPrefix)}:subject\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(dcPrefix)}:subject\\s*>`, 'g')
-  const bagExpression = new RegExp(`<${escapeRegex(rdfPrefix)}:Bag\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(rdfPrefix)}:Bag\\s*>`)
-  const liExpression = new RegExp(`<${escapeRegex(rdfPrefix)}:li\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegex(rdfPrefix)}:li\\s*>`, 'g')
+  const subjectExpression = new RegExp(
+    `<${escapeRegex(dcPrefix)}:subject\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(dcPrefix)}:subject\\s*>`,
+    'g',
+  )
+  const bagExpression = new RegExp(
+    `<${escapeRegex(rdfPrefix)}:Bag\\b[^>]*>[\\s\\S]*?<\\/${escapeRegex(rdfPrefix)}:Bag\\s*>`,
+  )
+  const liExpression = new RegExp(
+    `<${escapeRegex(rdfPrefix)}:li\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegex(rdfPrefix)}:li\\s*>`,
+    'g',
+  )
   let count = 0
   let subject: RegExpExecArray | null
 
@@ -522,7 +538,12 @@ function getPngXmpCarrier(bytes: Uint8Array): XmpCarrier | null {
   const chunks = parsePngChunks(bytes)
   const matches: XmpCarrier[] = []
   for (const chunk of chunks) {
-    if ((chunk.type === 'tEXt' || chunk.type === 'zTXt' || chunk.type === 'iTXt') && LATIN1.decode(bytes.slice(chunk.dataStart, Math.min(chunk.dataStart + 24, chunk.dataEnd))).startsWith('Raw profile type xmp')) {
+    if (
+      (chunk.type === 'tEXt' || chunk.type === 'zTXt' || chunk.type === 'iTXt') &&
+      LATIN1.decode(bytes.slice(chunk.dataStart, Math.min(chunk.dataStart + 24, chunk.dataEnd))).startsWith(
+        'Raw profile type xmp',
+      )
+    ) {
       throw makeError('PNG 含有非标准 XMP 配置文件，轻量打标器无法安全修改')
     }
     const parsed = parsePngXmpChunk(bytes, chunk)
@@ -567,7 +588,8 @@ function writePngXmp(bytes: Uint8Array, packet: string): Uint8Array {
 }
 
 function parseWebpChunks(bytes: Uint8Array): WebpChunk[] {
-  if (bytes.length < 12 || fourCc(bytes, 0) !== 'RIFF' || fourCc(bytes, 8) !== 'WEBP') throw makeError('文件不是有效的 WebP')
+  if (bytes.length < 12 || fourCc(bytes, 0) !== 'RIFF' || fourCc(bytes, 8) !== 'WEBP')
+    throw makeError('文件不是有效的 WebP')
   const end = 8 + readU32LE(bytes, 4)
   if (end !== bytes.length) throw makeError('WebP RIFF 长度无效')
 
@@ -681,7 +703,9 @@ function parseIsoBoxes(bytes: Uint8Array): IsoBox[] {
 function getVideoXmpCarrier(bytes: Uint8Array): XmpCarrier | null {
   const boxes = parseIsoBoxes(bytes)
   if (boxes.some((box) => box.type === 'XMP_')) throw makeError('视频含有非标准 XMP atom，轻量打标器无法安全修改')
-  const matches = boxes.filter((box) => box.type === 'uuid' && box.end - box.start >= 24 && bytesEqualAt(bytes, ADOBE_XMP_UUID, box.start + 8))
+  const matches = boxes.filter(
+    (box) => box.type === 'uuid' && box.end - box.start >= 24 && bytesEqualAt(bytes, ADOBE_XMP_UUID, box.start + 8),
+  )
   if (matches.length > 1) throw makeError('视频含有多个 Adobe XMP UUID atom，轻量打标器无法安全修改')
   const match = matches[0]
   if (!match) return null
@@ -717,8 +741,10 @@ function writeVideoXmp(bytes: Uint8Array, packet: string): Uint8Array {
 
 function readXmpCarrier(bytes: Uint8Array, format: SyntheticPerformerMediaFormat): XmpCarrier | null {
   switch (format) {
-    case 'jpeg': return getJpegXmpCarrier(bytes)
-    case 'png': return getPngXmpCarrier(bytes)
+    case 'jpeg':
+      return getJpegXmpCarrier(bytes)
+    case 'png':
+      return getPngXmpCarrier(bytes)
     case 'webp': {
       const packet = getWebpXmpPacket(parseWebpChunks(bytes))
       return packet ? { packet, start: 0, end: bytes.length, kind: 'webp' } : null
@@ -731,11 +757,15 @@ function readXmpCarrier(bytes: Uint8Array, format: SyntheticPerformerMediaFormat
 
 function writeXmpCarrier(bytes: Uint8Array, format: SyntheticPerformerMediaFormat, packet: string): Uint8Array {
   switch (format) {
-    case 'jpeg': return writeJpegXmp(bytes, packet)
-    case 'png': return writePngXmp(bytes, packet)
-    case 'webp': return writeWebpXmp(bytes, packet)
+    case 'jpeg':
+      return writeJpegXmp(bytes, packet)
+    case 'png':
+      return writePngXmp(bytes, packet)
+    case 'webp':
+      return writeWebpXmp(bytes, packet)
     case 'mp4':
-    case 'mov': return writeVideoXmp(bytes, packet)
+    case 'mov':
+      return writeVideoXmp(bytes, packet)
   }
 }
 
@@ -749,7 +779,12 @@ export function verifySyntheticPerformerTag(bytes: Uint8Array, fileName: string)
     const keywordCount = countKeywordInXmp(carrier.packet)
     return keywordCount === 1
       ? { valid: true, keywordCount, xmp: carrier.packet }
-      : { valid: false, keywordCount, xmp: carrier.packet, error: `XMP dc:subject rdf:Bag 中找到 ${keywordCount} 个目标标记` }
+      : {
+          valid: false,
+          keywordCount,
+          xmp: carrier.packet,
+          error: `XMP dc:subject rdf:Bag 中找到 ${keywordCount} 个目标标记`,
+        }
   } catch (error) {
     return {
       valid: false,

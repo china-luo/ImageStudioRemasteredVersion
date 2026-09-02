@@ -6,6 +6,7 @@ export interface DevProxyConfig {
   target: string
   changeOrigin: boolean
   secure: boolean
+  allowedHosts?: string[]
 }
 
 export interface DevProxyRequestTarget {
@@ -23,9 +24,7 @@ function normalizeBaseUrlPreservePath(baseUrl: string): string {
   const trimmed = baseUrl.trim()
   if (!trimmed) return ''
 
-  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`
+  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`
 
   try {
     const url = new URL(input)
@@ -40,24 +39,26 @@ export function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim()
   if (!trimmed) return ''
 
-  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`
+  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`
 
   try {
     const url = new URL(input)
     const pathSegments = url.pathname.split('/').filter(Boolean)
     const v1Index = pathSegments.indexOf('v1')
-    const normalizedSegments = v1Index >= 0
-      ? pathSegments.slice(0, v1Index + 1)
-      : pathSegments.length
-        ? [...pathSegments, 'v1']
-        : []
+    const normalizedSegments =
+      v1Index >= 0 ? pathSegments.slice(0, v1Index + 1) : pathSegments.length ? [...pathSegments, 'v1'] : []
     const pathname = normalizedSegments.length ? `/${normalizedSegments.join('/')}` : ''
     return `${url.origin}${pathname}`
   } catch {
     return trimmed.replace(/\/+$/, '')
   }
+}
+
+function normalizeAllowedHosts(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
+    .map((item) => item.trim().toLowerCase())
 }
 
 export function normalizeDevProxyConfig(input: unknown): DevProxyConfig | null {
@@ -77,6 +78,7 @@ export function normalizeDevProxyConfig(input: unknown): DevProxyConfig | null {
     target,
     changeOrigin: record.changeOrigin !== false,
     secure: Boolean(record.secure),
+    allowedHosts: normalizeAllowedHosts(record.allowedHosts),
   }
 }
 
@@ -90,11 +92,12 @@ export function buildApiUrl(
   const prefixV1 = options.prefixV1 !== false
   const normalizedBaseUrl = prefixV1 ? normalizeBaseUrl(baseUrl) : normalizeBaseUrlPreservePath(baseUrl)
   const endpointPath = path.replace(/^\/+/, '')
-  const apiPath = prefixV1 && normalizedBaseUrl.endsWith('/v1')
-    ? endpointPath
-    : prefixV1
-      ? ['v1', endpointPath].join('/')
-      : endpointPath
+  const apiPath =
+    prefixV1 && normalizedBaseUrl.endsWith('/v1')
+      ? endpointPath
+      : prefixV1
+        ? ['v1', endpointPath].join('/')
+        : endpointPath
 
   if (useApiProxy) {
     const proxyPrefix = proxyConfig?.prefix ?? DEFAULT_PROXY_PREFIX

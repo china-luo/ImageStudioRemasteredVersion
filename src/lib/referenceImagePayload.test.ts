@@ -67,10 +67,12 @@ describe('prepareReferenceImagePayload', () => {
   it('throws locally when the fallback payload is still too large', async () => {
     const compressor = vi.fn(async () => dataUrlOfLength(80, 'data:image/webp;base64,'))
 
-    await expect(prepareReferenceImagePayload([dataUrlOfLength(200), dataUrlOfLength(300)], {
-      maxPayloadBytes: 100,
-      compressor,
-    })).rejects.toThrow('参考图压缩后仍过大')
+    await expect(
+      prepareReferenceImagePayload([dataUrlOfLength(200), dataUrlOfLength(300)], {
+        maxPayloadBytes: 100,
+        compressor,
+      }),
+    ).rejects.toThrow('参考图压缩后仍过大')
 
     expect(compressor).toHaveBeenCalledTimes(4)
   })
@@ -80,10 +82,12 @@ describe('prepareReferenceImagePayload', () => {
     const controller = new AbortController()
     controller.abort()
 
-    await expect(prepareReferenceImagePayload([dataUrlOfLength(200)], {
-      signal: controller.signal,
-      compressor,
-    })).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(
+      prepareReferenceImagePayload([dataUrlOfLength(200)], {
+        signal: controller.signal,
+        compressor,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
 
     expect(compressor).not.toHaveBeenCalled()
   })
@@ -97,11 +101,15 @@ describe('prepareReferenceImageAndMaskPayload', () => {
       maskDataUrl: dataUrlOfLength(30, 'data:image/png;base64,'),
     }))
 
-    const result = await prepareReferenceImageAndMaskPayload([dataUrlOfLength(200), dataUrlOfLength(180)], dataUrlOfLength(160), {
-      maxPayloadBytes: 140,
-      compressor,
-      maskCompressor,
-    })
+    const result = await prepareReferenceImageAndMaskPayload(
+      [dataUrlOfLength(200), dataUrlOfLength(180)],
+      dataUrlOfLength(160),
+      {
+        maxPayloadBytes: 140,
+        compressor,
+        maskCompressor,
+      },
+    )
 
     expect(maskCompressor).toHaveBeenCalledTimes(1)
     expect(compressor).toHaveBeenCalledTimes(1)

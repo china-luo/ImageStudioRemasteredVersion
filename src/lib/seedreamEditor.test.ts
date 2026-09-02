@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
-import { appendSeedreamQuickAction, buildSeedreamEditPrompt, createImageEditorParams, createSeedreamEditorParams, findLatestImageEditorTask, findSeedreamAnnotationAtPoint, translateSeedreamAnnotation } from './seedreamEditor'
+import {
+  appendSeedreamQuickAction,
+  buildSeedreamEditPrompt,
+  createImageEditorParams,
+  createSeedreamEditorParams,
+  findLatestImageEditorTask,
+  findSeedreamAnnotationAtPoint,
+  translateSeedreamAnnotation,
+} from './seedreamEditor'
 
 function editorTask(overrides: Partial<TaskRecord>): TaskRecord {
   return {
@@ -75,10 +83,16 @@ describe('Seedream editor params', () => {
   })
 
   it('keeps Seedream Pro on its native resolution tiers', () => {
-    expect(createImageEditorParams('4k', {
-      provider: 'volcengine',
-      model: 'doubao-seedream-5-0-pro-260628',
-    }, { width: 1600, height: 900 })).toMatchObject({ size: '4K', n: 1 })
+    expect(
+      createImageEditorParams(
+        '4k',
+        {
+          provider: 'volcengine',
+          model: 'doubao-seedream-5-0-pro-260628',
+        },
+        { width: 1600, height: 900 },
+      ),
+    ).toMatchObject({ size: '4K', n: 1 })
   })
 
   it('adds quick actions without overwriting the existing requirement', () => {
@@ -126,14 +140,47 @@ describe('Seedream editor history recovery', () => {
 
 describe('Seedream visual guide hit testing', () => {
   it.each([
-    ['brush', [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.5 }], { x: 0.3, y: 0.3 }],
-    ['arrow', [{ x: 0.1, y: 0.5 }, { x: 0.8, y: 0.5 }], { x: 0.4, y: 0.5 }],
-    ['rectangle', [{ x: 0.2, y: 0.2 }, { x: 0.8, y: 0.8 }], { x: 0.2, y: 0.5 }],
-    ['ellipse', [{ x: 0.2, y: 0.2 }, { x: 0.8, y: 0.8 }], { x: 0.5, y: 0.2 }],
+    [
+      'brush',
+      [
+        { x: 0.1, y: 0.1 },
+        { x: 0.5, y: 0.5 },
+      ],
+      { x: 0.3, y: 0.3 },
+    ],
+    [
+      'arrow',
+      [
+        { x: 0.1, y: 0.5 },
+        { x: 0.8, y: 0.5 },
+      ],
+      { x: 0.4, y: 0.5 },
+    ],
+    [
+      'rectangle',
+      [
+        { x: 0.2, y: 0.2 },
+        { x: 0.8, y: 0.8 },
+      ],
+      { x: 0.2, y: 0.5 },
+    ],
+    [
+      'ellipse',
+      [
+        { x: 0.2, y: 0.2 },
+        { x: 0.8, y: 0.8 },
+      ],
+      { x: 0.5, y: 0.2 },
+    ],
   ] as const)('finds a %s annotation for the eraser', (kind, points, point) => {
-    expect(findSeedreamAnnotationAtPoint([
-      { id: 'target', kind, color: '#ef4444', width: 0.006, points: [...points] },
-    ], point, 1000, 1000)).toBe('target')
+    expect(
+      findSeedreamAnnotationAtPoint(
+        [{ id: 'target', kind, color: '#ef4444', width: 0.006, points: [...points] }],
+        point,
+        1000,
+        1000,
+      ),
+    ).toBe('target')
   })
 
   it('moves an existing annotation and keeps every point inside the image', () => {
@@ -142,7 +189,10 @@ describe('Seedream visual guide hit testing', () => {
       kind: 'arrow' as const,
       color: '#ef4444',
       width: 0.006,
-      points: [{ x: 0.2, y: 0.3 }, { x: 0.8, y: 0.7 }],
+      points: [
+        { x: 0.2, y: 0.3 },
+        { x: 0.8, y: 0.7 },
+      ],
     }
 
     const moved = translateSeedreamAnnotation(annotation, { x: 0.1, y: -0.2 }).points
@@ -156,4 +206,3 @@ describe('Seedream visual guide hit testing', () => {
     expect(clamped[1]).toEqual({ x: 1, y: 1 })
   })
 })
-

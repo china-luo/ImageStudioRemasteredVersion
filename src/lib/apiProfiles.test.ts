@@ -274,8 +274,14 @@ describe('mergeImportedSettings', () => {
     expect(merged.profiles).toHaveLength(4)
     expect(merged.activeProfileId).toBe(DEFAULT_OPENAI_PROFILE_ID)
     expect(merged.profiles[0]).toMatchObject({ apiKey: 'current-key', model: 'current-model' })
-    expect(merged.profiles.find((profile) => profile.name === 'Imported OpenAI')).toMatchObject({ provider: 'openai', apiKey: 'imported-key' })
-    expect(merged.profiles.find((profile) => profile.name === 'Imported fal')).toMatchObject({ provider: 'fal', apiKey: 'fal-key' })
+    expect(merged.profiles.find((profile) => profile.name === 'Imported OpenAI')).toMatchObject({
+      provider: 'openai',
+      apiKey: 'imported-key',
+    })
+    expect(merged.profiles.find((profile) => profile.name === 'Imported fal')).toMatchObject({
+      provider: 'fal',
+      apiKey: 'fal-key',
+    })
     expect(new Set(merged.profiles.map((profile) => profile.id)).size).toBe(4)
   })
 
@@ -316,60 +322,71 @@ describe('mergeImportedSettings', () => {
 
     expect(merged.profiles).toHaveLength(3)
     expect(merged.profiles[0]).toMatchObject({ apiKey: 'current-key', model: 'current-model' })
-    expect(merged.profiles.find((profile) => profile.provider === 'fal')).toMatchObject({ apiKey: 'fal-key', model: DEFAULT_FAL_MODEL })
+    expect(merged.profiles.find((profile) => profile.provider === 'fal')).toMatchObject({
+      apiKey: 'fal-key',
+      model: DEFAULT_FAL_MODEL,
+    })
   })
 
   it('reuses an existing keyed profile when importing the same custom profile without an API key', () => {
     const current = mergeImportedSettings(DEFAULT_SETTINGS, {
-      customProviders: [{
-        id: 'custom-json',
-        name: 'Custom JSON',
-        submit: {
-          path: 'images/generations',
-          method: 'POST',
-          contentType: 'json',
-          body: { model: '$profile.model', prompt: '$prompt' },
-          result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
+      customProviders: [
+        {
+          id: 'custom-json',
+          name: 'Custom JSON',
+          submit: {
+            path: 'images/generations',
+            method: 'POST',
+            contentType: 'json',
+            body: { model: '$profile.model', prompt: '$prompt' },
+            result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
+          },
         },
-      }],
-      profiles: [{
-        id: 'existing-custom',
-        name: 'Existing Custom',
-        provider: 'custom-json',
-        baseUrl: 'https://custom.example.com/v1',
-        apiKey: 'existing-key',
-        model: 'custom-model',
-        timeout: 300,
-        apiMode: 'images',
-        codexCli: false,
-        apiProxy: false,
-      }],
+      ],
+      profiles: [
+        {
+          id: 'existing-custom',
+          name: 'Existing Custom',
+          provider: 'custom-json',
+          baseUrl: 'https://custom.example.com/v1',
+          apiKey: 'existing-key',
+          model: 'custom-model',
+          timeout: 300,
+          apiMode: 'images',
+          codexCli: false,
+          apiProxy: false,
+        },
+      ],
       activeProfileId: 'existing-custom',
     })
     const imported = normalizeSettings({
-      customProviders: [{
-        id: 'custom-json',
-        name: 'Custom JSON',
-        submit: {
-          path: 'images/generations',
-          method: 'POST',
-          contentType: 'json',
-          body: { model: '$profile.model', prompt: '$prompt' },
-          result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
+      customProviders: [
+        {
+          id: 'custom-json',
+          name: 'Custom JSON',
+          submit: {
+            path: 'images/generations',
+            method: 'POST',
+            contentType: 'json',
+            body: { model: '$profile.model', prompt: '$prompt' },
+            result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
+          },
         },
-      }],
-      profiles: [{
-        id: 'imported-custom',
-        name: 'Imported Custom',
-        provider: 'custom-json',
-        baseUrl: 'https://custom.example.com/v1',
-        apiKey: '',
-        model: 'custom-model',
-        timeout: 300,
-        apiMode: 'images',
-        codexCli: false,
-        apiProxy: false,
-      }],
+      ],
+      profiles: [
+        {
+          id: 'imported-custom',
+          name: 'Imported Custom',
+          provider: 'custom-json',
+          baseUrl: 'https://custom.example.com/v1',
+          apiKey: '',
+          model: 'custom-model',
+          timeout: 300,
+          apiMode: 'images',
+          codexCli: false,
+          apiProxy: false,
+        },
+      ],
     })
     const merged = mergeImportedSettings(current, imported)
     const match = findEquivalentApiProfile(merged, imported.profiles[0], imported.customProviders)
@@ -381,30 +398,36 @@ describe('mergeImportedSettings', () => {
   it('does not replace existing custom providers when only the default profile remains', () => {
     const current = normalizeSettings({
       ...DEFAULT_SETTINGS,
-      customProviders: [{
-        id: 'custom-existing',
-        name: 'Existing Provider',
-        submit: { path: 'images/generations' },
-      }],
+      customProviders: [
+        {
+          id: 'custom-existing',
+          name: 'Existing Provider',
+          submit: { path: 'images/generations' },
+        },
+      ],
     })
     const merged = mergeImportedSettings(current, {
-      customProviders: [{
-        id: 'custom-imported',
-        name: 'Imported Provider',
-        submit: { path: 'images/generations' },
-      }],
-      profiles: [{
-        id: 'imported-custom',
-        name: 'Imported Custom',
-        provider: 'custom-imported',
-        baseUrl: 'https://custom.example.com/v1',
-        apiKey: '',
-        model: 'custom-model',
-        timeout: 300,
-        apiMode: 'images',
-        codexCli: false,
-        apiProxy: false,
-      }],
+      customProviders: [
+        {
+          id: 'custom-imported',
+          name: 'Imported Provider',
+          submit: { path: 'images/generations' },
+        },
+      ],
+      profiles: [
+        {
+          id: 'imported-custom',
+          name: 'Imported Custom',
+          provider: 'custom-imported',
+          baseUrl: 'https://custom.example.com/v1',
+          apiKey: '',
+          model: 'custom-model',
+          timeout: 300,
+          apiMode: 'images',
+          codexCli: false,
+          apiProxy: false,
+        },
+      ],
     })
 
     expect(merged.customProviders.map((provider) => provider.id)).toEqual(['custom-existing', 'custom-imported'])
@@ -418,29 +441,33 @@ describe('mergeImportedSettings', () => {
       model: 'current-model',
     })
     const merged = mergeImportedSettings(current, {
-      customProviders: [{
-        id: 'custom-json',
-        name: 'Custom JSON',
-        submit: {
-          path: 'images/generations',
-          method: 'POST',
-          contentType: 'json',
-          body: { model: '$profile.model', prompt: '$prompt' },
-          result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
+      customProviders: [
+        {
+          id: 'custom-json',
+          name: 'Custom JSON',
+          submit: {
+            path: 'images/generations',
+            method: 'POST',
+            contentType: 'json',
+            body: { model: '$profile.model', prompt: '$prompt' },
+            result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
+          },
         },
-      }],
-      profiles: [{
-        id: 'imported-custom',
-        name: 'Imported Custom',
-        provider: 'custom-json',
-        baseUrl: 'https://custom.example.com/v1',
-        apiKey: 'custom-key',
-        model: 'custom-model',
-        timeout: 300,
-        apiMode: 'images',
-        codexCli: false,
-        apiProxy: false,
-      }],
+      ],
+      profiles: [
+        {
+          id: 'imported-custom',
+          name: 'Imported Custom',
+          provider: 'custom-json',
+          baseUrl: 'https://custom.example.com/v1',
+          apiKey: 'custom-key',
+          model: 'custom-model',
+          timeout: 300,
+          apiMode: 'images',
+          codexCli: false,
+          apiProxy: false,
+        },
+      ],
     })
 
     expect(merged.customProviders).toHaveLength(1)
@@ -458,26 +485,30 @@ describe('mergeImportedSettings', () => {
 describe('custom providers', () => {
   it('normalizes custom provider definitions and keeps custom profiles', () => {
     const settings = normalizeSettings({
-      customProviders: [{
-        id: 'custom-async',
-        name: 'Custom Async',
-        template: 'openai-compatible-async',
-        generationPath: '/v1/images/generations',
-        editPath: '/v1/images/edits',
-        taskPath: '/v1/images/tasks/{task_id}',
-      }],
-      profiles: [{
-        id: 'profile-custom',
-        name: 'Custom Profile',
-        provider: 'custom-async',
-        baseUrl: 'https://api.example.com/v1',
-        apiKey: 'key',
-        model: 'model',
-        timeout: 60,
-        apiMode: 'images',
-        codexCli: false,
-        apiProxy: false,
-      }],
+      customProviders: [
+        {
+          id: 'custom-async',
+          name: 'Custom Async',
+          template: 'openai-compatible-async',
+          generationPath: '/v1/images/generations',
+          editPath: '/v1/images/edits',
+          taskPath: '/v1/images/tasks/{task_id}',
+        },
+      ],
+      profiles: [
+        {
+          id: 'profile-custom',
+          name: 'Custom Profile',
+          provider: 'custom-async',
+          baseUrl: 'https://api.example.com/v1',
+          apiKey: 'key',
+          model: 'model',
+          timeout: 60,
+          apiMode: 'images',
+          codexCli: false,
+          apiProxy: false,
+        },
+      ],
       activeProfileId: 'profile-custom',
     })
 
@@ -502,35 +533,37 @@ describe('custom providers', () => {
   })
 
   it('normalizes an Apimart-style task manifest', () => {
-    const provider = importCustomProviderDefinitionFromJson(JSON.stringify({
-      name: 'Apimart GPT-Image-2',
-      template: 'http-image',
-      submit: {
-        path: '/v1/images/generations',
-        method: 'POST',
-        contentType: 'json',
-        body: {
-          model: '$profile.model',
-          prompt: '$prompt',
-          n: '$params.n',
-          size: '$params.size',
-          resolution: '2k',
-          image_urls: '$inputImages.dataUrls',
+    const provider = importCustomProviderDefinitionFromJson(
+      JSON.stringify({
+        name: 'Apimart GPT-Image-2',
+        template: 'http-image',
+        submit: {
+          path: '/v1/images/generations',
+          method: 'POST',
+          contentType: 'json',
+          body: {
+            model: '$profile.model',
+            prompt: '$prompt',
+            n: '$params.n',
+            size: '$params.size',
+            resolution: '2k',
+            image_urls: '$inputImages.dataUrls',
+          },
+          taskIdPath: 'data.0.task_id',
         },
-        taskIdPath: 'data.0.task_id',
-      },
-      poll: {
-        path: '/v1/tasks/{task_id}',
-        method: 'GET',
-        query: { language: 'zh' },
-        statusPath: 'data.status',
-        successValues: ['completed'],
-        failureValues: ['failed', 'cancelled'],
-        result: {
-          imageUrlPaths: ['data.result.images.*.url.*'],
+        poll: {
+          path: '/v1/tasks/{task_id}',
+          method: 'GET',
+          query: { language: 'zh' },
+          statusPath: 'data.status',
+          successValues: ['completed'],
+          failureValues: ['failed', 'cancelled'],
+          result: {
+            imageUrlPaths: ['data.result.images.*.url.*'],
+          },
         },
-      },
-    }))
+      }),
+    )
 
     expect(provider).toMatchObject({
       template: 'http-image',
@@ -550,26 +583,32 @@ describe('custom providers', () => {
   })
 
   it('imports wrapped custom provider settings with profiles', () => {
-    const imported = importCustomProviderSettingsFromJson(JSON.stringify({
-      customProviders: [{
-        id: 'custom-json',
-        name: 'Custom JSON',
-        submit: {
-          path: 'images/generations',
-          method: 'POST',
-          contentType: 'json',
-          body: { model: '$profile.model', prompt: '$prompt' },
-          result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
-        },
-      }],
-      profiles: [{
-        name: 'Custom JSON',
-        provider: 'custom-json',
-        baseUrl: 'https://custom.example.com/v1',
-        model: 'custom-model',
-        apiMode: 'images',
-      }],
-    }))
+    const imported = importCustomProviderSettingsFromJson(
+      JSON.stringify({
+        customProviders: [
+          {
+            id: 'custom-json',
+            name: 'Custom JSON',
+            submit: {
+              path: 'images/generations',
+              method: 'POST',
+              contentType: 'json',
+              body: { model: '$profile.model', prompt: '$prompt' },
+              result: { imageUrlPaths: ['data.*.url'], b64JsonPaths: [] },
+            },
+          },
+        ],
+        profiles: [
+          {
+            name: 'Custom JSON',
+            provider: 'custom-json',
+            baseUrl: 'https://custom.example.com/v1',
+            model: 'custom-model',
+            apiMode: 'images',
+          },
+        ],
+      }),
+    )
 
     expect(imported.customProviders[0]).toMatchObject({ id: 'custom-json', name: 'Custom JSON' })
     expect(imported.profiles[0]).toMatchObject({
@@ -598,28 +637,39 @@ describe('custom providers', () => {
   })
 
   it('rejects markdown-corrupted profile fields when importing wrapped settings', () => {
-    expect(() => importCustomProviderSettingsFromJson(JSON.stringify({
-      customProviders: [{
-        id: 'custom-apimart',
-        name: 'APIMart',
-        submit: { path: 'images/generations' },
-      }],
-      profiles: [{
-        name: 'APIMart',
-        provider: 'custom-apimart',
-        baseUrl: '[https://api.apimart.ai/v1',
-        model: 'gpt-image-2-official',
-        apiMode: 'images](https://api.apimart.ai/v1%22,%22model%22:%22gpt-image-2-official%22,%22apiMode%22:%22images)',
-      }],
-    }))).toThrow('JSON 包含 Markdown 链接')
+    expect(() =>
+      importCustomProviderSettingsFromJson(
+        JSON.stringify({
+          customProviders: [
+            {
+              id: 'custom-apimart',
+              name: 'APIMart',
+              submit: { path: 'images/generations' },
+            },
+          ],
+          profiles: [
+            {
+              name: 'APIMart',
+              provider: 'custom-apimart',
+              baseUrl: '[https://api.apimart.ai/v1',
+              model: 'gpt-image-2-official',
+              apiMode:
+                'images](https://api.apimart.ai/v1%22,%22model%22:%22gpt-image-2-official%22,%22apiMode%22:%22images)',
+            },
+          ],
+        }),
+      ),
+    ).toThrow('JSON 包含 Markdown 链接')
   })
 
   it('does not inherit fal URL and model when switching to a custom provider', () => {
-    const provider = importCustomProviderDefinitionFromJson(JSON.stringify({
-      name: 'Custom Provider',
-      template: 'http-image',
-      submit: { path: 'images/generations' },
-    }))
+    const provider = importCustomProviderDefinitionFromJson(
+      JSON.stringify({
+        name: 'Custom Provider',
+        template: 'http-image',
+        submit: { path: 'images/generations' },
+      }),
+    )
     const profile = switchApiProfileProvider(createDefaultFalProfile(), provider.id, provider)
 
     expect(profile.provider).toBe(provider.id)
@@ -811,20 +861,32 @@ describe('amazon planner profile', () => {
 
 describe('OpenRouter image generation profiles', () => {
   it('recognizes OpenRouter images and chat profiles as image-capable', () => {
-    expect(isOpenRouterImageGenerationProfile(createDefaultOpenAIProfile({
-      baseUrl: 'https://openrouter.ai/api/v1',
-      apiMode: 'images',
-    }))).toBe(true)
-    expect(isOpenRouterImageGenerationProfile(createDefaultOpenAIProfile({
-      baseUrl: 'openrouter.ai/api/v1',
-      apiMode: 'chat',
-    }))).toBe(true)
+    expect(
+      isOpenRouterImageGenerationProfile(
+        createDefaultOpenAIProfile({
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiMode: 'images',
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      isOpenRouterImageGenerationProfile(
+        createDefaultOpenAIProfile({
+          baseUrl: 'openrouter.ai/api/v1',
+          apiMode: 'chat',
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('does not treat non-OpenRouter chat profiles as image-capable', () => {
-    expect(isOpenRouterImageGenerationProfile(createDefaultOpenAIProfile({
-      baseUrl: 'https://api.deepseek.com',
-      apiMode: 'chat',
-    }))).toBe(false)
+    expect(
+      isOpenRouterImageGenerationProfile(
+        createDefaultOpenAIProfile({
+          baseUrl: 'https://api.deepseek.com',
+          apiMode: 'chat',
+        }),
+      ),
+    ).toBe(false)
   })
 })

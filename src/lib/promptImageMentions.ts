@@ -46,7 +46,11 @@ export function isCursorInSelectedImageMention(prompt: string, visibleCursor: nu
   return false
 }
 
-export function getAtImageQuery(prompt: string, cursor: number, imageSource: Pick<InputImage[], 'length'>): AtImageQuery | null {
+export function getAtImageQuery(
+  prompt: string,
+  cursor: number,
+  imageSource: Pick<InputImage[], 'length'>,
+): AtImageQuery | null {
   if (imageSource.length === 0) return null
 
   const beforeCursor = prompt.slice(0, cursor)
@@ -125,9 +129,11 @@ export function getPromptMentionParts(prompt: string, inputImages: InputImage[])
     if (match.index > lastIndex) {
       parts.push({ type: 'text', text: stripImageMentionMarkers(prompt.slice(lastIndex, match.index)) })
     }
-    parts.push(index == null
-      ? { type: 'mention', text, mentionText: getSelectedTextMentionLabel(text) }
-      : { type: 'mention', text, imageIndex: index })
+    parts.push(
+      index == null
+        ? { type: 'mention', text, mentionText: getSelectedTextMentionLabel(text) }
+        : { type: 'mention', text, imageIndex: index },
+    )
     lastIndex = match.index + match[0].length
   }
 
@@ -138,7 +144,11 @@ export function getPromptMentionParts(prompt: string, inputImages: InputImage[])
   return parts.length > 0 ? parts : [{ type: 'text', text: stripImageMentionMarkers(prompt) }]
 }
 
-export function replaceImageMentionsForApi(prompt: string, imageCount?: number, formatImage?: (index: number) => string): string {
+export function replaceImageMentionsForApi(
+  prompt: string,
+  imageCount?: number,
+  formatImage?: (index: number) => string,
+): string {
   return prompt.replace(SELECTED_IMAGE_MENTION_RE, (text, n) => {
     const index = Number(n) - 1
     if (imageCount != null && (index < 0 || index >= imageCount)) return stripImageMentionMarkers(text)

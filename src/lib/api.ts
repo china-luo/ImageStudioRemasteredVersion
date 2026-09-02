@@ -16,5 +16,9 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
   if (profile.provider === 'volcengine') return callVolcengineImageApi(requestOpts, profile)
   if (isAliyunQwenImageProfile(profile)) return callAliyunQwenImageApi(requestOpts, profile)
 
-  return callOpenAICompatibleImageApi(requestOpts, profile, getCustomProviderDefinition(opts.settings, profile.provider))
+  return callOpenAICompatibleImageApi(
+    requestOpts,
+    profile,
+    getCustomProviderDefinition(opts.settings, profile.provider),
+  )
 }

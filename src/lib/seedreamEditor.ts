@@ -1,4 +1,11 @@
-import type { ApiProfile, ImageEditorEngine, SeedreamAnnotation, SeedreamEditorResolution, TaskParams, TaskRecord } from '../types'
+import type {
+  ApiProfile,
+  ImageEditorEngine,
+  SeedreamAnnotation,
+  SeedreamEditorResolution,
+  TaskParams,
+  TaskRecord,
+} from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { isVolcengineSeedreamProModel } from './apiProfiles'
 import { loadImage } from './canvasImage'
@@ -26,31 +33,31 @@ export function findLatestImageEditorTask(
   engine: ImageEditorEngine,
   preferredTaskId?: string | null,
 ) {
-  const candidates = tasks.filter((task) => (
-    (task.category?.workflow === 'seedream-edit' || Boolean(task.imageEditContext)) &&
-    getImageEditorTaskEngine(task) === engine
-  ))
-  const preferred = preferredTaskId
-    ? candidates.find((task) => task.id === preferredTaskId)
-    : undefined
+  const candidates = tasks.filter(
+    (task) =>
+      (task.category?.workflow === 'seedream-edit' || Boolean(task.imageEditContext)) &&
+      getImageEditorTaskEngine(task) === engine,
+  )
+  const preferred = preferredTaskId ? candidates.find((task) => task.id === preferredTaskId) : undefined
   if (preferred) return preferred
 
-  return candidates.reduce<TaskRecord | null>((latest, task) => (
-    !latest || task.createdAt > latest.createdAt ? task : latest
-  ), null)
+  return candidates.reduce<TaskRecord | null>(
+    (latest, task) => (!latest || task.createdAt > latest.createdAt ? task : latest),
+    null,
+  )
 }
 
 export function buildSeedreamEditPrompt({ instruction, hasVisualGuide, referenceCount }: SeedreamEditPromptOptions) {
   const visualGuideIndex = hasVisualGuide ? 2 : null
   const referenceStartIndex = hasVisualGuide ? 3 : 2
-  const roles = [
-    '图1是必须编辑的原图，也是构图、画幅和未修改内容的唯一基准。',
-  ]
+  const roles = ['图1是必须编辑的原图，也是构图、画幅和未修改内容的唯一基准。']
   if (visualGuideIndex) {
     roles.push(`图${visualGuideIndex}是“视觉定位图”，彩色线条仅用于指出编辑位置和范围，不是原图内容，也不是原生遮罩。`)
   }
   for (let index = 0; index < Math.max(0, referenceCount); index++) {
-    roles.push(`图${referenceStartIndex + index}是参考图${index + 1}，仅在编辑要求涉及主体替换、多图融合或风格/材质参考时使用。`)
+    roles.push(
+      `图${referenceStartIndex + index}是参考图${index + 1}，仅在编辑要求涉及主体替换、多图融合或风格/材质参考时使用。`,
+    )
   }
 
   return [
@@ -64,7 +71,9 @@ export function buildSeedreamEditPrompt({ instruction, hasVisualGuide, reference
       : null,
     '只修改用户明确指定的区域和内容；未指定区域、主体身份、透视、光照、文字与版式应尽量保持不变。',
     '保持图1的原始宽高比，只输出一张完成后的干净图片，不要输出对比图、拼图、说明文字或额外版本。',
-  ].filter((line): line is string => line != null).join('\n')
+  ]
+    .filter((line): line is string => line != null)
+    .join('\n')
 }
 
 export function createSeedreamEditorParams(resolution: SeedreamEditorResolution): TaskParams {
@@ -87,9 +96,10 @@ export function createImageEditorParams(
   }
 
   const tier = resolution === '4k' ? '4K' : '2K'
-  const ratio = sourceDimensions.width > 0 && sourceDimensions.height > 0
-    ? `${sourceDimensions.width}:${sourceDimensions.height}`
-    : '1:1'
+  const ratio =
+    sourceDimensions.width > 0 && sourceDimensions.height > 0
+      ? `${sourceDimensions.width}:${sourceDimensions.height}`
+      : '1:1'
   return {
     ...DEFAULT_PARAMS,
     size: calculateImageSize(tier, ratio) ?? (resolution === '4k' ? '2880x2880' : '2048x2048'),
@@ -264,4 +274,3 @@ export function findSeedreamAnnotationAtPoint(
   }
   return null
 }
-

@@ -36,7 +36,9 @@ export function useTooltip() {
   }, [clearTimer])
 
   useEffect(() => {
-    return () => { clearTimer() }
+    return () => {
+      clearTimer()
+    }
   }, [clearTimer])
 
   // Auto-dismiss when any modal opens via the global bus

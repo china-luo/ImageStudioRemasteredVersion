@@ -82,16 +82,11 @@ export function parseRatio(ratio: string) {
 export function formatImageRatio(width: number, height: number) {
   const roundedWidth = Math.round(width)
   const roundedHeight = Math.round(height)
-  if (
-    !Number.isFinite(roundedWidth) ||
-    !Number.isFinite(roundedHeight) ||
-    roundedWidth <= 0 ||
-    roundedHeight <= 0
-  ) {
+  if (!Number.isFinite(roundedWidth) || !Number.isFinite(roundedHeight) || roundedWidth <= 0 || roundedHeight <= 0) {
     return ''
   }
 
-  const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b)
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
   const divisor = gcd(roundedWidth, roundedHeight)
   const simplifiedWidth = roundedWidth / divisor
   const simplifiedHeight = roundedHeight / divisor
@@ -154,9 +149,9 @@ export function formatImageRatio(width: number, height: number) {
  * 在该预算内、满足所有 OpenAI 约束的前提下，选取总像素最大的候选尺寸。
  */
 const TIER_PIXEL_BUDGET: Record<SizeTier, number> = {
-  '1K': 1_572_864,   // 1024 × 1536
-  '2K': 4_194_304,   // 2048 × 2048
-  '4K': MAX_PIXELS,  // 8_294_400
+  '1K': 1_572_864, // 1024 × 1536
+  '2K': 4_194_304, // 2048 × 2048
+  '4K': MAX_PIXELS, // 8_294_400
 }
 
 const MAX_RATIO_ERROR = 0.01

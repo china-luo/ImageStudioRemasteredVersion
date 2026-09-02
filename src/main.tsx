@@ -6,9 +6,14 @@ import 'streamdown/styles.css'
 import './index.css'
 import { installMobileViewportGuards } from './lib/viewport'
 import { getPublicAssetUrl } from './lib/publicAsset'
+import { installDesktopFetch } from './lib/desktopFetch'
 
+installDesktopFetch()
 installMobileViewportGuards()
-document.documentElement.style.setProperty('--site-background-image', `url("${getPublicAssetUrl('site-background.png')}")`)
+document.documentElement.style.setProperty(
+  '--site-background-image',
+  `url("${getPublicAssetUrl('site-background.png')}")`,
+)
 
 if (!window.imageStudioDesktop?.isDesktop && 'serviceWorker' in navigator) {
   if (import.meta.env.PROD) {

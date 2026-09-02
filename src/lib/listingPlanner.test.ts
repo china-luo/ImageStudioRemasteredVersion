@@ -146,7 +146,6 @@ describe('Amazon prompt builders', () => {
     expect(prompt).toContain('No watermark, border, frame')
   })
 
-
   it('builds minimal TikTok density guidance when requested', () => {
     const prompt = buildTiktokPlanPrompt({
       prompt: 'Create a clean TikTok Shop product detail image.',
@@ -199,12 +198,15 @@ describe('Amazon prompt builders', () => {
   })
 
   it('builds style candidate prompts as reusable visual reference boards', () => {
-    const prompt = buildAmazonStyleCandidatePrompt({
-      label: '极简信息图',
-      description: '干净的字体和浅色背景',
-      prompt: 'Create a refined information-design style for the product.',
-      negativePrompt: 'Chinese characters, QR code, price badge',
-    }, 'Use warm off-white backgrounds and charcoal typography.')
+    const prompt = buildAmazonStyleCandidatePrompt(
+      {
+        label: '极简信息图',
+        description: '干净的字体和浅色背景',
+        prompt: 'Create a refined information-design style for the product.',
+        negativePrompt: 'Chinese characters, QR code, price badge',
+      },
+      'Use warm off-white backgrounds and charcoal typography.',
+    )
 
     expect(prompt).toContain('Create a refined information-design style for the product.')
     expect(prompt).toContain('1024x1024 visual style reference board')
@@ -218,7 +220,6 @@ describe('Amazon prompt builders', () => {
     expect(prompt).toContain('Negative prompt:')
     expect(prompt).toContain('Chinese characters, QR code, price badge')
   })
-
 })
 
 describe('A+ module helpers', () => {
@@ -279,10 +280,12 @@ describe('A+ module helpers', () => {
   })
 
   it('formats external A+ module copy from the LLM', () => {
-    expect(formatAPlusModuleText({
-      textTitle: 'Organized in Seconds',
-      textBody: 'Elastic loops keep pens, pencils, and small tools easy to find.',
-    })).toBe('Organized in Seconds\n\nElastic loops keep pens, pencils, and small tools easy to find.')
+    expect(
+      formatAPlusModuleText({
+        textTitle: 'Organized in Seconds',
+        textBody: 'Elastic loops keep pens, pencils, and small tools easy to find.',
+      }),
+    ).toBe('Organized in Seconds\n\nElastic loops keep pens, pencils, and small tools easy to find.')
   })
 })
 
@@ -324,9 +327,10 @@ function createApiPayload(title = 'AI planned tumbler') {
 }
 
 function createTiktokPlans(prefix: 'TTM' | 'TTD') {
-  const slots = prefix === 'TTM'
-    ? ['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06']
-    : ['TTD01', 'TTD02', 'TTD03', 'TTD04', 'TTD05', 'TTD06', 'TTD07', 'TTD08']
+  const slots =
+    prefix === 'TTM'
+      ? ['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06']
+      : ['TTD01', 'TTD02', 'TTD03', 'TTD04', 'TTD05', 'TTD06', 'TTD07', 'TTD08']
 
   return slots.map((slot) => ({
     slot,
@@ -356,30 +360,45 @@ function createTiktokPayload(prefix: 'TTM' | 'TTD', title = 'TikTok planned tumb
 }
 
 function createAPlusPlans(prefix: 'A+S' | 'A+L' | 'A+P' | 'A+M', brand = '') {
-  const slots = prefix === 'A+S'
-    ? ['A+S01', 'A+S02', 'A+S03', 'A+S04', 'A+S05', 'A+S06', 'A+S07', 'A+S08']
-    : prefix === 'A+L'
-      ? ['A+L01', 'A+L02', 'A+L03', 'A+L04', 'A+L05']
-      : prefix === 'A+M'
-        ? ['A+M01', 'A+M02', 'A+M03', 'A+M04', 'A+M05']
-        : ['A+P01', 'A+P02', 'A+P03', 'A+P04', 'A+P05', 'A+P06']
+  const slots =
+    prefix === 'A+S'
+      ? ['A+S01', 'A+S02', 'A+S03', 'A+S04', 'A+S05', 'A+S06', 'A+S07', 'A+S08']
+      : prefix === 'A+L'
+        ? ['A+L01', 'A+L02', 'A+L03', 'A+L04', 'A+L05']
+        : prefix === 'A+M'
+          ? ['A+M01', 'A+M02', 'A+M03', 'A+M04', 'A+M05']
+          : ['A+P01', 'A+P02', 'A+P03', 'A+P04', 'A+P05', 'A+P06']
 
   return slots.map((slot, index) => ({
     slot,
     label: `${slot} 模块`,
-    moduleType: prefix === 'A+S'
-      ? index === 0 ? 'header-banner' : index < 4 ? 'single-image' : 'highlight-tile'
-      : prefix === 'A+L'
-        ? index === 0 ? 'header-banner' : 'single-image'
-        : prefix === 'A+M'
-          ? index === 0 ? 'hero-banner' : 'feature-image'
-          : index === 0 ? 'hero-banner' : index < 4 ? 'feature-image' : 'brand-story',
+    moduleType:
+      prefix === 'A+S'
+        ? index === 0
+          ? 'header-banner'
+          : index < 4
+            ? 'single-image'
+            : 'highlight-tile'
+        : prefix === 'A+L'
+          ? index === 0
+            ? 'header-banner'
+            : 'single-image'
+          : prefix === 'A+M'
+            ? index === 0
+              ? 'hero-banner'
+              : 'feature-image'
+            : index === 0
+              ? 'hero-banner'
+              : index < 4
+                ? 'feature-image'
+                : 'brand-story',
     planMarkdown: `## ${slot} 模块方案\n\n中文 A+ 策划说明。`,
     textTitle: prefix === 'A+S' && index >= 4 ? `Benefit ${slot}` : '',
     textBody: prefix === 'A+S' && index >= 4 ? `External A+ copy for ${slot}.` : '',
-    prompt: brand && index === 0
-      ? `Create A+ module ${slot} for ${brand}, using the brand name as a small headline line.`
-      : `Create A+ module ${slot} for the product.`,
+    prompt:
+      brand && index === 0
+        ? `Create A+ module ${slot} for ${brand}, using the brand name as a small headline line.`
+        : `Create A+ module ${slot} for the product.`,
     negativePrompt: `negative ${slot}`,
   }))
 }
@@ -406,12 +425,18 @@ describe('callAmazonPlannerApi', () => {
   it('uses Responses API planning with JSON schema and attached reference images', async () => {
     const apiPayload = createApiPayload()
     const controller = new AbortController()
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
-      output_text: JSON.stringify(apiPayload),
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(apiPayload),
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await callAmazonPlannerApi({
@@ -456,7 +481,9 @@ describe('callAmazonPlannerApi', () => {
     expect(body.text.format.schema.properties.imagePlans.items.properties).toHaveProperty('planMarkdown')
     expect(body.text.format.schema.properties.imagePlans.items.properties).toHaveProperty('negativePrompt')
     expect(body.input[0].content[0].text).toContain('Parse this Amazon.de listing copy')
-    expect(body.input[0].content[0].text).toContain('Target marketplace language for visible customer-facing copy: German.')
+    expect(body.input[0].content[0].text).toContain(
+      'Target marketplace language for visible customer-facing copy: German.',
+    )
     expect(body.input[0].content[1]).toEqual({ type: 'input_image', image_url: 'data:image/png;base64,ref' })
     expect(result.parsed.title).toBe('AI planned tumbler')
     expect(result.seriesStyleGuide).toContain('cohesive warm')
@@ -470,21 +497,27 @@ describe('callAmazonPlannerApi', () => {
 
   it('uses Chat Completions planning with multimodal user content when references are present', async () => {
     const apiPayload = createApiPayload('DeepSeek planned tumbler')
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: 'assistant',
-            content: JSON.stringify(apiPayload),
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: JSON.stringify(apiPayload),
+                },
+                finish_reason: 'stop',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
           },
-          finish_reason: 'stop',
-        },
-      ],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+        ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await callAmazonPlannerApi({
@@ -518,12 +551,18 @@ describe('callAmazonPlannerApi', () => {
   })
 
   it('parses Standard A+ output and fills fixed module sizes without deciding content locally', async () => {
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
-      output_text: JSON.stringify(createAPlusPayload('A+S', 'Standard A+ tumbler', 'ExampleBrand')),
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(createAPlusPayload('A+S', 'Standard A+ tumbler', 'ExampleBrand')),
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await callAmazonPlannerApi({
@@ -549,7 +588,9 @@ describe('callAmazonPlannerApi', () => {
     expect(body.text.format.schema.required).toContain('seriesStyleGuide')
     expect(body.text.format.schema.required).toContain('styleCandidates')
     expect(body.text.format.schema.required).not.toContain('visualSystem')
-    expect(body.instructions).toContain('The application only fixes the module order, module type, upload size, and generation size')
+    expect(body.instructions).toContain(
+      'The application only fixes the module order, module type, upload size, and generation size',
+    )
     expect(body.instructions).toContain('Amazon A+ reference material for the planner')
     expect(body.instructions).toContain('Header Banner 970x300')
     expect(body.instructions).toContain('Single Image 970x600')
@@ -586,12 +627,18 @@ describe('callAmazonPlannerApi', () => {
   })
 
   it('plans Mobile A+ with five compact-screen 600x450 modules', async () => {
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
-      output_text: JSON.stringify(createAPlusPayload('A+M', 'Mobile A+ tumbler')),
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(createAPlusPayload('A+M', 'Mobile A+ tumbler')),
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await callAmazonPlannerApi({
@@ -618,13 +665,68 @@ describe('callAmazonPlannerApi', () => {
     expect(result.aPlusPlans[0]).toMatchObject({ slot: 'A+M01', uploadSize: '600x450' })
   })
 
+  it('retries Responses API gateway timeouts through Chat Completions', async () => {
+    const apiPayload = createApiPayload('Fallback planned tumbler')
+    const fetchMock = vi
+      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockResolvedValueOnce(new Response('HTTP 524', { status: 524 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: JSON.stringify(apiPayload),
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await callAmazonPlannerApi({
+      listingText: SAMPLE_LISTING,
+      baseDraft: DEFAULT_AMAZON_PROMPT_DRAFT,
+      referenceImageDataUrls: ['data:image/png;base64,ref-fallback'],
+      profile: createDefaultOpenAIProfile({
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'user-api-key',
+        apiMode: 'responses',
+        model: 'gpt-planner-profile',
+      }),
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.example.com/v1/responses')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://api.example.com/v1/chat/completions')
+    const fallbackBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(fallbackBody.response_format).toEqual({ type: 'json_object' })
+    expect(fallbackBody.messages[1].content[1]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'data:image/png;base64,ref-fallback' },
+    })
+    expect(result.parsed.title).toBe('Fallback planned tumbler')
+  })
+
   it('uses the customized A+ module count in schema, instructions, and response normalization', async () => {
     const customSpecs = insertAPlusModuleSpecAfter('standard-large', getAPlusModuleSpecs('standard-large'), 4)
     const payload = createAPlusPayload('A+L', 'Customized A+ tumbler')
     payload.aPlusPlans.push({ ...payload.aPlusPlans[4]!, slot: 'A+L06' })
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
-      output_text: JSON.stringify(payload),
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(payload),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await callAmazonPlannerApi({
@@ -651,12 +753,18 @@ describe('callAmazonPlannerApi', () => {
   })
 
   it('uses TikTok main-image slot strategy without Amazon reference material', async () => {
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
-      output_text: JSON.stringify(createTiktokPayload('TTM', 'TikTok main planned tumbler')),
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(createTiktokPayload('TTM', 'TikTok main planned tumbler')),
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await callAmazonPlannerApi({
@@ -674,7 +782,14 @@ describe('callAmazonPlannerApi', () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
     expect(body.text.format.name).toBe('tiktok_main_image_plan')
-    expect(body.text.format.schema.properties.imagePlans.items.properties.slot.enum).toEqual(['TTM01', 'TTM02', 'TTM03', 'TTM04', 'TTM05', 'TTM06'])
+    expect(body.text.format.schema.properties.imagePlans.items.properties.slot.enum).toEqual([
+      'TTM01',
+      'TTM02',
+      'TTM03',
+      'TTM04',
+      'TTM05',
+      'TTM06',
+    ])
     expect(body.text.format.schema.required).toContain('styleCandidates')
     expect(body.instructions).toContain('TikTok Shop US main-image slot strategy')
     expect(body.instructions).toContain('TTM01: pure-white front compliance main image')
@@ -687,7 +802,9 @@ describe('callAmazonPlannerApi', () => {
     expect(body.instructions).toContain('Return exactly 3 styleCandidates')
     expect(body.instructions).not.toContain('Amazon Listing reference material for the planner')
     expect(body.instructions).not.toContain('Amazon A+ reference material for the planner')
-    expect(body.input[0].content[0].text).toContain('Parse this product copy and produce the TikTok Shop main image plan')
+    expect(body.input[0].content[0].text).toContain(
+      'Parse this product copy and produce the TikTok Shop main image plan',
+    )
     expect(result.parsed.title).toBe('TikTok main planned tumbler')
     expect(result.plans).toHaveLength(6)
     expect(result.plans[5]).toMatchObject({
@@ -697,12 +814,18 @@ describe('callAmazonPlannerApi', () => {
   })
 
   it('does not include empty A+ brand output in parsed inferred fields', async () => {
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
-      output_text: JSON.stringify(createAPlusPayload('A+S', 'Standard A+ tumbler')),
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(createAPlusPayload('A+S', 'Standard A+ tumbler')),
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await callAmazonPlannerApi({

@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { normalizeBaseUrl } from '../lib/api'
-import { APP_BRAND_NAME, APP_REPOSITORY_URL } from '../lib/appBrand'
-import { getPublicAssetUrl } from '../lib/publicAsset'
 import { isApiProxyAvailable, isApiProxyLocked, readClientDevProxyConfig } from '../lib/devProxy'
 import { useStore, exportData, importData, clearData, type SettingsTab } from '../store'
 import {
@@ -13,14 +11,12 @@ import {
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_RESPONSES_MODEL,
-  DEFAULT_VOLCENGINE_BASE_URL,
   DEFAULT_SETTINGS,
   findEquivalentApiProfile,
   getApiProviderLabel,
   getActiveApiProfile,
   importCustomProviderSettingsFromJson,
   isAmazonPlannerProfile,
-  isOpenRouterImageGenerationProfile,
   isOpenAICompatibleProvider,
   mergeImportedSettings,
   normalizeCustomProviderDefinition,
@@ -33,152 +29,48 @@ import { type ApiProfile, type AppSettings, type CustomProviderDefinition } from
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
-import Select from './Select'
 import { Checkbox } from './Checkbox'
 import ViewportTooltip from './ViewportTooltip'
-import { ChevronDownIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon, ExportIcon, ImportIcon, DragHandleIcon, LinkIcon } from './icons'
+import { CloseIcon, CopyIcon, DragHandleIcon, LinkIcon } from './icons'
+import {
+  isPristineNewOpenAIProfile as isPristineNewOpenAIProfileRecord,
+  readCopyImportUrlOptions,
+  saveCopyImportUrlOptions,
+  type CopyImportUrlOptions,
+} from '../lib/settingsCopyUrl'
+import {
+  createDefaultCustomProviderForm,
+  customProviderFormToInput,
+  customProviderToForm,
+  type CustomProviderForm,
+} from '../lib/customProviderForm'
+import { CUSTOM_PROVIDER_LLM_PROMPT } from '../lib/customProviderLlmPrompt'
+import SettingsGeneralTab from './settings/SettingsGeneralTab'
+import SettingsAboutTab from './settings/SettingsAboutTab'
+import SettingsDataTab from './settings/SettingsDataTab'
+import SettingsApiTab from './settings/SettingsApiTab'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
 
 const ADD_CUSTOM_PROVIDER_VALUE = '__add_custom_provider__'
-const COPY_IMPORT_URL_OPTIONS_STORAGE_KEY = 'gpt-image-playground.copy-import-url-options'
 const LEGACY_DEFAULT_CHAT_MODEL = 'deepseek-v4-flash'
-
-const DEFAULT_COPY_IMPORT_URL_OPTIONS = {
-  includeApiKey: false,
-  useNewApiAddress: false,
-  useNewApiKey: true,
-  useNewApiModel: false,
-}
-
-type CopyImportUrlOptions = typeof DEFAULT_COPY_IMPORT_URL_OPTIONS
-
-function readCopyImportUrlOptions(): CopyImportUrlOptions {
-  if (typeof window === 'undefined') return DEFAULT_COPY_IMPORT_URL_OPTIONS
-
-  try {
-    const saved = window.localStorage.getItem(COPY_IMPORT_URL_OPTIONS_STORAGE_KEY)
-    if (!saved) return DEFAULT_COPY_IMPORT_URL_OPTIONS
-
-    const parsed = JSON.parse(saved) as Partial<CopyImportUrlOptions> | null
-    if (!parsed || typeof parsed !== 'object') return DEFAULT_COPY_IMPORT_URL_OPTIONS
-
-
-    return {
-      includeApiKey: false,
-      useNewApiAddress: Boolean(parsed.useNewApiAddress),
-      useNewApiKey: parsed.useNewApiKey === undefined ? true : Boolean(parsed.useNewApiKey),
-      useNewApiModel: Boolean(parsed.useNewApiModel),
-    }
-  } catch {
-    return DEFAULT_COPY_IMPORT_URL_OPTIONS
-  }
-}
-
-function saveCopyImportUrlOptions(options: CopyImportUrlOptions) {
-  if (typeof window === 'undefined') return
-
-  try {
-    window.localStorage.setItem(COPY_IMPORT_URL_OPTIONS_STORAGE_KEY, JSON.stringify({
-      useNewApiAddress: options.useNewApiAddress,
-      useNewApiKey: options.useNewApiKey,
-      useNewApiModel: options.useNewApiModel,
-    }))
-  } catch {
-    // localStorage 不可用时只保留当前会话状态。
-  }
-}
-
-interface CustomProviderForm {
-  json: string
-}
-
-const DEFAULT_CUSTOM_PROVIDER_MANIFEST = {
-  name: '自定义服务商',
-  submit: {
-    path: 'images/generations',
-    method: 'POST',
-    contentType: 'json',
-    body: {
-      model: '$profile.model',
-      prompt: '$prompt',
-      size: '$params.size',
-      quality: '$params.quality',
-      output_format: '$params.output_format',
-      moderation: '$params.moderation',
-      output_compression: '$params.output_compression',
-      n: '$params.n',
-    },
-    result: {
-      imageUrlPaths: ['data.*.url'],
-      b64JsonPaths: ['data.*.b64_json'],
-    },
-  },
-  editSubmit: {
-    path: 'images/edits',
-    method: 'POST',
-    contentType: 'multipart',
-    body: {
-      model: '$profile.model',
-      prompt: '$prompt',
-      size: '$params.size',
-      quality: '$params.quality',
-      output_format: '$params.output_format',
-      moderation: '$params.moderation',
-      output_compression: '$params.output_compression',
-      n: '$params.n',
-    },
-    files: [
-      { field: 'image[]', source: 'inputImages', array: true },
-      { field: 'mask', source: 'mask' },
-    ],
-    result: {
-      imageUrlPaths: ['data.*.url'],
-      b64JsonPaths: ['data.*.b64_json'],
-    },
-  },
-}
-
-function createDefaultCustomProviderForm(): CustomProviderForm {
-  return {
-    json: JSON.stringify(DEFAULT_CUSTOM_PROVIDER_MANIFEST, null, 2),
-  }
-}
-
-function customProviderToForm(provider: CustomProviderDefinition): CustomProviderForm {
-  return {
-    json: JSON.stringify({
-      name: provider.name,
-      submit: provider.submit,
-      editSubmit: provider.editSubmit,
-      poll: provider.poll,
-    }, null, 2),
-  }
-}
-
-function customProviderFormToInput(form: CustomProviderForm) {
-  return JSON.parse(form.json)
-}
 
 function isPristineNewOpenAIProfile(profile: ApiProfile) {
   const defaultProfile = createDefaultOpenAIProfile({ id: profile.id, name: '新配置' })
-  return profile.name === '新配置' &&
-    profile.provider === 'openai' &&
-    profile.baseUrl === DEFAULT_SETTINGS.baseUrl &&
-    profile.apiKey === '' &&
-    profile.model === DEFAULT_IMAGES_MODEL &&
-    profile.timeout === DEFAULT_SETTINGS.timeout &&
-    profile.apiMode === 'images' &&
-    profile.codexCli === false &&
-    profile.apiProxy === defaultProfile.apiProxy
+  return isPristineNewOpenAIProfileRecord(profile, {
+    baseUrl: DEFAULT_SETTINGS.baseUrl,
+    timeout: DEFAULT_SETTINGS.timeout,
+    imagesModel: DEFAULT_IMAGES_MODEL,
+    apiProxy: defaultProfile.apiProxy,
+  })
 }
 
 function getImportedProfileFromMergedSettings(
   nextSettings: AppSettings,
   previousProfileIds: Set<string>,
-  importedSettings: { customProviders: CustomProviderDefinition[], profiles: ApiProfile[] },
+  importedSettings: { customProviders: CustomProviderDefinition[]; profiles: ApiProfile[] },
 ) {
   const existingProfile = importedSettings.profiles
     .map((profile) => findEquivalentApiProfile(nextSettings, profile, importedSettings.customProviders))
@@ -188,101 +80,15 @@ function getImportedProfileFromMergedSettings(
   return nextSettings.profiles.find((profile) => !previousProfileIds.has(profile.id)) ?? nextSettings.profiles[0]
 }
 
-const CUSTOM_PROVIDER_LLM_PROMPT = `# 角色
-你是 API 文档解析助手。你的任务是根据用户提供的图像生成 API 文档，生成本应用可导入的自定义服务商配置 JSON。
-
-# 工作流程
-1. 先向用户索要 API 文档链接或完整文档文本。
-2. 如果当前环境支持读取链接，主动读取；否则要求用户粘贴文档内容。
-3. 在未获得文档前不要猜测，不要生成占位配置。
-4. 从文档中判断提交接口、图生图接口、异步任务查询接口、状态值、结果图片路径。
-5. 如果文档中明确了默认模型 ID 或 API Base URL，在 profiles 中填入；如果未明确模型 ID，model 使用 "gpt-image-2"；如果未明确 API Base URL，baseUrl 留空，由用户稍后填写。
-6. 输出最终 JSON；不要索要 API Key。
-
-# 输出结构
-输出 JSON 包含两个顶层字段：
-- customProviders：自定义服务商 Manifest 数组，每项描述一个服务商的接口映射规则。
-- profiles：API 配置数组，每项描述一个可直接使用的连接配置，引用 customProviders 中的服务商。
-
-## customProviders 元素（Manifest）
-每个元素的顶层字段：id、name、submit、editSubmit、poll。
-id 是服务商的唯一标识，用于 profiles 中的 provider 字段引用，建议使用 custom-{英文短名} 格式。
-submit 是文生图提交配置，必填。
-editSubmit 是图生图或局部重绘提交配置，可选。如果文生图和图生图使用同一个 JSON 接口，可以省略 editSubmit，并在 submit.body 中加入 image_urls。
-poll 是异步任务查询配置，可选；同步接口不要写 poll。
-
-submit/editSubmit 字段：
-- path：接口路径，不带开头斜杠，不带 /v1/ 前缀，例如 images/generations 或 tasks/{task_id}。
-- method：GET 或 POST，默认 POST。
-- contentType：json 或 multipart。
-- query：提交 query 参数对象，可选，例如 {"async":"true"}。
-- body：请求体模板对象。
-- files：multipart 文件字段数组，仅 contentType=multipart 时使用。
-- taskIdPath：提交响应里的任务 ID JSON 路径；同步接口不要写。
-- result：同步响应图片提取规则。
-
-poll 字段：
-- path：任务查询路径，使用 {task_id} 占位，例如 images/tasks/{task_id} 或 tasks/{task_id}。
-- method：GET 或 POST，默认 GET。
-- query：查询 query 参数对象，可选。
-- intervalSeconds：轮询间隔秒数。
-- statusPath：查询响应状态字段路径。
-- successValues：成功状态值数组。
-- failureValues：失败状态值数组。
-- errorPath：失败原因路径，可选。
-- result：成功后图片提取规则。
-
-result 字段：
-- imageUrlPaths：图片 URL 路径数组，支持 * 通配数组。例如 data.*.url、data.result.images.*.url.*。
-- b64JsonPaths：base64 图片路径数组，支持 * 通配数组。例如 data.*.b64_json。
-
-body 模板变量：
-- $profile.model：用户在设置里填写的模型 ID。
-- $prompt：当前提示词。
-- $params.size、$params.quality、$params.output_format、$params.output_compression、$params.moderation、$params.n：应用内参数。
-- $inputImages.dataUrls：参考图 data URL 数组；没有参考图时会自动省略该字段。
-- $mask.dataUrl：遮罩图 data URL；没有遮罩时会自动省略该字段。
-
-multipart files 示例：
-- {"field":"image[]","source":"inputImages","array":true}
-- {"field":"mask","source":"mask"}
-
-## profiles 元素
-每个元素的字段：
-- name：配置名称，方便用户识别。
-- provider：对应 customProviders 中某个元素的 id。
-- baseUrl：API Base URL。如果文档明确给出，填入完整基础地址；否则留空字符串 ""。
-- model：模型 ID。如果 API 文档明确了默认模型，填入该值；否则使用 "gpt-image-2"。
-- apiMode：固定为 "images"。
-
-profiles 中不要包含 apiKey（用户导入后自行填写）。
-
-# 输出要求
-- 最终回复只包含一个 \`\`\`json 代码块，代码块内是 JSON 对象。
-- JSON 对象必须包含 customProviders 和 profiles 两个顶层字段。
-- 代码块外不要附加解释文字。
-- 不要输出 API Key、Authorization header。
-- 如果文档返回 task_id，就必须配置 taskIdPath 和 poll。
-- 如果结果 URL 是数组，路径必须写到数组元素，例如 data.result.images.*.url.*。
-
-## 同步接口示例
-{"customProviders":[{"id":"custom-example-sync","name":"示例同步服务商","submit":{"path":"images/generations","method":"POST","contentType":"json","body":{"model":"$profile.model","prompt":"$prompt","size":"$params.size","quality":"$params.quality","output_format":"$params.output_format","moderation":"$params.moderation","output_compression":"$params.output_compression","n":"$params.n"},"result":{"imageUrlPaths":["data.*.url"],"b64JsonPaths":["data.*.b64_json"]}},"editSubmit":{"path":"images/edits","method":"POST","contentType":"multipart","body":{"model":"$profile.model","prompt":"$prompt","size":"$params.size","quality":"$params.quality","output_format":"$params.output_format","moderation":"$params.moderation","output_compression":"$params.output_compression","n":"$params.n"},"files":[{"field":"image[]","source":"inputImages","array":true},{"field":"mask","source":"mask"}],"result":{"imageUrlPaths":["data.*.url"],"b64JsonPaths":["data.*.b64_json"]}}}],"profiles":[{"name":"示例同步服务商","provider":"custom-example-sync","baseUrl":"https://api.example.com/v1","model":"example-model-v1","apiMode":"images"}]}
-
-## 异步接口示例
-{"customProviders":[{"id":"custom-example-async","name":"示例异步服务商","submit":{"path":"images/generations","method":"POST","contentType":"json","query":{"async":"true"},"body":{"model":"$profile.model","prompt":"$prompt","size":"$params.size","n":"$params.n"},"taskIdPath":"data"},"editSubmit":{"path":"images/edits","method":"POST","contentType":"multipart","query":{"async":"true"},"body":{"model":"$profile.model","prompt":"$prompt","size":"$params.size","n":"$params.n"},"files":[{"field":"image[]","source":"inputImages","array":true}],"taskIdPath":"data"},"poll":{"path":"images/tasks/{task_id}","method":"GET","intervalSeconds":5,"statusPath":"data.status","successValues":["SUCCESS"],"failureValues":["FAILURE"],"errorPath":"data.fail_reason","result":{"imageUrlPaths":["data.data.data.*.url"],"b64JsonPaths":["data.data.data.*.b64_json"]}}}],"profiles":[{"name":"示例异步服务商","provider":"custom-example-async","baseUrl":"","model":"gpt-image-2","apiMode":"images"}]}
-
-## 统一任务接口示例
-{"customProviders":[{"id":"custom-example-task","name":"示例任务服务商","submit":{"path":"images/generations","method":"POST","contentType":"json","body":{"model":"$profile.model","prompt":"$prompt","n":"$params.n","size":"$params.size","resolution":"2k","quality":"$params.quality","image_urls":"$inputImages.dataUrls"},"taskIdPath":"data.0.task_id"},"poll":{"path":"tasks/{task_id}","method":"GET","query":{"language":"zh"},"intervalSeconds":5,"statusPath":"data.status","successValues":["completed"],"failureValues":["failed","cancelled"],"errorPath":"data.error.message","result":{"imageUrlPaths":["data.result.images.*.url.*"],"b64JsonPaths":[]}}}],"profiles":[{"name":"示例任务服务商","provider":"custom-example-task","baseUrl":"","model":"gpt-image-2","apiMode":"images"}]}`
-
-const normalizeDraftSettings = (value: Partial<AppSettings> | unknown) =>
-  normalizeSettings(value)
+const normalizeDraftSettings = (value: Partial<AppSettings> | unknown) => normalizeSettings(value)
 
 function getAppVersionLabel() {
   const buildVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''
   return buildVersion.trim() || import.meta.env.VITE_APP_VERSION?.trim() || 'dev'
 }
 
-const ABOUT_DESCRIPTION = '面向 Amazon 与 TikTok Shop 的跨境电商图片工作台，支持商品图生成、Listing 与 A+ 图片策划、竞品图片拆解反推、VOC 评论分析，以及 CSV/XLSX 评论导入后的 AI 报告生成。适合主图、卖点图、详情图、A+ 模块和多平台视觉素材的本地化创作流程。'
+const ABOUT_DESCRIPTION =
+  '面向 Amazon 与 TikTok Shop 的跨境电商图片工作台，支持商品图生成、Listing 与 A+ 图片策划、竞品图片拆解反推、VOC 评论分析，以及 CSV/XLSX 评论导入后的 AI 报告生成。适合主图、卖点图、详情图、A+ 模块和多平台视觉素材的本地化创作流程。'
 
 export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
@@ -303,7 +109,7 @@ export default function SettingsModal() {
   const llmPromptTooltipTimerRef = useRef<number | null>(null)
   const settingsScrollBoundaryRef = useRef<HTMLDivElement>(null)
   const customProviderScrollBoundaryRef = useRef<HTMLDivElement>(null)
-  
+
   const [draft, setDraft] = useState<AppSettings>(normalizeDraftSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [showApiKey, setShowApiKey] = useState(false)
@@ -340,7 +146,7 @@ export default function SettingsModal() {
     offsetX: number
     offsetY: number
   } | null>(null)
-  const profileTouchDragRef = useRef<{ id: string, startX: number, startY: number, moved: boolean } | null>(null)
+  const profileTouchDragRef = useRef<{ id: string; startX: number; startY: number; moved: boolean } | null>(null)
   const [copyImportUrlProfile, setCopyImportUrlProfile] = useState<ApiProfile | null>(null)
   const [copyImportUrlOptions, setCopyImportUrlOptions] = useState<CopyImportUrlOptions>(readCopyImportUrlOptions)
 
@@ -348,15 +154,19 @@ export default function SettingsModal() {
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
   const apiProxyLocked = isApiProxyLocked(apiProxyConfig)
   const apiProxyUsesDynamicTarget = Boolean(apiProxyConfig?.enabled)
-  const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
+  const activeProfile =
+    draft.profiles.find((profile) => profile.id === draft.activeProfileId) ??
+    draft.profiles[0] ??
+    getActiveApiProfile(draft)
   const activeProviderSupportsApiProxy = activeProfile.provider === 'openai' || activeProfile.provider === 'volcengine'
   const apiProxyChecked = activeProviderSupportsApiProxy && (apiProxyLocked || activeProfile.apiProxy)
   const apiProxyEnabled = apiProxyAvailable && activeProviderSupportsApiProxy && apiProxyChecked
   const apiProxyUrlLocked = apiProxyEnabled && !apiProxyUsesDynamicTarget
   const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, activeProfile.provider)
-  const activeProviderUsesApiUrl = activeProviderIsOpenAICompatible || activeProfile.provider === 'fal' || activeProfile.provider === 'volcengine'
+  const activeProviderUsesApiUrl =
+    activeProviderIsOpenAICompatible || activeProfile.provider === 'fal' || activeProfile.provider === 'volcengine'
   const activeCustomProvider = draft.customProviders.find((provider) => provider.id === activeProfile.provider)
-  const defaultProviderOrder = ['openai', 'fal', 'volcengine', ...draft.customProviders.map(p => p.id)]
+  const defaultProviderOrder = ['openai', 'fal', 'volcengine', ...draft.customProviders.map((p) => p.id)]
   const providerOrder = draft.providerOrder || defaultProviderOrder
 
   const unorderedProviderOptions = [
@@ -386,7 +196,7 @@ export default function SettingsModal() {
       const validA = aIndex !== -1 ? aIndex : defaultProviderOrder.indexOf(String(a.value))
       const validB = bIndex !== -1 ? bIndex : defaultProviderOrder.indexOf(String(b.value))
       return validA - validB
-    })
+    }),
   ]
 
   const getDefaultModelForMode = (apiMode: AppSettings['apiMode']) =>
@@ -407,7 +217,8 @@ export default function SettingsModal() {
       }))
     : [{ label: '暂无 Chat/Responses 策划配置', value: '' }]
   const amazonPlannerModelOptions = [
-    ...(amazonPlannerProfile?.model && !OPENAI_PLANNER_MODELS.includes(amazonPlannerProfile.model as typeof OPENAI_PLANNER_MODELS[number])
+    ...(amazonPlannerProfile?.model &&
+    !OPENAI_PLANNER_MODELS.includes(amazonPlannerProfile.model as (typeof OPENAI_PLANNER_MODELS)[number])
       ? [{ label: `${amazonPlannerProfile.model}（当前自定义）`, value: amazonPlannerProfile.model }]
       : []),
     ...OPENAI_PLANNER_MODELS.map((model) => ({
@@ -439,16 +250,20 @@ export default function SettingsModal() {
 
     wasSettingsOpenRef.current = true
     const normalizedSettings = normalizeDraftSettings(settings)
-    const displaySettings = normalizedSettings.reuseTaskApiProfileTemporarily && reusedTaskApiProfileId && normalizedSettings.profiles.some((profile) => profile.id === reusedTaskApiProfileId)
-      ? normalizeDraftSettings({ ...normalizedSettings, activeProfileId: reusedTaskApiProfileId })
-      : normalizedSettings
+    const displaySettings =
+      normalizedSettings.reuseTaskApiProfileTemporarily &&
+      reusedTaskApiProfileId &&
+      normalizedSettings.profiles.some((profile) => profile.id === reusedTaskApiProfileId)
+        ? normalizeDraftSettings({ ...normalizedSettings, activeProfileId: reusedTaskApiProfileId })
+        : normalizedSettings
     const nextDraft = normalizeDraftSettings({
       ...displaySettings,
       profiles: displaySettings.profiles.map((profile) => ({
         ...profile,
-        apiProxy: (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable
-          ? (apiProxyLocked || profile.apiProxy)
-          : false,
+        apiProxy:
+          (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable
+            ? apiProxyLocked || profile.apiProxy
+            : false,
       })),
     })
     setDraft(nextDraft)
@@ -488,11 +303,14 @@ export default function SettingsModal() {
     }
   }, [showProfileMenu, updateProfileMenuMaxHeight])
 
-  useEffect(() => () => {
-    if (profileImportUrlTooltipTimerRef.current != null) window.clearTimeout(profileImportUrlTooltipTimerRef.current)
-    if (duplicateProfileTooltipTimerRef.current != null) window.clearTimeout(duplicateProfileTooltipTimerRef.current)
-    if (llmPromptTooltipTimerRef.current != null) window.clearTimeout(llmPromptTooltipTimerRef.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (profileImportUrlTooltipTimerRef.current != null) window.clearTimeout(profileImportUrlTooltipTimerRef.current)
+      if (duplicateProfileTooltipTimerRef.current != null) window.clearTimeout(duplicateProfileTooltipTimerRef.current)
+      if (llmPromptTooltipTimerRef.current != null) window.clearTimeout(llmPromptTooltipTimerRef.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!profileTouchDragPreview) return
@@ -538,9 +356,10 @@ export default function SettingsModal() {
 
   const commitSettings = (nextDraft: AppSettings) => {
     const normalizedProfiles = nextDraft.profiles.map((profile) => {
-      const normalizedBaseUrl = profile.provider === 'fal'
-        ? profile.baseUrl.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
-        : normalizeBaseUrl(profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl)
+      const normalizedBaseUrl =
+        profile.provider === 'fal'
+          ? profile.baseUrl.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
+          : normalizeBaseUrl(profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl)
       const defaultModel = profile.provider === 'fal' ? DEFAULT_FAL_MODEL : getDefaultModelForMode(profile.apiMode)
       return {
         ...profile,
@@ -548,7 +367,10 @@ export default function SettingsModal() {
         baseUrl: normalizedBaseUrl,
         model: profile.model.trim() || defaultModel,
         timeout: Number(profile.timeout) || DEFAULT_SETTINGS.timeout,
-        apiProxy: (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable ? (apiProxyLocked || profile.apiProxy) : false,
+        apiProxy:
+          (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable
+            ? apiProxyLocked || profile.apiProxy
+            : false,
         codexCli: profile.provider === 'openai' ? profile.codexCli : false,
       }
     })
@@ -556,7 +378,10 @@ export default function SettingsModal() {
     const nextActiveProfileId = normalizedProfiles.some((profile) => profile.id === nextDraft.activeProfileId)
       ? nextDraft.activeProfileId
       : (normalizedProfiles[0]?.id ?? fallbackProfile.id)
-    const nextActiveProfile = normalizedProfiles.find((profile) => profile.id === nextActiveProfileId) ?? normalizedProfiles[0] ?? fallbackProfile
+    const nextActiveProfile =
+      normalizedProfiles.find((profile) => profile.id === nextActiveProfileId) ??
+      normalizedProfiles[0] ??
+      fallbackProfile
     const normalizedDraft = normalizeDraftSettings({
       ...nextDraft,
       baseUrl: nextActiveProfile.baseUrl,
@@ -600,7 +425,10 @@ export default function SettingsModal() {
 
     if (profile.provider === 'openai') {
       const baseUrl = profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl
-      url.searchParams.set('apiUrl', options.useNewApiAddress && !options.includeApiKey ? '{address}' : normalizeBaseUrl(baseUrl))
+      url.searchParams.set(
+        'apiUrl',
+        options.useNewApiAddress && !options.includeApiKey ? '{address}' : normalizeBaseUrl(baseUrl),
+      )
       if (options.includeApiKey && profile.apiKey.trim()) {
         url.searchParams.set('apiKey', profile.apiKey.trim())
       } else if (!options.includeApiKey && options.useNewApiKey) {
@@ -630,10 +458,13 @@ export default function SettingsModal() {
       if (options.useNewApiKey) importProfile.apiKey = '{key}'
       if (options.useNewApiModel) importProfile.model = '{model}'
     }
-    url.searchParams.set('settings', JSON.stringify({
-      customProviders: provider ? [provider] : [],
-      profiles: [importProfile],
-    }))
+    url.searchParams.set(
+      'settings',
+      JSON.stringify({
+        customProviders: provider ? [provider] : [],
+        profiles: [importProfile],
+      }),
+    )
 
     let result = url.toString()
     if (!options.includeApiKey) {
@@ -662,9 +493,9 @@ export default function SettingsModal() {
   }
 
   const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>) => ({
-      ...draft,
-      profiles: draft.profiles.map((profile) => profile.id === activeProfile.id ? { ...profile, ...patch } : profile),
-    })
+    ...draft,
+    profiles: draft.profiles.map((profile) => (profile.id === activeProfile.id ? { ...profile, ...patch } : profile)),
+  })
 
   const updateActiveProfile = (patch: Partial<ApiProfile>, commit = false) => {
     const nextDraft = getDraftWithActiveProfilePatch(patch)
@@ -680,9 +511,7 @@ export default function SettingsModal() {
   const handleClose = () => {
     const nextTimeout = Number(timeoutInput)
     const normalizedTimeout =
-      timeoutInput.trim() === '' || Number.isNaN(nextTimeout)
-        ? DEFAULT_SETTINGS.timeout
-        : nextTimeout
+      timeoutInput.trim() === '' || Number.isNaN(nextTimeout) ? DEFAULT_SETTINGS.timeout : nextTimeout
     const nextDraft = {
       ...draft,
       profiles: activeProviderIsOpenAICompatible
@@ -699,7 +528,11 @@ export default function SettingsModal() {
     if (!isOpenAICompatibleProvider(draft, activeProfile.provider)) return
     const nextTimeout = Number(timeoutInput)
     const normalizedTimeout =
-      timeoutInput.trim() === '' ? DEFAULT_SETTINGS.timeout : Number.isNaN(nextTimeout) ? activeProfile.timeout : nextTimeout
+      timeoutInput.trim() === ''
+        ? DEFAULT_SETTINGS.timeout
+        : Number.isNaN(nextTimeout)
+          ? activeProfile.timeout
+          : nextTimeout
     setTimeoutInput(String(normalizedTimeout))
     updateActiveProfile({ timeout: normalizedTimeout }, true)
   }, [draft, activeProfile.id, activeProfile.provider, activeProfile.timeout, timeoutInput])
@@ -722,7 +555,10 @@ export default function SettingsModal() {
   }
 
   useCloseOnEscape(showSettings, handleClose)
-  usePreventBackgroundScroll(showSettings, showCustomProviderImport ? customProviderScrollBoundaryRef : settingsScrollBoundaryRef)
+  usePreventBackgroundScroll(
+    showSettings,
+    showCustomProviderImport ? customProviderScrollBoundaryRef : settingsScrollBoundaryRef,
+  )
 
   if (!showSettings) return null
 
@@ -788,7 +624,7 @@ export default function SettingsModal() {
     commitSettings(nextDraft)
     setShowProfileMenu(false)
   }
-  
+
   const handleProfileDragStart = (e: React.DragEvent, id: string) => {
     setDraggedProfileId(id)
     e.dataTransfer.effectAllowed = 'move'
@@ -890,7 +726,7 @@ export default function SettingsModal() {
     }
 
     e.preventDefault()
-    setProfileTouchDragPreview((current) => current ? { ...current, x: touch.clientX, y: touch.clientY } : current)
+    setProfileTouchDragPreview((current) => (current ? { ...current, x: touch.clientX, y: touch.clientY } : current))
 
     const el = document.elementFromPoint(touch.clientX, touch.clientY)
     const targetElement = el?.closest('[data-profile-id]') as HTMLElement | null
@@ -938,8 +774,17 @@ export default function SettingsModal() {
     commitSettings(nextDraft)
   }
 
-  const handleProviderReorder = (sourceValue: string | number, targetValue: string | number, position: 'before' | 'after' | null) => {
-    const currentOrder = draft.providerOrder || ['openai', 'fal', 'volcengine', ...draft.customProviders.map(p => p.id)]
+  const handleProviderReorder = (
+    sourceValue: string | number,
+    targetValue: string | number,
+    position: 'before' | 'after' | null,
+  ) => {
+    const currentOrder = draft.providerOrder || [
+      'openai',
+      'fal',
+      'volcengine',
+      ...draft.customProviders.map((p) => p.id),
+    ]
     const sourceIndex = currentOrder.indexOf(String(sourceValue))
     const targetIndex = currentOrder.indexOf(String(targetValue))
     if (sourceIndex < 0 || targetIndex < 0) return
@@ -979,14 +824,10 @@ export default function SettingsModal() {
   const buildCustomProviderFromForm = () => {
     const input = customProviderFormToInput(customProviderForm)
     const usedIds = new Set(
-      draft.customProviders
-        .filter((item) => item.id !== editingCustomProviderId)
-        .map((item) => item.id),
+      draft.customProviders.filter((item) => item.id !== editingCustomProviderId).map((item) => item.id),
     )
     const provider = normalizeCustomProviderDefinition(
-      editingCustomProviderId && input && typeof input === 'object'
-        ? { ...input, id: editingCustomProviderId }
-        : input,
+      editingCustomProviderId && input && typeof input === 'object' ? { ...input, id: editingCustomProviderId } : input,
       usedIds,
     )
     if (!provider) throw new Error('自定义服务商配置无效')
@@ -1022,7 +863,7 @@ export default function SettingsModal() {
       const nextDraft = normalizeDraftSettings({
         ...draft,
         customProviders: [...draft.customProviders, customProvider],
-        profiles: draft.profiles.map((profile) => profile.id === activeProfile.id ? nextProfile : profile),
+        profiles: draft.profiles.map((profile) => (profile.id === activeProfile.id ? nextProfile : profile)),
       })
       commitSettings(nextDraft)
       setShowCustomProviderImport(false)
@@ -1076,14 +917,17 @@ export default function SettingsModal() {
         const mergedDraft = mergeImportedSettings(draft, imported)
         const importedProfile = getImportedProfileFromMergedSettings(mergedDraft, previousProfileIds, imported)
         const importedProfileAlreadyExisted = previousProfileIds.has(importedProfile.id)
-        const shouldReplaceActiveProfile = !editingCustomProviderId && isPristineNewOpenAIProfile(activeProfile) && !importedProfileAlreadyExisted
+        const shouldReplaceActiveProfile =
+          !editingCustomProviderId && isPristineNewOpenAIProfile(activeProfile) && !importedProfileAlreadyExisted
         const switchedToExistingProfile = !shouldReplaceActiveProfile && importedProfileAlreadyExisted
         const nextDraft = shouldReplaceActiveProfile
           ? normalizeDraftSettings({
               ...mergedDraft,
               profiles: mergedDraft.profiles
                 .filter((profile) => profile.id === activeProfile.id || profile.id !== importedProfile.id)
-                .map((profile) => profile.id === activeProfile.id ? { ...importedProfile, id: activeProfile.id } : profile),
+                .map((profile) =>
+                  profile.id === activeProfile.id ? { ...importedProfile, id: activeProfile.id } : profile,
+                ),
               activeProfileId: activeProfile.id,
             })
           : normalizeDraftSettings({
@@ -1096,7 +940,14 @@ export default function SettingsModal() {
         setShowCustomProviderImport(false)
         setEditingCustomProviderId(null)
         setCustomProviderImportError(null)
-        showToast(shouldReplaceActiveProfile ? '已覆盖当前空配置' : switchedToExistingProfile ? '已存在相同配置，已切换到已有配置' : 'JSON 配置已导入并切换', 'success')
+        showToast(
+          shouldReplaceActiveProfile
+            ? '已覆盖当前空配置'
+            : switchedToExistingProfile
+              ? '已存在相同配置，已切换到已有配置'
+              : 'JSON 配置已导入并切换',
+          'success',
+        )
         return
       }
 
@@ -1118,11 +969,8 @@ export default function SettingsModal() {
   }
 
   return (
-        <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in"
-        onClick={handleClose}
-      />
+    <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" onClick={handleClose} />
       <div
         ref={settingsScrollBoundaryRef}
         className="relative z-10 flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 sm:h-[720px]"
@@ -1131,13 +979,20 @@ export default function SettingsModal() {
         <div className="flex items-center justify-between shrink-0 p-5 border-b border-gray-100 dark:border-white/[0.08]">
           <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
             <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             设置
           </h3>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">v{getAppVersionLabel()}</span>
+            <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">
+              v{getAppVersionLabel()}
+            </span>
             <button
               onClick={handleClose}
               className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
@@ -1157,7 +1012,12 @@ export default function SettingsModal() {
                 className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'api' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                  />
                 </svg>
                 API 配置
               </button>
@@ -1166,7 +1026,12 @@ export default function SettingsModal() {
                 className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'general' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"
+                  />
                 </svg>
                 习惯配置
               </button>
@@ -1175,7 +1040,12 @@ export default function SettingsModal() {
                 className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'data' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"
+                  />
                 </svg>
                 数据管理
               </button>
@@ -1184,7 +1054,12 @@ export default function SettingsModal() {
                 className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'about' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
                 </svg>
                 关于
               </button>
@@ -1194,878 +1069,129 @@ export default function SettingsModal() {
           {/* Content */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-transparent relative overflow-hidden">
             <div className="flex-1 overflow-y-auto overscroll-contain custom-scrollbar p-5 sm:p-6">
-            {activeTab === 'general' && (
-              <div className="space-y-4 rounded-2xl border border-gray-200/80 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.025]">
-                <div className="hidden sm:block">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">任务提交方式</span>
-                    <div className="w-32">
-                      <Select
-                        value={draft.enterSubmit ? 'enter' : 'ctrl-enter'}
-                        onChange={(val) => commitSettings({ ...draft, enterSubmit: val === 'enter' })}
-                        options={[
-                          { label: 'Enter', value: 'enter' },
-                          { label: navigator.userAgent.includes('Mac') ? 'Cmd + Enter' : 'Ctrl + Enter', value: 'ctrl-enter' }
-                        ]}
-                        className="w-full px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm text-gray-700 dark:text-gray-200 outline-none"
-                      />
-                    </div>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    选择 Enter 提交时，使用 Shift + Enter 换行；否则直接 Enter 换行。
-                  </div>
-                </div>
-                <div className="block">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">提交任务后清空输入框</span>
-                    <button
-                      type="button"
-                      onClick={() => commitSettings({ ...draft, clearInputAfterSubmit: !draft.clearInputAfterSubmit })}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      role="switch"
-                      aria-checked={draft.clearInputAfterSubmit}
-                      aria-label="提交任务后清空输入框"
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.clearInputAfterSubmit ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                    </button>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    开启后，提交成功创建任务时会清空提示词和参考图。
-                  </div>
-                </div>
-                <div className="block">
-                  <div className="mb-1 flex items-center justify-between gap-3">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">参考图编辑按钮</span>
-                    <div className="w-32">
-                      <Select
-                        value={draft.referenceImageEditAction}
-                        onChange={(val) => commitSettings({ ...draft, referenceImageEditAction: val as AppSettings['referenceImageEditAction'] })}
-                        options={[
-                          { label: '询问', value: 'ask' },
-                          { label: '替换参考图', value: 'replace-reference' },
-                          { label: '添加遮罩', value: 'add-mask' },
-                        ]}
-                        className="w-full px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm text-gray-700 dark:text-gray-200 outline-none"
-                      />
-                    </div>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    控制未添加遮罩的参考图点击编辑按钮时，是每次询问、直接替换参考图，还是直接添加遮罩。
-                  </div>
-                </div>
-                <div className="block">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">重启后加载上次的输入框</span>
-                    <button
-                      type="button"
-                      onClick={() => commitSettings({ ...draft, persistInputOnRestart: !draft.persistInputOnRestart })}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.persistInputOnRestart ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      role="switch"
-                      aria-checked={draft.persistInputOnRestart}
-                      aria-label="重启后加载上次的输入框"
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.persistInputOnRestart ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                    </button>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    关闭后，不再持久化提示词和参考图，下次启动会使用空输入框。
-                  </div>
-                </div>
-                <div className="block">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">复用配置时临时复用该任务的 API 配置</span>
-                    <button
-                      type="button"
-                      onClick={() => commitSettings({ ...draft, reuseTaskApiProfileTemporarily: !draft.reuseTaskApiProfileTemporarily })}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.reuseTaskApiProfileTemporarily ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      role="switch"
-                      aria-checked={draft.reuseTaskApiProfileTemporarily}
-                      aria-label="复用配置时临时复用该任务的 API 配置"
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.reuseTaskApiProfileTemporarily ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                    </button>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    开启后，复用历史任务时会临时使用该任务的 API 配置，找不到该配置时提交会提示；关闭后，会继续使用当前的 API 配置。
-                  </div>
-                </div>
-                <div className="block">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">成功任务仍然展示重试按钮</span>
-                    <button
-                      type="button"
-                      onClick={() => commitSettings({ ...draft, alwaysShowRetryButton: !draft.alwaysShowRetryButton })}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.alwaysShowRetryButton ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      role="switch"
-                      aria-checked={draft.alwaysShowRetryButton}
-                      aria-label="成功任务仍然展示重试按钮"
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.alwaysShowRetryButton ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                    </button>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    开启后，即使任务成功生成，也会在任务卡片和详情页显示重试按钮。
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            {activeTab === 'api' && (
-              <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-                <section className="space-y-4 rounded-2xl border border-gray-200/80 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.025]">
-                  <div className="border-b border-gray-100 pb-4 dark:border-white/[0.07]">
-                    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">API 配置</h4>
-                    <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">按用途切换并维护图片生成或 AI 分析连接。</p>
-                    <div className="mt-4 grid grid-cols-2 rounded-xl bg-gray-100 p-1 dark:bg-white/[0.06]" role="tablist" aria-label="API 配置类型">
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={apiConfigView === 'generation'}
-                        onClick={() => setApiConfigView('generation')}
-                        className={`h-9 rounded-lg px-3 text-sm font-medium transition ${apiConfigView === 'generation' ? 'bg-white text-gray-900 shadow-sm dark:bg-white/[0.12] dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`}
-                      >
-                        图片生成
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={apiConfigView === 'analysis'}
-                        onClick={() => setApiConfigView('analysis')}
-                        className={`h-9 rounded-lg px-3 text-sm font-medium transition ${apiConfigView === 'analysis' ? 'bg-white text-gray-900 shadow-sm dark:bg-white/[0.12] dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`}
-                      >
-                        AI 分析
-                      </button>
-                    </div>
-                  </div>
-                <div className={apiConfigView === 'generation' ? 'block' : 'hidden'}>
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">当前配置</span>
-                    <span className="relative inline-flex">
-                      <button
-                        type="button"
-                        onClick={() => confirmCopyProfileImportUrl(activeProfile)}
-                        onMouseEnter={() => setProfileImportUrlTooltipVisible(true)}
-                        onMouseLeave={() => setProfileImportUrlTooltipVisible(false)}
-                        onFocus={() => setProfileImportUrlTooltipVisible(true)}
-                        onBlur={() => setProfileImportUrlTooltipVisible(false)}
-                        onTouchStart={() => {
-                          clearProfileImportUrlTooltipTimer()
-                          profileImportUrlTooltipTimerRef.current = window.setTimeout(() => {
-                            setProfileImportUrlTooltipVisible(true)
-                            profileImportUrlTooltipTimerRef.current = null
-                          }, 450)
-                        }}
-                        onTouchEnd={clearProfileImportUrlTooltipTimer}
-                        onTouchCancel={clearProfileImportUrlTooltipTimer}
-                        className="flex h-5 w-5 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-                        aria-label={`复制导入配置「${activeProfile.name}」的 URL`}
-                      >
-                        <LinkIcon className="h-3.5 w-3.5" />
-                      </button>
-                      <ViewportTooltip visible={profileImportUrlTooltipVisible} className="whitespace-nowrap">
-                        复制导入 URL
-                      </ViewportTooltip>
-                    </span>
-                    <span className="relative inline-flex">
-                      <button
-                        type="button"
-                        onClick={duplicateActiveProfile}
-                        onMouseEnter={() => setDuplicateProfileTooltipVisible(true)}
-                        onMouseLeave={() => setDuplicateProfileTooltipVisible(false)}
-                        onFocus={() => setDuplicateProfileTooltipVisible(true)}
-                        onBlur={() => setDuplicateProfileTooltipVisible(false)}
-                        onTouchStart={() => {
-                          clearDuplicateProfileTooltipTimer()
-                          duplicateProfileTooltipTimerRef.current = window.setTimeout(() => {
-                            setDuplicateProfileTooltipVisible(true)
-                            duplicateProfileTooltipTimerRef.current = null
-                          }, 450)
-                        }}
-                        onTouchEnd={clearDuplicateProfileTooltipTimer}
-                        onTouchCancel={clearDuplicateProfileTooltipTimer}
-                        className="flex h-5 w-5 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-                        aria-label={`复制一份配置「${activeProfile.name}」`}
-                      >
-                        <CopyIcon className="h-3.5 w-3.5" />
-                      </button>
-                      <ViewportTooltip visible={duplicateProfileTooltipVisible} className="whitespace-nowrap">
-                        复制当前配置
-                      </ViewportTooltip>
-                    </span>
-                  </div>
-                  <div ref={profileMenuRef} className="relative">
-                    <button
-                      ref={profileMenuTriggerRef}
-                      type="button"
-                      onClick={() => {
-                        if (!showProfileMenu) updateProfileMenuMaxHeight()
-                        setShowProfileMenu(!showProfileMenu)
-                      }}
-                      className="flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:hover:bg-white/[0.06]"
-                      title={activeProfile.name}
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="min-w-0 truncate">{activeProfile.name}</span>
-                        <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-                          {getApiProviderLabel(draft, activeProfile.provider)}
-                        </span>
-                      </span>
-                      <ChevronDownIcon className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
-                    </button>
-                    
-                    {showProfileMenu && (
-                      <>
-                        <div
-                          className="absolute right-0 top-full z-50 mt-1.5 w-full overflow-hidden overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl animate-dropdown-down dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 custom-scrollbar"
-                          style={{ maxHeight: profileMenuMaxHeight }}
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              createNewProfile()
-                            }}
-                            className="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
-                          >
-                            <span className="truncate font-semibold">创建新配置</span>
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                              <PlusIcon className="h-4 w-4" />
-                            </span>
-                          </button>
-                          <div>
-                            {draft.profiles.map(profile => (
-                              <div
-                                key={profile.id}
-                                data-profile-id={profile.id}
-                                title={profile.name}
-                                draggable
-                                onDragStart={(e) => handleProfileDragStart(e, profile.id)}
-                                onDragOver={(e) => handleProfileDragOver(e, profile.id)}
-                                onDrop={(e) => handleProfileDrop(e, profile.id)}
-                                onDragEnd={handleProfileDragEnd}
-                                onTouchStart={(e) => handleProfileTouchStart(e, profile)}
-                                onTouchMove={handleProfileTouchMove}
-                                onTouchEnd={handleProfileTouchEnd}
-                                onTouchCancel={handleProfileDragEnd}
-                                onClick={(e) => {
-                                  // Don't switch profile if they are clicking the drag handle
-                                  if ((e.target as HTMLElement).closest('[data-drag-handle]')) return
-                                  e.preventDefault()
-                                  switchProfile(profile.id)
-                                }}
-                                className={`relative group flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-xs transition-colors ${draggedProfileId === profile.id ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]' : profile.id === activeProfile.id ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'}`}
-                              >
-                                {dragOverProfileId === profile.id && dragDropPosition === 'before' && draggedProfileId !== profile.id && (
-                                  <div className="absolute -top-[1px] left-0 right-0 h-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
-                                )}
-                                {dragOverProfileId === profile.id && dragDropPosition === 'after' && draggedProfileId !== profile.id && (
-                                  <div className="absolute -bottom-[1px] left-0 right-0 h-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
-                                )}
-                                <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
-                                  <div
-                                    data-drag-handle
-                                    className="flex cursor-grab active:cursor-grabbing items-center justify-center text-gray-400 opacity-60 transition-opacity hover:opacity-100 dark:text-gray-500"
-                                    style={{ touchAction: 'none' }}
-                                    title="拖拽排序"
-                                  >
-                                    <DragHandleIcon className="h-3.5 w-3.5" />
-                                  </div>
-                                  <span className="min-w-0 truncate">{profile.name}</span>
-                                  <span className={`rounded px-1.5 py-0.5 text-[10px] shrink-0 ${profile.id === activeProfile.id ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.08] dark:text-gray-400'}`}>
-                                    {getApiProviderLabel(draft, profile.provider)}
-                                  </span>
-                                </div>
-                                
-                                <div className="flex shrink-0 items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      confirmCopyProfileImportUrl(profile)
-                                    }}
-                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 opacity-60 transition-all hover:bg-gray-100 hover:text-gray-600 hover:opacity-100 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-                                    aria-label={`复制导入配置「${profile.name}」的 URL`}
-                                    title="复制导入 URL"
-                                  >
-                                    <LinkIcon className="h-3.5 w-3.5" />
-                                  </button>
-                                  {draft.profiles.length > 1 && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.preventDefault()
-                                        e.stopPropagation()
-                                        setConfirmDialog({
-                                          title: '删除配置',
-                                          message: `确定要删除配置「${profile.name}」吗？`,
-                                          action: () => deleteProfile(profile.id)
-                                        })
-                                      }}
-                                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 opacity-60 transition-all hover:bg-red-50 hover:text-red-500 hover:opacity-100 dark:hover:bg-red-500/10"
-                                      aria-label="删除配置"
-                                    >
-                                      <TrashIcon className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
+              {activeTab === 'general' && <SettingsGeneralTab draft={draft} onCommit={commitSettings} />}
 
-              <div className={`${apiConfigView === 'analysis' ? 'block' : 'hidden'} rounded-2xl border border-blue-100 bg-blue-50/70 p-3 dark:border-blue-400/20 dark:bg-blue-400/10`}>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-blue-900 dark:text-blue-100">AI 策划配置</span>
-                  <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-500/20 dark:text-blue-200">
-                    Chat
-                  </span>
-                </div>
-                <Select
-                  value={draft.amazonPlannerProfileId}
-                  onChange={(value) => commitSettings({ ...draft, amazonPlannerProfileId: String(value) })}
-                  disabled={amazonPlannerProfiles.length === 0}
-                  options={amazonPlannerProfileOptions}
-                  className="w-full rounded-xl border border-blue-200/70 bg-white/80 px-3 py-2.5 text-sm text-blue-900 outline-none transition focus:border-blue-300 dark:border-blue-400/20 dark:bg-gray-950/40 dark:text-blue-100 dark:focus:border-blue-500/50"
+              {activeTab === 'api' && (
+                <SettingsApiTab
+                  {...{
+                    draft,
+                    activeProfile,
+                    activeCustomProvider,
+                    apiConfigView,
+                    setApiConfigView,
+                    showApiKey,
+                    setShowApiKey,
+                    showProfileMenu,
+                    setShowProfileMenu,
+                    profileMenuMaxHeight,
+                    profileMenuRef,
+                    profileMenuTriggerRef,
+                    profileImportUrlTooltipVisible,
+                    setProfileImportUrlTooltipVisible,
+                    duplicateProfileTooltipVisible,
+                    setDuplicateProfileTooltipVisible,
+                    profileImportUrlTooltipTimerRef,
+                    duplicateProfileTooltipTimerRef,
+                    draggedProfileId,
+                    dragOverProfileId,
+                    dragDropPosition,
+                    providerOptions,
+                    amazonPlannerProfiles,
+                    amazonPlannerProfile,
+                    amazonPlannerProfileOptions,
+                    amazonPlannerModelOptions,
+                    sopReverseProfileOptions,
+                    vocProfileOptions,
+                    activeProviderUsesApiUrl,
+                    activeProviderIsOpenAICompatible,
+                    activeProviderSupportsApiProxy,
+                    apiProxyAvailable,
+                    apiProxyLocked,
+                    apiProxyChecked,
+                    apiProxyEnabled,
+                    apiProxyUrlLocked,
+                    apiProxyUsesDynamicTarget,
+                    timeoutInput,
+                    setTimeoutInput,
+                    updateProfileMenuMaxHeight,
+                    clearProfileImportUrlTooltipTimer,
+                    clearDuplicateProfileTooltipTimer,
+                    confirmCopyProfileImportUrl,
+                    duplicateActiveProfile,
+                    createNewProfile,
+                    switchProfile,
+                    deleteProfile,
+                    handleProfileDragStart,
+                    handleProfileDragOver,
+                    handleProfileDrop,
+                    handleProfileDragEnd,
+                    handleProfileTouchStart,
+                    handleProfileTouchMove,
+                    handleProfileTouchEnd,
+                    setConfirmDialog,
+                    commitSettings,
+                    updateAmazonPlannerModel,
+                    updateActiveProfile,
+                    commitActiveProfilePatch,
+                    handleProviderTypeChange,
+                    handleProviderReorder,
+                    getDefaultModelForMode,
+                    isDefaultModelForModeSwitch,
+                    commitTimeout,
+                    saveApiSettings,
+                  }}
                 />
-                <div className="mt-3">
-                  <div className="mb-1.5 text-xs font-medium text-blue-800 dark:text-blue-200">策划模型</div>
-                  <Select
-                    value={amazonPlannerProfile?.model ?? ''}
-                    onChange={(value) => updateAmazonPlannerModel(String(value))}
-                    disabled={!amazonPlannerProfile}
-                    options={amazonPlannerModelOptions}
-                    className="w-full rounded-xl border border-blue-200/70 bg-white/80 px-3 py-2.5 text-sm text-blue-900 outline-none transition focus:border-blue-300 dark:border-blue-400/20 dark:bg-gray-950/40 dark:text-blue-100 dark:focus:border-blue-500/50"
-                  />
-                </div>
-                <div data-selectable-text className="mt-2 text-xs leading-relaxed text-blue-800 dark:text-blue-200">
-                  只用于首页 Amazon 面板的 AI 策划；普通生图只接受当前配置为 Images API。生图默认使用 gpt-image-2；AI 策划可选择 gpt-5.5 或 gpt-5.6-sol。
-                </div>
-              </div>
-
-              <div className={`${apiConfigView === 'analysis' ? 'block' : 'hidden'} rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 dark:border-emerald-400/20 dark:bg-emerald-400/10`}>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">拆图反推 AI 配置</span>
-                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
-                    Analysis
-                  </span>
-                </div>
-                <Select
-                  value={draft.sopReverseProfileId}
-                  onChange={(value) => commitSettings({ ...draft, sopReverseProfileId: String(value) })}
-                  disabled={amazonPlannerProfiles.length === 0}
-                  options={sopReverseProfileOptions}
-                  className="w-full rounded-xl border border-emerald-200/70 bg-white/80 px-3 py-2.5 text-sm text-emerald-900 outline-none transition focus:border-emerald-300 dark:border-emerald-400/20 dark:bg-gray-950/40 dark:text-emerald-100 dark:focus:border-emerald-500/50"
+              )}
+              {activeTab === 'data' && (
+                <SettingsDataTab
+                  exportConfig={exportConfig}
+                  exportTasks={exportTasks}
+                  importConfig={importConfig}
+                  importTasks={importTasks}
+                  clearConfig={clearConfig}
+                  clearTasks={clearTasks}
+                  isImportingData={isImportingData}
+                  importInputRef={importInputRef}
+                  onExportConfigChange={setExportConfig}
+                  onExportTasksChange={setExportTasks}
+                  onImportConfigChange={setImportConfig}
+                  onImportTasksChange={setImportTasks}
+                  onClearConfigChange={setClearConfig}
+                  onClearTasksChange={setClearTasks}
+                  onExport={() => void exportData({ exportConfig, exportTasks })}
+                  onImport={handleImport}
+                  onClear={() =>
+                    setConfirmDialog({
+                      title: '清空所选数据',
+                      message: '确定要清空所选的数据吗？此操作不可恢复。',
+                      action: () => void handleClearAllData(),
+                    })
+                  }
                 />
-                <div data-selectable-text className="mt-2 text-xs leading-relaxed text-emerald-800 dark:text-emerald-200">
-                  只用于「电商图片拆解反推 SOP」板块，把竞品图、表单信息和 SOP 一起发送给文本/多模态模型分析；不会改变图片生成板块的当前配置。
-                </div>
-              </div>
-
-              <div className={`${apiConfigView === 'analysis' ? 'block' : 'hidden'} rounded-2xl border border-amber-100 bg-amber-50/70 p-3 dark:border-amber-400/20 dark:bg-amber-400/10`}>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-amber-900 dark:text-amber-100">VOC 评论分析配置</span>
-                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-200">
-                    Reviews
-                  </span>
-                </div>
-                <Select
-                  value={draft.vocProfileId}
-                  onChange={(value) => commitSettings({ ...draft, vocProfileId: String(value) })}
-                  disabled={amazonPlannerProfiles.length === 0}
-                  options={vocProfileOptions}
-                  className="w-full rounded-xl border border-amber-200/70 bg-white/80 px-3 py-2.5 text-sm text-amber-900 outline-none transition focus:border-amber-300 dark:border-amber-400/20 dark:bg-gray-950/40 dark:text-amber-100 dark:focus:border-amber-500/50"
-                />
-                <input
-                  value={draft.vocApiKey}
-                  onChange={(event) => commitSettings({ ...draft, vocApiKey: event.target.value })}
-                  type="password"
-                  placeholder="Shulex OpenAPI Key（实时任务）"
-                  className="mt-2 w-full rounded-xl border border-amber-200/70 bg-white/80 px-3 py-2.5 text-sm text-amber-900 outline-none transition placeholder:text-amber-700/45 focus:border-amber-300 dark:border-amber-400/20 dark:bg-gray-950/40 dark:text-amber-100 dark:placeholder:text-amber-200/35 dark:focus:border-amber-500/50"
-                />
-                <div data-selectable-text className="mt-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
-                  只用于「VOC 评论分析」板块。评论拉取使用 Shulex OpenAPI Key；AI 分析使用这里选择的 Chat/Responses 模型。
-                </div>
-              </div>
-
-              <div className={apiConfigView === 'generation' ? 'contents' : 'hidden'}>
-              {/* 1. 配置名称 */}
-              <label className="block">
-                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">配置名称</span>
-                <input
-                  value={activeProfile.name}
-                  onChange={(e) => updateActiveProfile({ name: e.target.value })}
-                  onBlur={(e) => commitActiveProfilePatch({ name: e.target.value })}
-                  type="text"
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                />
-              </label>
-
-              {/* 2. 服务商类型 */}
-              <div className="block">
-                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">服务商类型</span>
-                <Select
-                  value={activeProfile.provider}
-                  onChange={handleProviderTypeChange}
-                  onReorder={handleProviderReorder}
-                  options={providerOptions}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                />
-              </div>
-
-              {/* 3. API URL */}
-              {activeProviderUsesApiUrl && (
-                <label className="block">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">API URL</span>
-                  </div>
-                  <input
-                    value={activeProfile.baseUrl}
-                    onChange={(e) => updateActiveProfile({ baseUrl: e.target.value })}
-                    onBlur={(e) => commitActiveProfilePatch({ baseUrl: e.target.value })}
-                    type="text"
-                    disabled={apiProxyUrlLocked}
-                    placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_BASE_URL : activeProfile.provider === 'volcengine' ? DEFAULT_VOLCENGINE_BASE_URL : DEFAULT_SETTINGS.baseUrl}
-                    className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${apiProxyUrlLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  />
-                  <div data-selectable-text className="mt-1.5 min-h-[22px] flex items-center text-xs text-gray-500 dark:text-gray-500">
-                    {apiProxyEnabled ? (
-                      apiProxyUsesDynamicTarget ? (
-                        <span className="text-blue-600 dark:text-blue-400">已开启代理，请求会通过本地服务转发到此 API URL。</span>
-                      ) : (
-                        <span className="text-yellow-600 dark:text-yellow-500">已开启代理，实际请求目标由部署端决定，此处设置被忽略。</span>
-                      )
-                    ) : activeProfile.provider === 'fal' ? (
-                      <span>默认使用 <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">{DEFAULT_FAL_BASE_URL}</code>；填写自定义地址时将作为 fal.ai 代理 URL。</span>
-                    ) : (
-                      <span>支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code></span>
-                    )}
-                  </div>
-                </label>
               )}
 
-              {/* 4. API 代理（紧跟 URL） */}
-              {apiProxyAvailable && activeProviderSupportsApiProxy && (
-                <div className="block">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">API 代理</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!apiProxyLocked) updateActiveProfile({ apiProxy: !activeProfile.apiProxy }, true)
-                      }}
-                      disabled={apiProxyLocked}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${apiProxyChecked ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'} ${apiProxyLocked ? 'cursor-not-allowed opacity-70' : ''}`}
-                      role="switch"
-                      aria-checked={apiProxyChecked}
-                      aria-label="API 代理"
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${apiProxyChecked ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                    </button>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    {apiProxyUsesDynamicTarget
-                      ? apiProxyLocked
-                        ? '当前部署已锁定 API 代理为开启；API URL 仍可修改，代理会按该地址转发。'
-                        : '开启后通过同源代理访问上方 API URL，用于解决浏览器跨域限制。'
-                      : apiProxyLocked
-                        ? '当前部署已锁定 API 代理为开启，API URL 设置会被忽略。'
-                        : '当前部署提供同源代理时默认开启，可手动关闭。开启后用于解决浏览器跨域限制，API URL 设置会被忽略。'}
-                  </div>
-                </div>
-              )}
-
-              {/* 5. API Key */}
-              <div className="block">
-                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">API Key</span>
-                <div className="relative">
-                  <input
-                    value={activeProfile.apiKey}
-                    onChange={(e) => updateActiveProfile({ apiKey: e.target.value })}
-                    onBlur={(e) => commitActiveProfilePatch({ apiKey: e.target.value })}
-                    type={showApiKey ? 'text' : 'password'}
-                    placeholder={activeProfile.provider === 'fal' ? 'FAL_KEY' : 'sk-...'}
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKey((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                    tabIndex={-1}
-                  >
-                    {showApiKey ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-                <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                  支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>
-                </div>
-              </div>
-
-              {/* 6. API 接口（Images/Responses/Chat） */}
-              {false && activeProfile.provider === 'openai' && (
-                <div className="block">
-                  <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">API 接口</span>
-                  <Select
-                    value={activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode}
-                    onChange={(value) => {
-                      const apiMode = value as AppSettings['apiMode']
-                      const nextModel =
-                        isDefaultModelForModeSwitch(activeProfile.model)
-                          ? getDefaultModelForMode(apiMode)
-                          : activeProfile.model
-                      updateActiveProfile({ apiMode, model: nextModel }, true)
-                    }}
-                    options={[
-                      { label: 'Images API (/v1/images)', value: 'images' },
-                      { label: 'Responses API (/v1/responses)', value: 'responses' },
-                      { label: 'Chat Completions (/chat/completions)', value: 'chat' },
-                    ]}
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                  />
-                  <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                    支持通过查询参数覆盖：<code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">apiMode=images</code>、<code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">apiMode=responses</code> 或 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">apiMode=chat</code>。
-                  </div>
-                </div>
-              )}
-
-              {/* 7. 模型 ID（紧跟接口选择） */}
-              <label className="block">
-                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
-                  模型 ID
-                </span>
-                <input
-                  value={activeProfile.model}
-                  onChange={(e) => updateActiveProfile({ model: e.target.value })}
-                  onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
-                  type="text"
-                  placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+              {activeTab === 'about' && (
+                <SettingsAboutTab
+                  description={ABOUT_DESCRIPTION}
+                  descriptionExpanded={aboutDescriptionExpanded}
+                  onToggleDescription={() => setAboutDescriptionExpanded((expanded) => !expanded)}
                 />
-                <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                  {activeProfile.provider === 'fal' ? (
-                    <>当前适配 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_FAL_MODEL}</code>。</>
-                  ) : activeCustomProvider ? (
-                    <>当前使用 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{activeCustomProvider.name}</code>。</>
-                  ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' ? (
-                    <>Responses API 用于 AI 策划等文本/多模态流程；普通生图请切换到 Images API 配置。</>
-                  ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'chat' ? (
-                    isOpenRouterImageGenerationProfile(activeProfile) ? (
-                      <>OpenRouter 图片模型通过 Chat Completions 生图；模型需支持 image 输出。</>
-                    ) : (
-                      <>Chat Completions 用于 AI 策划文本模型，默认 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_CHAT_MODEL}</code>；普通生图请使用 Images API 配置。</>
-                    )
-                  ) : (
-                    <>Images API 需要使用 GPT Image 模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_IMAGES_MODEL}</code>。</>
-                  )}
-                  {activeProfile.provider === 'openai' && (
-                    <>支持通过查询参数覆盖：<code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">?model=</code>。</>
-                  )}
-                </div>
-              </label>
-
-              {/* 9. 返回 Base64 图片数据 */}
-              {activeProviderIsOpenAICompatible && (
-                <div className="block">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">返回 Base64 图片数据</span>
-                    <button
-                      type="button"
-                      onClick={() => updateActiveProfile({ responseFormatB64Json: !activeProfile.responseFormatB64Json }, true)}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${activeProfile.responseFormatB64Json ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      role="switch"
-                      aria-checked={!!activeProfile.responseFormatB64Json}
-                      aria-label="返回 Base64 图片数据"
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${activeProfile.responseFormatB64Json ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                    </button>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    开启后在请求体中追加 <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">response_format: b64_json</code>，使接口直接返回 Base64 编码的图片数据而非 URL。并非所有服务商和网关都支持此功能。
-                  </div>
-                </div>
               )}
-
-              {/* 10. Codex CLI 兼容模式 */}
-              {activeProfile.provider === 'openai' && (
-                <div className="block">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">Codex CLI 兼容模式</span>
-                    <button
-                      type="button"
-                      onClick={() => updateActiveProfile({ codexCli: !activeProfile.codexCli }, true)}
-                      className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${activeProfile.codexCli ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      role="switch"
-                      aria-checked={activeProfile.codexCli}
-                      aria-label="Codex CLI 兼容模式"
-                    >
-                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${activeProfile.codexCli ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
-                    </button>
-                  </div>
-                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                    开启后应用 Codex CLI 实际支持的参数。支持查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">codexCli=true</code>。
-                  </div>
-                </div>
-              )}
-
-              {/* 11. 请求超时 */}
-              {activeProviderIsOpenAICompatible && (
-                <label className="block">
-                  <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">请求超时 (秒)</span>
-                  <input
-                    value={timeoutInput}
-                    onChange={(e) => setTimeoutInput(e.target.value)}
-                    onBlur={commitTimeout}
-                    type="number"
-                    min={10}
-                    max={600}
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                  />
-                </label>
-              )}
-
-              <div className="-mx-5 -mb-5 border-t border-gray-200/70 bg-gray-50/80 px-5 py-4 dark:border-white/[0.08] dark:bg-white/[0.02]">
-                <button
-                  type="button"
-                  onClick={saveApiSettings}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 active:scale-[0.99] dark:bg-blue-500 dark:hover:bg-blue-400"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
-                    <path d="M17 21v-8H7v8" />
-                    <path d="M7 3v5h8" />
-                  </svg>
-                  保存 API 配置
-                </button>
-              </div>
-              </div>
-                </section>
-                <section className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.025]">
-                  <div className="border-b border-gray-100 p-5 dark:border-white/[0.07]">
-                    <div className="flex items-center justify-between gap-3">
-                      <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">图片编辑</h4>
-                      <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-medium text-gray-500 dark:bg-white/[0.07] dark:text-gray-400">可选</span>
-                    </div>
-                    <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">仅供独立图片编辑器使用，不改变首页图片生成配置。</p>
-                  </div>
-                  <div className="space-y-4 p-5">
-                    <label className="block">
-                      <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">编辑器 API 配置</span>
-                      <Select
-                        value={draft.seedreamEditorProfileId || ''}
-                        onChange={(value) => commitSettings({ ...draft, seedreamEditorProfileId: String(value) })}
-                        options={[
-                          { label: '跟随当前图片生成配置', value: '' },
-                          ...draft.profiles.filter((profile) => profile.apiMode === 'images').map((profile) => ({ label: `${profile.name} · ${profile.model || '未配置模型'}`, value: profile.id })),
-                        ]}
-                        className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
-                      />
-                    </label>
-                    <div className="rounded-xl border border-dashed border-gray-300 px-4 py-5 text-center text-xs leading-5 text-gray-500 dark:border-white/[0.14] dark:text-gray-400">
-                      需要 Seedream 5.0 Pro 时，可先在左侧图片生成卡片中新建对应配置，再在这里选用。
-                    </div>
-                  </div>
-                </section>
             </div>
-            )}
-            
-            {activeTab === 'data' && (
-              <div className="space-y-4">
-                <div className="rounded-2xl bg-gray-50/80 p-4 border border-gray-200/60 dark:bg-white/[0.02] dark:border-white/[0.05] flex items-start gap-3">
-                  <svg className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                  <div className="text-[13px] leading-relaxed text-gray-500 dark:text-gray-400">
-                    所有的配置、任务记录和生成的图片均仅保存在您的浏览器本地（除非您使用的服务商存储了它们）。如果您需要清理浏览器站点数据、重置浏览器或使用其他设备，请先导出备份。
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-gray-100 bg-white p-4 dark:border-white/[0.06] dark:bg-white/[0.02] space-y-4 shadow-sm">
-                  <div className="flex items-center gap-2 mb-1">
-                    <ExportIcon className="w-4 h-4 text-gray-700 dark:text-gray-300" />
-                    <h4 className="text-sm font-bold text-gray-800 dark:text-gray-100">导出数据</h4>
-                  </div>
-                  <div className="flex flex-wrap gap-x-6 gap-y-3">
-                    <Checkbox
-                      checked={exportConfig}
-                      onChange={setExportConfig}
-                      label="包含配置"
-                    />
-                    <Checkbox
-                      checked={exportTasks}
-                      onChange={setExportTasks}
-                      label="包含任务和图片"
-                    />
-                  </div>
-                  <button
-                    onClick={() => exportData({ exportConfig, exportTasks })}
-                    disabled={!exportConfig && !exportTasks}
-                    className="w-full rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:bg-gray-200 hover:text-gray-900 disabled:opacity-50 disabled:hover:bg-gray-100/80 disabled:hover:text-gray-700 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white dark:disabled:hover:bg-white/[0.06] dark:disabled:hover:text-gray-300 flex items-center justify-center gap-2"
-                  >
-                    导出所选数据
-                  </button>
-                </div>
-
-                <div className="rounded-2xl border border-gray-100 bg-white p-4 dark:border-white/[0.06] dark:bg-white/[0.02] space-y-4 shadow-sm">
-                  <div className="flex items-center gap-2 mb-1">
-                    <ImportIcon className="w-4 h-4 text-gray-700 dark:text-gray-300" />
-                    <h4 className="text-sm font-bold text-gray-800 dark:text-gray-100">导入数据</h4>
-                  </div>
-                  <div className="flex flex-wrap gap-x-6 gap-y-3">
-                    <Checkbox
-                      checked={importConfig}
-                      onChange={setImportConfig}
-                      label="包含配置"
-                    />
-                    <Checkbox
-                      checked={importTasks}
-                      onChange={setImportTasks}
-                      label="包含任务和图片"
-                    />
-                  </div>
-                  <button
-                    onClick={() => importInputRef.current?.click()}
-                    disabled={(!importConfig && !importTasks) || isImportingData}
-                    className="w-full rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:bg-gray-200 hover:text-gray-900 disabled:opacity-50 disabled:hover:bg-gray-100/80 disabled:hover:text-gray-700 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white dark:disabled:hover:bg-white/[0.06] dark:disabled:hover:text-gray-300 flex items-center justify-center gap-2"
-                  >
-                    {isImportingData ? (
-                      <>
-                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        导入中...
-                      </>
-                    ) : (
-                      '从 ZIP 导入所选数据'
-                    )}
-                  </button>
-                  <input
-                    ref={importInputRef}
-                    type="file"
-                    accept=".zip"
-                    className="hidden"
-                    onChange={handleImport}
-                  />
-                </div>
-
-                <div className="rounded-2xl border border-red-100/50 bg-red-50/30 p-4 dark:border-red-500/10 dark:bg-red-500/5 space-y-4 shadow-sm">
-                  <div className="flex items-center gap-2 mb-1">
-                    <TrashIcon className="w-4 h-4 text-red-500/90 dark:text-red-400" />
-                    <h4 className="text-sm font-bold text-red-500/90 dark:text-red-400">清除数据</h4>
-                  </div>
-                  <div className="flex flex-wrap gap-x-6 gap-y-3">
-                    <Checkbox
-                      checked={clearConfig}
-                      onChange={setClearConfig}
-                      label="包含配置"
-                      tone="danger"
-                    />
-                    <Checkbox
-                      checked={clearTasks}
-                      onChange={setClearTasks}
-                      label="包含任务和图片"
-                      tone="danger"
-                    />
-                  </div>
-                  <button
-                    onClick={() =>
-                      setConfirmDialog({
-                        title: '清空所选数据',
-                        message: `确定要清空所选的数据吗？此操作不可恢复。`,
-                        action: () => handleClearAllData(),
-                      })
-                    }
-                    disabled={!clearConfig && !clearTasks}
-                    className="w-full rounded-xl border border-red-200/60 bg-red-50/50 px-4 py-2.5 text-sm font-medium text-red-500 transition-all hover:bg-red-50 hover:border-red-200 hover:text-red-600 disabled:opacity-50 disabled:hover:bg-red-50/50 disabled:hover:border-red-200/60 disabled:hover:text-red-500 dark:border-red-500/15 dark:bg-red-500/5 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:border-red-500/30 dark:hover:text-red-300 dark:disabled:hover:bg-red-500/5 dark:disabled:hover:border-red-500/15 dark:disabled:hover:text-red-400"
-                  >
-                    清空所选数据
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'about' && (
-              <div className="flex h-full min-h-[300px] flex-col items-center overflow-y-auto px-6 py-6">
-                <div className="mb-5 flex h-[88px] w-[88px] items-center justify-center rounded-3xl border border-gray-200/80 bg-white p-1.5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04]">
-                  <img
-                    src={getPublicAssetUrl('pwa-icon.png')}
-                    alt={`${APP_BRAND_NAME} Logo`}
-                    className="h-full w-full rounded-[1.25rem] object-cover"
-                  />
-                </div>
-                <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">{APP_BRAND_NAME}</h4>
-                <button
-                  type="button"
-                  title={ABOUT_DESCRIPTION}
-                  onClick={() => setAboutDescriptionExpanded((expanded) => !expanded)}
-                  className="group mt-3 max-w-[460px] rounded-2xl px-3 py-2 text-center transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:hover:bg-white/[0.04]"
-                  aria-expanded={aboutDescriptionExpanded}
-                >
-                  <span
-                    className="block text-[13px] leading-relaxed text-gray-500 dark:text-gray-400"
-                    style={aboutDescriptionExpanded ? undefined : {
-                      display: '-webkit-box',
-                      WebkitBoxOrient: 'vertical',
-                      WebkitLineClamp: 2,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {ABOUT_DESCRIPTION}
-                  </span>
-                  <span className="mt-1 block text-[11px] font-medium text-blue-500 opacity-0 transition group-hover:opacity-100 group-focus:opacity-100 dark:text-blue-300">
-                    {aboutDescriptionExpanded ? '收起介绍' : '查看完整介绍'}
-                  </span>
-                </button>
-                <div className="mt-5 flex w-full max-w-[420px] flex-col items-center gap-3 rounded-2xl border border-gray-200/70 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
-                  <a
-                    href={APP_REPOSITORY_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-gray-300 hover:text-gray-950 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:border-white/[0.18] dark:hover:text-white"
-                  >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.589 2 12.253c0 4.531 2.865 8.374 6.839 9.731.5.095.683-.222.683-.494 0-.244-.009-.89-.014-1.747-2.782.62-3.369-1.375-3.369-1.375-.455-1.186-1.11-1.502-1.11-1.502-.908-.636.069-.623.069-.623 1.004.072 1.532 1.057 1.532 1.057.892 1.565 2.341 1.113 2.91.851.091-.662.349-1.113.635-1.369-2.221-.259-4.556-1.138-4.556-5.064 0-1.119.39-2.034 1.029-2.751-.103-.26-.446-1.303.098-2.716 0 0 .84-.276 2.75 1.051A9.384 9.384 0 0 1 12 6.957a9.37 9.37 0 0 1 2.504.345c1.909-1.327 2.747-1.051 2.747-1.051.546 1.413.203 2.456.1 2.716.64.717 1.028 1.632 1.028 2.751 0 3.936-2.339 4.802-4.566 5.056.359.317.678.943.678 1.9 0 1.371-.012 2.477-.012 2.816 0 .274.18.594.688.493C21.138 20.623 24 16.782 24 12.253 24 6.589 19.523 2 12 2Z" />
-                    </svg>
-                    github.com/china-luo/ImageStudioRemasteredVersion
-                  </a>
-                  <div className="flex flex-col items-center gap-2">
-                    <img
-                      src={getPublicAssetUrl('support-wechat-pay-qr.png')}
-                      alt="微信赞助码"
-                      className="w-full max-w-[200px] rounded-2xl border border-gray-200 bg-white object-contain p-1.5 shadow-sm dark:border-white/[0.08]"
-                    />
-                    <span className="text-xs text-gray-500 dark:text-gray-400">微信赞助码</span>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
-      </div>
 
-        {showCustomProviderImport && createPortal(
+      {showCustomProviderImport &&
+        createPortal(
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" onClick={() => {
-              setShowCustomProviderImport(false)
-              setEditingCustomProviderId(null)
-            }} />
+            <div
+              className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in"
+              onClick={() => {
+                setShowCustomProviderImport(false)
+                setEditingCustomProviderId(null)
+              }}
+            />
             <div className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 flex flex-col h-[85vh] sm:h-[680px] max-h-[90vh] overflow-hidden">
               <div className="mb-5 flex items-center justify-between gap-4 shrink-0">
                 <h3 className="text-base font-bold text-gray-800 dark:text-gray-100">
@@ -2090,12 +1216,18 @@ export default function SettingsModal() {
                 <div className="mb-6 shrink-0 rounded-2xl bg-gray-50/80 p-4 border border-gray-200/60 dark:bg-white/[0.02] dark:border-white/[0.05]">
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-200">
                     <svg className="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                      />
                     </svg>
                     AI 一键生成与导入
                   </div>
                   <div data-selectable-text className="mb-4 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                    复制提示词发给 LLM，可根据 API 文档自动生成完整的配置（包含服务商、模型、URL 等）。复制 LLM 输出的 JSON 后，点击“从剪贴板粘贴并导入”即可一键生效。
+                    复制提示词发给 LLM，可根据 API 文档自动生成完整的配置（包含服务商、模型、URL 等）。复制 LLM 输出的
+                    JSON 后，点击“从剪贴板粘贴并导入”即可一键生效。
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="relative inline-flex">
@@ -2131,35 +1263,51 @@ export default function SettingsModal() {
                       disabled={isImportingJson}
                       className="flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-sm border border-gray-200/80 transition hover:bg-gray-50 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/[0.05] dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.08] dark:hover:text-white"
                     >
-                    {isImportingJson ? (
-                      <>
-                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        导入中...
-                      </>
-                    ) : (
-                      '从剪贴板粘贴并导入'
-                    )}
-                  </button>
+                      {isImportingJson ? (
+                        <>
+                          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            ></circle>
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path>
+                          </svg>
+                          导入中...
+                        </>
+                      ) : (
+                        '从剪贴板粘贴并导入'
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex-1 flex flex-col min-h-0">
-                <label className="flex-1 flex flex-col min-h-0">
-                  <span className="mb-1 shrink-0 block text-xs text-gray-500 dark:text-gray-400">手动编辑 (仅接口映射 Manifest)</span>
-                  <textarea
-                    value={customProviderForm.json}
-                    onChange={(e) => updateCustomProviderForm({ json: e.target.value })}
-                    spellCheck={false}
-                    className="flex-1 min-h-[150px] w-full resize-none rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 font-mono text-xs leading-relaxed text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 custom-scrollbar"
-                  />
-                </label>
-              </div>
+                <div className="flex-1 flex flex-col min-h-0">
+                  <label className="flex-1 flex flex-col min-h-0">
+                    <span className="mb-1 shrink-0 block text-xs text-gray-500 dark:text-gray-400">
+                      手动编辑 (仅接口映射 Manifest)
+                    </span>
+                    <textarea
+                      value={customProviderForm.json}
+                      onChange={(e) => updateCustomProviderForm({ json: e.target.value })}
+                      spellCheck={false}
+                      className="flex-1 min-h-[150px] w-full resize-none rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 font-mono text-xs leading-relaxed text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 custom-scrollbar"
+                    />
+                  </label>
+                </div>
 
                 {customProviderImportError && (
-                  <div data-selectable-text className="shrink-0 mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-500 dark:bg-red-500/10 dark:text-red-300">
+                  <div
+                    data-selectable-text
+                    className="shrink-0 mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-500 dark:bg-red-500/10 dark:text-red-300"
+                  >
                     {customProviderImportError}
                   </div>
                 )}
@@ -2184,9 +1332,11 @@ export default function SettingsModal() {
                 </button>
               </div>
             </div>
-          </div>
-          , document.body)}
-        {profileTouchDragPreview && createPortal(
+          </div>,
+          document.body,
+        )}
+      {profileTouchDragPreview &&
+        createPortal(
           <div
             className="fixed pointer-events-none z-[110] flex items-center justify-between gap-2 rounded-xl bg-white/95 px-3 py-2 text-xs text-gray-700 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:bg-gray-900/95 dark:text-gray-300 dark:ring-white/10"
             style={{
@@ -2206,7 +1356,8 @@ export default function SettingsModal() {
           </div>,
           document.body,
         )}
-        {copyImportUrlProfile && createPortal(
+      {copyImportUrlProfile &&
+        createPortal(
           <div
             data-no-drag-select
             className="fixed inset-0 z-[110] flex items-center justify-center p-4"
@@ -2241,17 +1392,39 @@ export default function SettingsModal() {
                     <Checkbox
                       checked={copyImportUrlOptions.useNewApiAddress}
                       onChange={(checked) => updateCopyImportUrlOptions({ useNewApiAddress: checked })}
-                      label={<>使用 <code className="mx-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[0.85em] font-mono text-gray-700 dark:bg-white/[0.08] dark:text-gray-200">{"{address}"}</code> (不含 /v1)</>}
+                      label={
+                        <>
+                          使用{' '}
+                          <code className="mx-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[0.85em] font-mono text-gray-700 dark:bg-white/[0.08] dark:text-gray-200">
+                            {'{address}'}
+                          </code>{' '}
+                          (不含 /v1)
+                        </>
+                      }
                     />
                     <Checkbox
                       checked={copyImportUrlOptions.useNewApiKey}
                       onChange={(checked) => updateCopyImportUrlOptions({ useNewApiKey: checked })}
-                      label={<>使用 <code className="mx-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[0.85em] font-mono text-gray-700 dark:bg-white/[0.08] dark:text-gray-200">{"{key}"}</code></>}
+                      label={
+                        <>
+                          使用{' '}
+                          <code className="mx-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[0.85em] font-mono text-gray-700 dark:bg-white/[0.08] dark:text-gray-200">
+                            {'{key}'}
+                          </code>
+                        </>
+                      }
                     />
                     <Checkbox
                       checked={copyImportUrlOptions.useNewApiModel}
                       onChange={(checked) => updateCopyImportUrlOptions({ useNewApiModel: checked })}
-                      label={<>使用 <code className="mx-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[0.85em] font-mono text-gray-700 dark:bg-white/[0.08] dark:text-gray-200">{"{model}"}</code></>}
+                      label={
+                        <>
+                          使用{' '}
+                          <code className="mx-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[0.85em] font-mono text-gray-700 dark:bg-white/[0.08] dark:text-gray-200">
+                            {'{model}'}
+                          </code>
+                        </>
+                      }
                     />
                   </div>
                 </div>

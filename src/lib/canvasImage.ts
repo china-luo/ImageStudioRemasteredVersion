@@ -46,10 +46,14 @@ export async function maskDataUrlToPngBlob(maskDataUrl: string): Promise<Blob> {
 
 export async function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png', quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) reject(new Error('图片导出失败'))
-      else resolve(blob)
-    }, type, quality)
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) reject(new Error('图片导出失败'))
+        else resolve(blob)
+      },
+      type,
+      quality,
+    )
   })
 }
 

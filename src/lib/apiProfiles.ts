@@ -41,24 +41,39 @@ export function isVolcengineSeedreamProModel(model: string): boolean {
 function toProfileUrl(value: string): URL | null {
   const trimmed = value.trim()
   if (!trimmed) return null
-  try { return new URL(/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`) } catch { return null }
+  try {
+    return new URL(/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`)
+  } catch {
+    return null
+  }
 }
 
 export function isAliyunApiBaseUrl(value: string): boolean {
   const url = toProfileUrl(value)
   if (!url) return false
   const hostname = url.hostname.toLowerCase()
-  return hostname === 'dashscope.aliyuncs.com' || hostname === 'dashscope-intl.aliyuncs.com' ||
-    hostname === 'dashscope.aliyun.com' || hostname === 'dashscope-intl.aliyun.com' ||
-    hostname.endsWith('.maas.aliyuncs.com') || hostname.endsWith('.maas.aliyun.com')
+  return (
+    hostname === 'dashscope.aliyuncs.com' ||
+    hostname === 'dashscope-intl.aliyuncs.com' ||
+    hostname === 'dashscope.aliyun.com' ||
+    hostname === 'dashscope-intl.aliyun.com' ||
+    hostname.endsWith('.maas.aliyuncs.com') ||
+    hostname.endsWith('.maas.aliyun.com')
+  )
 }
 
 export function getAliyunQwenImageModel(model: string): string {
   return /^qwen-image(?:-|$)/i.test(model.trim()) ? model.trim() : DEFAULT_ALIYUN_QWEN_MODEL
 }
 
-export function isAliyunQwenImageProfile(profile: Pick<ApiProfile, 'provider' | 'baseUrl'> & Partial<Pick<ApiProfile, 'apiMode'>>): boolean {
-  return profile.provider === 'openai' && (profile.apiMode === undefined || profile.apiMode === 'images') && isAliyunApiBaseUrl(profile.baseUrl)
+export function isAliyunQwenImageProfile(
+  profile: Pick<ApiProfile, 'provider' | 'baseUrl'> & Partial<Pick<ApiProfile, 'apiMode'>>,
+): boolean {
+  return (
+    profile.provider === 'openai' &&
+    (profile.apiMode === undefined || profile.apiMode === 'images') &&
+    isAliyunApiBaseUrl(profile.baseUrl)
+  )
 }
 const DEFAULT_CUSTOM_PROVIDER_PATHS = {
   generationPath: 'images/generations',
@@ -87,7 +102,10 @@ const DEFAULT_EDIT_FILES: CustomProviderFileMapping[] = [
 
 type ApiProfileProviderDraft = NonNullable<ApiProfile['providerDrafts']>[ApiProvider]
 
-export function normalizeAgentMaxToolRounds(value: unknown, fallback: number | undefined = DEFAULT_AGENT_MAX_TOOL_ROUNDS): number {
+export function normalizeAgentMaxToolRounds(
+  value: unknown,
+  fallback: number | undefined = DEFAULT_AGENT_MAX_TOOL_ROUNDS,
+): number {
   const fallbackValue = fallback ?? DEFAULT_AGENT_MAX_TOOL_ROUNDS
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return fallbackValue
@@ -110,8 +128,9 @@ function normalizeStringRecord(value: unknown): Record<string, string> | undefin
   if (!value || typeof value !== 'object') return undefined
 
   const entries = Object.entries(value as Record<string, unknown>)
-    .filter((entry): entry is [string, string | number | boolean] =>
-      typeof entry[0] === 'string' && ['string', 'number', 'boolean'].includes(typeof entry[1]),
+    .filter(
+      (entry): entry is [string, string | number | boolean] =>
+        typeof entry[0] === 'string' && ['string', 'number', 'boolean'].includes(typeof entry[1]),
     )
     .map(([key, item]) => [key, String(item)] as const)
 
@@ -120,7 +139,9 @@ function normalizeStringRecord(value: unknown): Record<string, string> | undefin
 
 function normalizeStringArray(value: unknown, fallback: string[]): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim())
+    ? value
+        .filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
+        .map((item) => item.trim())
     : fallback
 }
 
@@ -128,7 +149,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function normalizeRequestMethod(value: unknown, fallback: CustomProviderRequestMethod = 'POST'): CustomProviderRequestMethod {
+function normalizeRequestMethod(
+  value: unknown,
+  fallback: CustomProviderRequestMethod = 'POST',
+): CustomProviderRequestMethod {
   return value === 'GET' || value === 'POST' ? value : fallback
 }
 
@@ -140,7 +164,10 @@ function normalizeBodyTemplate(value: unknown, fallback: Record<string, unknown>
   return isRecord(value) ? value : fallback
 }
 
-function normalizeFileMappings(value: unknown, fallback: CustomProviderFileMapping[] = []): CustomProviderFileMapping[] {
+function normalizeFileMappings(
+  value: unknown,
+  fallback: CustomProviderFileMapping[] = [],
+): CustomProviderFileMapping[] {
   if (!Array.isArray(value)) return fallback
   const files = value
     .map((item): CustomProviderFileMapping | null => {
@@ -156,7 +183,10 @@ function normalizeFileMappings(value: unknown, fallback: CustomProviderFileMappi
   return files.length ? files : fallback
 }
 
-function normalizeResultMapping(value: unknown, fallback: CustomProviderResultMapping = DEFAULT_OPENAI_RESULT): CustomProviderResultMapping {
+function normalizeResultMapping(
+  value: unknown,
+  fallback: CustomProviderResultMapping = DEFAULT_OPENAI_RESULT,
+): CustomProviderResultMapping {
   const record = isRecord(value) ? value : {}
   const imageUrlPaths = normalizeStringArray(record.imageUrlPaths, fallback.imageUrlPaths ?? [])
   const b64JsonPaths = normalizeStringArray(record.b64JsonPaths, fallback.b64JsonPaths ?? [])
@@ -174,31 +204,49 @@ function normalizeSubmitMapping(value: unknown, fallback: CustomProviderSubmitMa
     method: normalizeRequestMethod(record.method, fallback.method ?? 'POST'),
     contentType,
     query: normalizeStringRecord(record.query) ?? fallback.query,
-    body: normalizeBodyTemplate(record.body, fallback.body ?? (contentType === 'multipart' ? DEFAULT_EDIT_BODY : DEFAULT_GENERATE_BODY)),
+    body: normalizeBodyTemplate(
+      record.body,
+      fallback.body ?? (contentType === 'multipart' ? DEFAULT_EDIT_BODY : DEFAULT_GENERATE_BODY),
+    ),
     files: contentType === 'multipart' ? normalizeFileMappings(record.files, fallback.files) : undefined,
-    taskIdPath: typeof record.taskIdPath === 'string' && record.taskIdPath.trim() ? record.taskIdPath.trim() : fallback.taskIdPath,
+    taskIdPath:
+      typeof record.taskIdPath === 'string' && record.taskIdPath.trim()
+        ? record.taskIdPath.trim()
+        : fallback.taskIdPath,
     result: normalizeResultMapping(record.result, fallback.result ?? DEFAULT_OPENAI_RESULT),
   }
 }
 
-function normalizePollMapping(value: unknown, fallback?: CustomProviderPollMapping): CustomProviderPollMapping | undefined {
+function normalizePollMapping(
+  value: unknown,
+  fallback?: CustomProviderPollMapping,
+): CustomProviderPollMapping | undefined {
   if (!isRecord(value) && !fallback) return undefined
   const record = isRecord(value) ? value : {}
   const path = normalizeProviderPath(record.path, fallback?.path ?? DEFAULT_CUSTOM_PROVIDER_PATHS.taskPath)
-  const statusPath = typeof record.statusPath === 'string' && record.statusPath.trim() ? record.statusPath.trim() : fallback?.statusPath
+  const statusPath =
+    typeof record.statusPath === 'string' && record.statusPath.trim() ? record.statusPath.trim() : fallback?.statusPath
   if (!statusPath) return undefined
 
   return {
     path,
     method: normalizeRequestMethod(record.method, fallback?.method ?? 'GET'),
     query: normalizeStringRecord(record.query) ?? fallback?.query,
-    intervalSeconds: typeof record.intervalSeconds === 'number' && Number.isFinite(record.intervalSeconds)
-      ? Math.max(1, record.intervalSeconds)
-      : fallback?.intervalSeconds ?? 5,
+    intervalSeconds:
+      typeof record.intervalSeconds === 'number' && Number.isFinite(record.intervalSeconds)
+        ? Math.max(1, record.intervalSeconds)
+        : (fallback?.intervalSeconds ?? 5),
     statusPath,
-    successValues: normalizeStringArray(record.successValues, fallback?.successValues ?? ['SUCCESS', 'succeeded', 'completed', 'COMPLETED']),
-    failureValues: normalizeStringArray(record.failureValues, fallback?.failureValues ?? ['FAILURE', 'failed', 'error', 'FAILED', 'cancelled']),
-    errorPath: typeof record.errorPath === 'string' && record.errorPath.trim() ? record.errorPath.trim() : fallback?.errorPath,
+    successValues: normalizeStringArray(
+      record.successValues,
+      fallback?.successValues ?? ['SUCCESS', 'succeeded', 'completed', 'COMPLETED'],
+    ),
+    failureValues: normalizeStringArray(
+      record.failureValues,
+      fallback?.failureValues ?? ['FAILURE', 'failed', 'error', 'FAILED', 'cancelled'],
+    ),
+    errorPath:
+      typeof record.errorPath === 'string' && record.errorPath.trim() ? record.errorPath.trim() : fallback?.errorPath,
     result: normalizeResultMapping(record.result, fallback?.result ?? DEFAULT_OPENAI_RESULT),
   }
 }
@@ -206,7 +254,10 @@ function normalizePollMapping(value: unknown, fallback?: CustomProviderPollMappi
 function legacyCustomProviderToManifest(record: Record<string, unknown>): Record<string, unknown> | null {
   if (record.template !== 'openai-compatible' && record.template !== 'openai-compatible-async') return null
   const isAsync = record.template === 'openai-compatible-async'
-  const taskResultPath = typeof record.taskResultPath === 'string' && record.taskResultPath.trim() ? record.taskResultPath.trim() : 'data.data'
+  const taskResultPath =
+    typeof record.taskResultPath === 'string' && record.taskResultPath.trim()
+      ? record.taskResultPath.trim()
+      : 'data.data'
   return {
     id: record.id,
     name: record.name,
@@ -215,7 +266,7 @@ function legacyCustomProviderToManifest(record: Record<string, unknown>): Record
       path: record.generationPath ?? DEFAULT_CUSTOM_PROVIDER_PATHS.generationPath,
       method: 'POST',
       contentType: 'json',
-      query: isAsync ? normalizeStringRecord(record.submitQuery) ?? { async: 'true' } : undefined,
+      query: isAsync ? (normalizeStringRecord(record.submitQuery) ?? { async: 'true' }) : undefined,
       body: DEFAULT_GENERATE_BODY,
       taskIdPath: isAsync ? (record.taskIdPath ?? 'data') : undefined,
       result: DEFAULT_OPENAI_RESULT,
@@ -224,30 +275,42 @@ function legacyCustomProviderToManifest(record: Record<string, unknown>): Record
       path: record.editPath ?? DEFAULT_CUSTOM_PROVIDER_PATHS.editPath,
       method: 'POST',
       contentType: 'multipart',
-      query: isAsync ? normalizeStringRecord(record.submitQuery) ?? { async: 'true' } : undefined,
+      query: isAsync ? (normalizeStringRecord(record.submitQuery) ?? { async: 'true' }) : undefined,
       body: DEFAULT_EDIT_BODY,
       files: DEFAULT_EDIT_FILES,
       taskIdPath: isAsync ? (record.taskIdPath ?? 'data') : undefined,
       result: DEFAULT_OPENAI_RESULT,
     },
-    poll: isAsync ? {
-      path: record.taskPath ?? DEFAULT_CUSTOM_PROVIDER_PATHS.taskPath,
-      method: 'GET',
-      statusPath: record.taskStatusPath ?? 'data.status',
-      successValues: normalizeStringArray(record.taskSuccessValues, ['SUCCESS', 'succeeded', 'completed', 'COMPLETED']),
-      failureValues: normalizeStringArray(record.taskFailureValues, ['FAILURE', 'failed', 'error', 'FAILED']),
-      errorPath: 'data.fail_reason',
-      intervalSeconds: typeof record.pollIntervalSeconds === 'number' ? record.pollIntervalSeconds : 5,
-      result: {
-        imageUrlPaths: [`${taskResultPath}.data.*.url`],
-        b64JsonPaths: [`${taskResultPath}.data.*.b64_json`],
-      },
-    } : undefined,
+    poll: isAsync
+      ? {
+          path: record.taskPath ?? DEFAULT_CUSTOM_PROVIDER_PATHS.taskPath,
+          method: 'GET',
+          statusPath: record.taskStatusPath ?? 'data.status',
+          successValues: normalizeStringArray(record.taskSuccessValues, [
+            'SUCCESS',
+            'succeeded',
+            'completed',
+            'COMPLETED',
+          ]),
+          failureValues: normalizeStringArray(record.taskFailureValues, ['FAILURE', 'failed', 'error', 'FAILED']),
+          errorPath: 'data.fail_reason',
+          intervalSeconds: typeof record.pollIntervalSeconds === 'number' ? record.pollIntervalSeconds : 5,
+          result: {
+            imageUrlPaths: [`${taskResultPath}.data.*.url`],
+            b64JsonPaths: [`${taskResultPath}.data.*.b64_json`],
+          },
+        }
+      : undefined,
   }
 }
 
 function createCustomProviderId(name: string, usedIds: Set<string>): string {
-  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom'
+  const slug =
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'custom'
   let id = `custom-${slug}`
   let index = 2
   while (usedIds.has(id) || BUILT_IN_PROVIDER_IDS.has(id)) {
@@ -258,17 +321,25 @@ function createCustomProviderId(name: string, usedIds: Set<string>): string {
   return id
 }
 
-export function normalizeCustomProviderDefinition(input: unknown, usedIds = new Set<string>()): CustomProviderDefinition | null {
+export function normalizeCustomProviderDefinition(
+  input: unknown,
+  usedIds = new Set<string>(),
+): CustomProviderDefinition | null {
   if (!input || typeof input !== 'object') return null
   const rawRecord = input as Record<string, unknown>
   const record = legacyCustomProviderToManifest(rawRecord) ?? rawRecord
-  const template = record.template == null ? 'http-image' : isCustomProviderTemplate(record.template) ? record.template : null
+  const template =
+    record.template == null ? 'http-image' : isCustomProviderTemplate(record.template) ? record.template : null
   if (!template || !isRecord(record.submit)) return null
 
   const rawName = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : '自定义服务商'
-  const id = typeof record.id === 'string' && record.id.trim() && !BUILT_IN_PROVIDER_IDS.has(record.id.trim()) && !usedIds.has(record.id.trim())
-    ? record.id.trim()
-    : createCustomProviderId(rawName, usedIds)
+  const id =
+    typeof record.id === 'string' &&
+    record.id.trim() &&
+    !BUILT_IN_PROVIDER_IDS.has(record.id.trim()) &&
+    !usedIds.has(record.id.trim())
+      ? record.id.trim()
+      : createCustomProviderId(rawName, usedIds)
   usedIds.add(id)
 
   return {
@@ -282,14 +353,16 @@ export function normalizeCustomProviderDefinition(input: unknown, usedIds = new 
       body: DEFAULT_GENERATE_BODY,
       result: DEFAULT_OPENAI_RESULT,
     }),
-    editSubmit: isRecord(record.editSubmit) ? normalizeSubmitMapping(record.editSubmit, {
-      path: DEFAULT_CUSTOM_PROVIDER_PATHS.editPath,
-      method: 'POST',
-      contentType: 'multipart',
-      body: DEFAULT_EDIT_BODY,
-      files: DEFAULT_EDIT_FILES,
-      result: DEFAULT_OPENAI_RESULT,
-    }) : undefined,
+    editSubmit: isRecord(record.editSubmit)
+      ? normalizeSubmitMapping(record.editSubmit, {
+          path: DEFAULT_CUSTOM_PROVIDER_PATHS.editPath,
+          method: 'POST',
+          contentType: 'multipart',
+          body: DEFAULT_EDIT_BODY,
+          files: DEFAULT_EDIT_FILES,
+          result: DEFAULT_OPENAI_RESULT,
+        })
+      : undefined,
     poll: normalizePollMapping(record.poll),
   }
 }
@@ -370,7 +443,11 @@ export function createDefaultVolcengineProfile(overrides: Partial<ApiProfile> = 
   }
 }
 
-export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvider, customProvider?: CustomProviderDefinition): ApiProfile {
+export function switchApiProfileProvider(
+  profile: ApiProfile,
+  provider: ApiProvider,
+  customProvider?: CustomProviderDefinition,
+): ApiProfile {
   const providerDrafts = {
     ...profile.providerDrafts,
     [profile.provider]: {
@@ -417,8 +494,10 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
     return {
       ...profile,
       provider: customProvider.id,
-      baseUrl: savedDraft?.baseUrl ?? (shouldUseOpenAIDefaults ? DEFAULT_BASE_URL : profile.baseUrl || DEFAULT_BASE_URL),
-      model: savedDraft?.model ?? (shouldUseOpenAIDefaults ? DEFAULT_IMAGES_MODEL : profile.model || DEFAULT_IMAGES_MODEL),
+      baseUrl:
+        savedDraft?.baseUrl ?? (shouldUseOpenAIDefaults ? DEFAULT_BASE_URL : profile.baseUrl || DEFAULT_BASE_URL),
+      model:
+        savedDraft?.model ?? (shouldUseOpenAIDefaults ? DEFAULT_IMAGES_MODEL : profile.model || DEFAULT_IMAGES_MODEL),
       apiMode: savedDraft?.apiMode ?? 'images',
       codexCli: false,
       apiProxy: false,
@@ -440,21 +519,37 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
   }
 }
 
-function normalizeProviderDraft(input: unknown, provider: ApiProvider, customProviderIds: Set<string>): ApiProfileProviderDraft {
+function normalizeProviderDraft(
+  input: unknown,
+  provider: ApiProvider,
+  customProviderIds: Set<string>,
+): ApiProfileProviderDraft {
   if (!isRecord(input)) return undefined
-  const fallback = provider === 'fal' ? createDefaultFalProfile() : provider === 'volcengine' ? createDefaultVolcengineProfile() : createDefaultOpenAIProfile()
+  const fallback =
+    provider === 'fal'
+      ? createDefaultFalProfile()
+      : provider === 'volcengine'
+        ? createDefaultVolcengineProfile()
+        : createDefaultOpenAIProfile()
   const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : undefined
   const model = typeof input.model === 'string' && input.model.trim() ? input.model : undefined
-  const apiMode = input.apiMode === 'responses' || input.apiMode === 'chat' ? input.apiMode : input.apiMode === 'images' ? 'images' : undefined
-  const knownProvider = provider === 'fal' || provider === 'openai' || provider === 'volcengine' || customProviderIds.has(provider)
+  const apiMode =
+    input.apiMode === 'responses' || input.apiMode === 'chat'
+      ? input.apiMode
+      : input.apiMode === 'images'
+        ? 'images'
+        : undefined
+  const knownProvider =
+    provider === 'fal' || provider === 'openai' || provider === 'volcengine' || customProviderIds.has(provider)
   if (!knownProvider) return undefined
 
   return {
-    baseUrl: provider === 'fal'
-      ? baseUrl?.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
-      : provider === 'volcengine'
-        ? baseUrl?.trim().replace(/\/+$/, '') || DEFAULT_VOLCENGINE_BASE_URL
-        : baseUrl,
+    baseUrl:
+      provider === 'fal'
+        ? baseUrl?.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
+        : provider === 'volcengine'
+          ? baseUrl?.trim().replace(/\/+$/, '') || DEFAULT_VOLCENGINE_BASE_URL
+          : baseUrl,
     model,
     apiMode,
     codexCli: typeof input.codexCli === 'boolean' ? input.codexCli : fallback.codexCli,
@@ -476,14 +571,14 @@ export function isAmazonPlannerProfile(profile: Pick<ApiProfile, 'provider' | 'a
   return profile.provider === 'openai' && (profile.apiMode === 'responses' || profile.apiMode === 'chat')
 }
 
-export function isOpenRouterImageGenerationProfile(profile: Pick<ApiProfile, 'provider' | 'baseUrl' | 'apiMode'>): boolean {
+export function isOpenRouterImageGenerationProfile(
+  profile: Pick<ApiProfile, 'provider' | 'baseUrl' | 'apiMode'>,
+): boolean {
   if (profile.provider !== 'openai' || (profile.apiMode !== 'images' && profile.apiMode !== 'chat')) return false
   const rawBaseUrl = profile.baseUrl.trim()
   if (!rawBaseUrl) return false
 
-  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(rawBaseUrl)
-    ? rawBaseUrl
-    : `https://${rawBaseUrl}`
+  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(rawBaseUrl) ? rawBaseUrl : `https://${rawBaseUrl}`
 
   try {
     const hostname = new URL(input).hostname.toLowerCase()
@@ -494,7 +589,9 @@ export function isOpenRouterImageGenerationProfile(profile: Pick<ApiProfile, 'pr
 }
 
 export function canApiProfileGenerateImages(profile: Pick<ApiProfile, 'provider' | 'baseUrl' | 'apiMode'>): boolean {
-  return profile.apiMode === 'images' || profile.provider === 'volcengine' || isOpenRouterImageGenerationProfile(profile)
+  return (
+    profile.apiMode === 'images' || profile.provider === 'volcengine' || isOpenRouterImageGenerationProfile(profile)
+  )
 }
 
 export function getHomeApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
@@ -530,10 +627,7 @@ function resolveVocProfileId(profiles: ApiProfile[], value: unknown, fallbackId:
 }
 
 function createDefaultProfilePair(overrides: Partial<ApiProfile> = {}): ApiProfile[] {
-  return [
-    createDefaultImageProfile(overrides),
-    createDefaultAmazonPlannerProfile(overrides),
-  ]
+  return [createDefaultImageProfile(overrides), createDefaultAmazonPlannerProfile(overrides)]
 }
 
 function isSingleDefaultOpenAIProfileCandidate(profile: ApiProfile): boolean {
@@ -579,13 +673,15 @@ function splitSingleDefaultOpenAIProfile(profile: ApiProfile): ApiProfile[] | nu
 }
 
 function hasTopLevelProfileFields(record: Record<string, unknown>): boolean {
-  return record.baseUrl !== undefined ||
+  return (
+    record.baseUrl !== undefined ||
     record.apiKey !== undefined ||
     record.model !== undefined ||
     record.timeout !== undefined ||
     record.apiMode !== undefined ||
     record.codexCli !== undefined ||
     record.apiProxy !== undefined
+  )
 }
 
 interface NormalizeSettingsOptions {
@@ -607,16 +703,32 @@ function normalizeDefaultProfileSet(
   return splitProfiles ?? profiles
 }
 
-export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfile>, customProviderIds = new Set<string>()): ApiProfile {
-  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+export function normalizeApiProfile(
+  input: unknown,
+  fallback?: Partial<ApiProfile>,
+  customProviderIds = new Set<string>(),
+): ApiProfile {
+  const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   const rawProvider = typeof record.provider === 'string' ? record.provider : ''
-  const provider: ApiProvider = rawProvider === 'fal' || rawProvider === 'volcengine' || customProviderIds.has(rawProvider) ? rawProvider : 'openai'
-  const defaults = provider === 'fal' ? createDefaultFalProfile(fallback) : provider === 'volcengine' ? createDefaultVolcengineProfile(fallback) : createDefaultOpenAIProfile(fallback)
-  const apiMode: ApiMode = provider === 'volcengine' ? 'images' : record.apiMode === 'responses' || record.apiMode === 'chat' ? record.apiMode : 'images'
+  const provider: ApiProvider =
+    rawProvider === 'fal' || rawProvider === 'volcengine' || customProviderIds.has(rawProvider) ? rawProvider : 'openai'
+  const defaults =
+    provider === 'fal'
+      ? createDefaultFalProfile(fallback)
+      : provider === 'volcengine'
+        ? createDefaultVolcengineProfile(fallback)
+        : createDefaultOpenAIProfile(fallback)
+  const apiMode: ApiMode =
+    provider === 'volcengine'
+      ? 'images'
+      : record.apiMode === 'responses' || record.apiMode === 'chat'
+        ? record.apiMode
+        : 'images'
   const rawBaseUrl = typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl
-  const normalizedBaseUrl = provider === 'fal' || provider === 'volcengine'
-    ? rawBaseUrl.trim().replace(/\/+$/, '') || defaults.baseUrl
-    : rawBaseUrl
+  const normalizedBaseUrl =
+    provider === 'fal' || provider === 'volcengine'
+      ? rawBaseUrl.trim().replace(/\/+$/, '') || defaults.baseUrl
+      : rawBaseUrl
   const rawModel = typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model
 
   return {
@@ -626,7 +738,9 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     provider,
     baseUrl: normalizedBaseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
-    model: isAliyunQwenImageProfile({ provider, baseUrl: normalizedBaseUrl, apiMode }) ? getAliyunQwenImageModel(rawModel) : rawModel,
+    model: isAliyunQwenImageProfile({ provider, baseUrl: normalizedBaseUrl, apiMode })
+      ? getAliyunQwenImageModel(rawModel)
+      : rawModel,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : defaults.timeout,
     apiMode,
     codexCli: Boolean(record.codexCli),
@@ -644,13 +758,21 @@ function validateImportedProfileRecord(input: unknown) {
     throw new Error('JSON 包含 Markdown 链接，请粘贴纯文本')
   }
 
-  if (typeof input.apiMode === 'string' && input.apiMode !== 'images' && input.apiMode !== 'responses' && input.apiMode !== 'chat') {
+  if (
+    typeof input.apiMode === 'string' &&
+    input.apiMode !== 'images' &&
+    input.apiMode !== 'responses' &&
+    input.apiMode !== 'chat'
+  ) {
     throw new Error('apiMode 格式无效，应为 images、responses 或 chat')
   }
 }
 
-export function normalizeSettings(input: Partial<AppSettings> | unknown, options: NormalizeSettingsOptions = {}): AppSettings {
-  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+export function normalizeSettings(
+  input: Partial<AppSettings> | unknown,
+  options: NormalizeSettingsOptions = {},
+): AppSettings {
+  const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   const splitDefaultProfiles = options.splitDefaultProfiles ?? true
   const customProviders = normalizeCustomProviderDefinitions(record.customProviders)
   const customProviderIds = new Set(customProviders.map((provider) => provider.id))
@@ -658,7 +780,8 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
     baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : DEFAULT_BASE_URL,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
     model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_IMAGES_MODEL,
-    timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : DEFAULT_API_TIMEOUT,
+    timeout:
+      typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : DEFAULT_API_TIMEOUT,
     apiMode: record.apiMode === 'responses' || record.apiMode === 'chat' ? record.apiMode : 'images',
     codexCli: Boolean(record.codexCli),
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : DEFAULT_OPENAI_API_PROXY,
@@ -674,15 +797,18 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
     !hasExplicitProfiles && hasTopLevelProfileFields(record),
     splitDefaultProfiles,
   )
-  const activeProfileId = typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId)
-    ? record.activeProfileId
-    : profiles[0].id
+  const activeProfileId =
+    typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId)
+      ? record.activeProfileId
+      : profiles[0].id
   const amazonPlannerProfileId = resolveAmazonPlannerProfileId(profiles, record.amazonPlannerProfileId)
   const sopReverseProfileId = resolveSopReverseProfileId(profiles, record.sopReverseProfileId, amazonPlannerProfileId)
   const vocProfileId = resolveVocProfileId(profiles, record.vocProfileId, amazonPlannerProfileId)
-  const seedreamEditorProfileId = typeof record.seedreamEditorProfileId === 'string' && profiles.some((profile) => profile.id === record.seedreamEditorProfileId)
-    ? record.seedreamEditorProfileId
-    : ''
+  const seedreamEditorProfileId =
+    typeof record.seedreamEditorProfileId === 'string' &&
+    profiles.some((profile) => profile.id === record.seedreamEditorProfileId)
+      ? record.seedreamEditorProfileId
+      : ''
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
 
   return {
@@ -697,11 +823,13 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
     providerOrder: Array.isArray(record.providerOrder) ? record.providerOrder.map(String) : undefined,
     clearInputAfterSubmit: typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
     persistInputOnRestart: typeof record.persistInputOnRestart === 'boolean' ? record.persistInputOnRestart : true,
-    reuseTaskApiProfileTemporarily: typeof record.reuseTaskApiProfileTemporarily === 'boolean' ? record.reuseTaskApiProfileTemporarily : false,
+    reuseTaskApiProfileTemporarily:
+      typeof record.reuseTaskApiProfileTemporarily === 'boolean' ? record.reuseTaskApiProfileTemporarily : false,
     alwaysShowRetryButton: typeof record.alwaysShowRetryButton === 'boolean' ? record.alwaysShowRetryButton : false,
     enterSubmit: typeof record.enterSubmit === 'boolean' ? record.enterSubmit : false,
     referenceImageEditAction: normalizeReferenceImageEditAction(record.referenceImageEditAction),
-    agentScrollToBottomAfterSubmit: typeof record.agentScrollToBottomAfterSubmit === 'boolean' ? record.agentScrollToBottomAfterSubmit : true,
+    agentScrollToBottomAfterSubmit:
+      typeof record.agentScrollToBottomAfterSubmit === 'boolean' ? record.agentScrollToBottomAfterSubmit : true,
     agentMaxToolRounds: normalizeAgentMaxToolRounds(record.agentMaxToolRounds),
     agentWebSearch: typeof record.agentWebSearch === 'boolean' ? record.agentWebSearch : false,
     profiles,
@@ -714,7 +842,10 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown, options
   }
 }
 
-export function getCustomProviderDefinition(settings: Partial<AppSettings> | unknown, provider: ApiProvider): CustomProviderDefinition | null {
+export function getCustomProviderDefinition(
+  settings: Partial<AppSettings> | unknown,
+  provider: ApiProvider,
+): CustomProviderDefinition | null {
   const normalized = normalizeSettings(settings)
   return normalized.customProviders.find((item) => item.id === provider) ?? null
 }
@@ -767,12 +898,12 @@ export function importCustomProviderSettingsFromJson(
     const customProviderIds = new Set(customProviders.map((provider) => provider.id))
     const profiles = Array.isArray(record.profiles)
       ? record.profiles
-        .map((item) => {
-          validateImportedProfileRecord(item)
-          return item
-        })
-        .map((item) => normalizeApiProfile(item, undefined, customProviderIds))
-        .filter((profile) => customProviderIds.has(profile.provider))
+          .map((item) => {
+            validateImportedProfileRecord(item)
+            return item
+          })
+          .map((item) => normalizeApiProfile(item, undefined, customProviderIds))
+          .filter((profile) => customProviderIds.has(profile.provider))
       : []
     return { customProviders, profiles }
   }
@@ -785,15 +916,21 @@ export function importCustomProviderSettingsFromJson(
   throw new Error('无法识别该 JSON。请粘贴自定义服务商配置。')
 }
 
-export function importCustomProviderDefinitionFromJson(jsonText: string, existingProviders: CustomProviderDefinition[] = []): CustomProviderDefinition {
+export function importCustomProviderDefinitionFromJson(
+  jsonText: string,
+  existingProviders: CustomProviderDefinition[] = [],
+): CustomProviderDefinition {
   const result = importCustomProviderSettingsFromJson(jsonText, existingProviders)
   return result.customProviders[0]
 }
 
 export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile {
-  const record = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
+  const record = settings && typeof settings === 'object' ? (settings as Record<string, unknown>) : {}
   const normalized = normalizeSettings(settings)
-  const profile = normalized.profiles.find((p) => p.id === normalized.activeProfileId) ?? normalized.profiles[0] ?? createDefaultOpenAIProfile()
+  const profile =
+    normalized.profiles.find((p) => p.id === normalized.activeProfileId) ??
+    normalized.profiles[0] ??
+    createDefaultOpenAIProfile()
 
   return {
     ...profile,
@@ -801,7 +938,10 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : profile.apiKey,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : profile.model,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : profile.timeout,
-    apiMode: record.apiMode === 'images' || record.apiMode === 'responses' || record.apiMode === 'chat' ? record.apiMode : profile.apiMode,
+    apiMode:
+      record.apiMode === 'images' || record.apiMode === 'responses' || record.apiMode === 'chat'
+        ? record.apiMode
+        : profile.apiMode,
     codexCli: typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : profile.apiProxy,
   }
@@ -809,17 +949,28 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
 
 export function getAmazonPlannerProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
   const normalized = normalizeSettings(settings)
-  return normalized.profiles.find((profile) => profile.id === normalized.amazonPlannerProfileId && isAmazonPlannerProfile(profile)) ?? null
+  return (
+    normalized.profiles.find(
+      (profile) => profile.id === normalized.amazonPlannerProfileId && isAmazonPlannerProfile(profile),
+    ) ?? null
+  )
 }
 
 export function getSopReverseProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
   const normalized = normalizeSettings(settings)
-  return normalized.profiles.find((profile) => profile.id === normalized.sopReverseProfileId && isAmazonPlannerProfile(profile)) ?? null
+  return (
+    normalized.profiles.find(
+      (profile) => profile.id === normalized.sopReverseProfileId && isAmazonPlannerProfile(profile),
+    ) ?? null
+  )
 }
 
 export function getVocAnalysisProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
   const normalized = normalizeSettings(settings)
-  return normalized.profiles.find((profile) => profile.id === normalized.vocProfileId && isAmazonPlannerProfile(profile)) ?? null
+  return (
+    normalized.profiles.find((profile) => profile.id === normalized.vocProfileId && isAmazonPlannerProfile(profile)) ??
+    null
+  )
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {
@@ -833,7 +984,8 @@ export function validateApiProfile(profile: ApiProfile): string | null {
 export function getImageGenerationProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
   const normalized = normalizeSettings(settings)
   const activeProfile = getActiveApiProfile(settings)
-  const isCompleteImageProfile = (profile: ApiProfile) => canApiProfileGenerateImages(profile) && !validateApiProfile(profile)
+  const isCompleteImageProfile = (profile: ApiProfile) =>
+    canApiProfileGenerateImages(profile) && !validateApiProfile(profile)
 
   if (isCompleteImageProfile(activeProfile)) return activeProfile
 
@@ -844,7 +996,10 @@ export function getImageGenerationProfile(settings: Partial<AppSettings> | unkno
   return normalized.profiles.find(canApiProfileGenerateImages) ?? null
 }
 
-export function createSettingsForApiProfile(settings: Partial<AppSettings> | unknown, profile: ApiProfile): AppSettings {
+export function createSettingsForApiProfile(
+  settings: Partial<AppSettings> | unknown,
+  profile: ApiProfile,
+): AppSettings {
   const normalized = normalizeSettings(settings)
   const hasProfile = normalized.profiles.some((item) => item.id === profile.id)
 
@@ -858,7 +1013,7 @@ export function createSettingsForApiProfile(settings: Partial<AppSettings> | unk
     codexCli: profile.codexCli,
     apiProxy: profile.apiProxy,
     profiles: hasProfile
-      ? normalized.profiles.map((item) => item.id === profile.id ? profile : item)
+      ? normalized.profiles.map((item) => (item.id === profile.id ? profile : item))
       : [profile, ...normalized.profiles],
     activeProfileId: profile.id,
   })
@@ -869,14 +1024,14 @@ export function createApiProfileRequestSettings(
   profileOrId: string | ApiProfile,
 ): AppSettings | null {
   const normalized = normalizeSettings(settings)
-  const profile = typeof profileOrId === 'string'
-    ? normalized.profiles.find((item) => item.id === profileOrId)
-    : profileOrId
+  const profile =
+    typeof profileOrId === 'string' ? normalized.profiles.find((item) => item.id === profileOrId) : profileOrId
   return profile ? createSettingsForApiProfile(normalized, profile) : null
 }
 
 function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
-  return profile.id === DEFAULT_OPENAI_PROFILE_ID &&
+  return (
+    profile.id === DEFAULT_OPENAI_PROFILE_ID &&
     profile.name === '生图' &&
     profile.provider === 'openai' &&
     profile.baseUrl === DEFAULT_BASE_URL &&
@@ -886,10 +1041,12 @@ function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
     profile.apiMode === 'images' &&
     profile.codexCli === false &&
     profile.apiProxy === DEFAULT_OPENAI_API_PROXY
+  )
 }
 
 function isDefaultAmazonPlannerProfile(profile: ApiProfile): boolean {
-  return profile.id === DEFAULT_AMAZON_PLANNER_PROFILE_ID &&
+  return (
+    profile.id === DEFAULT_AMAZON_PLANNER_PROFILE_ID &&
     profile.name === 'AI策划' &&
     profile.provider === 'openai' &&
     profile.baseUrl === DEFAULT_BASE_URL &&
@@ -899,15 +1056,18 @@ function isDefaultAmazonPlannerProfile(profile: ApiProfile): boolean {
     profile.apiMode === 'responses' &&
     profile.codexCli === false &&
     profile.apiProxy === DEFAULT_OPENAI_API_PROXY
+  )
 }
 
 function hasOnlyDefaultProfiles(settings: AppSettings): boolean {
-  return settings.customProviders.length === 0 &&
+  return (
+    settings.customProviders.length === 0 &&
     settings.profiles.length === 2 &&
     settings.activeProfileId === DEFAULT_OPENAI_PROFILE_ID &&
     settings.amazonPlannerProfileId === DEFAULT_AMAZON_PLANNER_PROFILE_ID &&
     settings.profiles.some(isDefaultOpenAIProfile) &&
     settings.profiles.some(isDefaultAmazonPlannerProfile)
+  )
 }
 
 function createImportedProfileId(provider: ApiProvider, usedIds: Set<string>): string {
@@ -969,7 +1129,10 @@ function getCustomProviderDedupKey(provider: CustomProviderDefinition): string {
   ])
 }
 
-function mergeImportedCustomProviders(currentProviders: CustomProviderDefinition[], importedProviders: CustomProviderDefinition[]) {
+function mergeImportedCustomProviders(
+  currentProviders: CustomProviderDefinition[],
+  importedProviders: CustomProviderDefinition[],
+) {
   const providers = [...currentProviders]
   const providerIdMap = new Map<string, string>()
   const usedIds = new Set(providers.map((provider) => provider.id))
@@ -1000,7 +1163,9 @@ export function findEquivalentApiProfile(
   const normalized = normalizeSettings(settings)
   const importedProvider = importedProviders.find((provider) => provider.id === importedProfile.provider)
   const provider = importedProvider
-    ? normalized.customProviders.find((provider) => getCustomProviderDedupKey(provider) === getCustomProviderDedupKey(importedProvider))?.id ?? importedProfile.provider
+    ? (normalized.customProviders.find(
+        (provider) => getCustomProviderDedupKey(provider) === getCustomProviderDedupKey(importedProvider),
+      )?.id ?? importedProfile.provider)
     : importedProfile.provider
   const profile = { ...importedProfile, provider }
   const dedupKey = getApiProfileDedupKey(profile)
@@ -1012,13 +1177,19 @@ export function findEquivalentApiProfile(
   return normalized.profiles.find((item) => getApiProfileConnectionKey(item) === connectionKey) ?? null
 }
 
-export function mergeImportedSettings(currentSettings: Partial<AppSettings> | unknown, importedSettings: Partial<AppSettings> | unknown): AppSettings {
+export function mergeImportedSettings(
+  currentSettings: Partial<AppSettings> | unknown,
+  importedSettings: Partial<AppSettings> | unknown,
+): AppSettings {
   const current = normalizeSettings(currentSettings)
   const normalizedImported = normalizeSettings(importedSettings, { splitDefaultProfiles: false })
-  const imported = normalizeSettings({
-    ...normalizedImported,
-    profiles: dedupeApiProfiles(normalizedImported.profiles),
-  }, { splitDefaultProfiles: false })
+  const imported = normalizeSettings(
+    {
+      ...normalizedImported,
+      profiles: dedupeApiProfiles(normalizedImported.profiles),
+    },
+    { splitDefaultProfiles: false },
+  )
 
   if (hasOnlyDefaultProfiles(current)) {
     return imported
@@ -1026,13 +1197,20 @@ export function mergeImportedSettings(currentSettings: Partial<AppSettings> | un
 
   const usedIds = new Set(current.profiles.map((profile) => profile.id))
   const existingKeys = new Set(current.profiles.map(getApiProfileDedupKey))
-  const { providers: customProviders, providerIdMap } = mergeImportedCustomProviders(current.customProviders, imported.customProviders)
+  const { providers: customProviders, providerIdMap } = mergeImportedCustomProviders(
+    current.customProviders,
+    imported.customProviders,
+  )
   const importedProfiles = imported.profiles
-    .map((profile) => providerIdMap.has(profile.provider)
-      ? { ...profile, provider: providerIdMap.get(profile.provider) ?? profile.provider }
-      : profile,
+    .map((profile) =>
+      providerIdMap.has(profile.provider)
+        ? { ...profile, provider: providerIdMap.get(profile.provider) ?? profile.provider }
+        : profile,
     )
-    .filter((profile) => !existingKeys.has(getApiProfileDedupKey(profile)) && !hasEquivalentApiProfile(current.profiles, profile))
+    .filter(
+      (profile) =>
+        !existingKeys.has(getApiProfileDedupKey(profile)) && !hasEquivalentApiProfile(current.profiles, profile),
+    )
     .map((profile) => ({
       ...profile,
       id: createImportedProfileId(profile.provider, usedIds),
