@@ -172,6 +172,7 @@ export default function AmazonPlanner() {
   const [currentPlannerSessionId, setCurrentPlannerSessionId] = useState<string | null>(null)
   const [showPlannerHistory, setShowPlannerHistory] = useState(false)
   const [isPlanning, setIsPlanning] = useState(false)
+  const [planningStage, setPlanningStage] = useState<'idle' | 'preparing' | 'requesting' | 'parsing'>('idle')
   const [plannerError, setPlannerError] = useState('')
   const [isPreparingReferencePayload, setIsPreparingReferencePayload] = useState(false)
   const [referencePayloadNotice, setReferencePayloadNotice] = useState('')
@@ -1168,6 +1169,7 @@ export default function AmazonPlanner() {
     const controller = new AbortController()
     plannerAbortControllerRef.current = controller
     setIsPlanning(true)
+    setPlanningStage(inputImages.length > 0 ? 'preparing' : 'requesting')
     setPlannerError('')
     try {
       setIsPreparingReferencePayload(inputImages.length > 0)
@@ -1185,6 +1187,10 @@ export default function AmazonPlanner() {
         aPlusModuleSpecs: aPlusSpecs,
         aPlusGenerationTier: resolutionTier,
         signal: controller.signal,
+        onStage: (stage) => {
+          setPlanningStage(stage)
+          if (stage !== 'preparing') setIsPreparingReferencePayload(false)
+        },
       })
       if (controller.signal.aborted) return
       setReferencePayloadNotice(workflow.referencePayloadNotice)
@@ -1198,6 +1204,7 @@ export default function AmazonPlanner() {
       if (plannerAbortControllerRef.current === controller) {
         plannerAbortControllerRef.current = null
         setIsPlanning(false)
+        setPlanningStage('idle')
       }
     }
   }
@@ -1277,6 +1284,7 @@ export default function AmazonPlanner() {
     controller.abort()
     plannerAbortControllerRef.current = null
     setIsPlanning(false)
+    setPlanningStage('idle')
     showToast('AI 策划已停止', 'info')
   }
 
@@ -1681,6 +1689,7 @@ export default function AmazonPlanner() {
               plannerModelOptions={plannerModelOptions}
               onPlannerModelChange={changePlannerModel}
               isPlanning={isPlanning}
+              planningStage={planningStage}
               onConfirmCreatePlan={confirmCreateAiPlan}
               onStopPlan={stopAiPlan}
               hasListingContent={Boolean(listingText.trim() || imagePlans.length > 0 || aPlusPlans.length > 0)}

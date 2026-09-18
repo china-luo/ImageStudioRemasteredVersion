@@ -41,6 +41,7 @@ export async function requestAmazonPlannerPlan(options: {
   aPlusModuleSpecs: AmazonAPlusModuleSpec[]
   aPlusGenerationTier: '2K' | '4K'
   signal: AbortSignal
+  onStage?: (stage: 'requesting' | 'parsing') => void
 }) {
   return callAmazonPlannerApi(options)
 }
@@ -116,8 +117,10 @@ export async function retryPlannerStyleImage(options: {
 export async function createAmazonPlannerPlan(
   options: Omit<Parameters<typeof requestAmazonPlannerPlan>[0], 'referenceImageDataUrls'> & {
     referenceImageDataUrls: string[]
+    onStage?: (stage: 'preparing' | 'requesting' | 'parsing') => void
   },
 ): Promise<{ result: PlannerApiResult; referencePayloadNotice: string }> {
+  options.onStage?.('preparing')
   const referencePayload = await prepareReferenceImagePayload(options.referenceImageDataUrls, {
     signal: options.signal,
   })

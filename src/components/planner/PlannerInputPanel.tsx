@@ -34,6 +34,7 @@ type PlannerInputPanelProps = {
   plannerModelOptions: PlannerModelOption[]
   onPlannerModelChange: (value: string) => void
   isPlanning: boolean
+  planningStage: 'idle' | 'preparing' | 'requesting' | 'parsing'
   onConfirmCreatePlan: () => void
   onStopPlan: () => void
   hasListingContent: boolean
@@ -66,6 +67,7 @@ export default function PlannerInputPanel({
   plannerModelOptions,
   onPlannerModelChange,
   isPlanning,
+  planningStage,
   onConfirmCreatePlan,
   onStopPlan,
   hasListingContent,
@@ -138,7 +140,15 @@ export default function PlannerInputPanel({
             disabled={isPlanning || Boolean(plannerProfileValidation)}
             className={`inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold text-white transition ${isPlanning ? 'cursor-wait bg-gray-400' : plannerProfileValidation ? 'cursor-not-allowed bg-gray-300 dark:bg-white/[0.12]' : 'bg-blue-600 hover:bg-blue-500'}`}
           >
-            {isPlanning ? '策划中...' : plannerMode === 'aplus' ? 'AI策划A+' : 'AI策划'}
+            {isPlanning
+              ? planningStage === 'preparing'
+                ? '准备参考图...'
+                : planningStage === 'parsing'
+                  ? '解析结果...'
+                  : '请求模型...'
+              : plannerMode === 'aplus'
+                ? 'AI策划A+'
+                : 'AI策划'}
           </button>
           {isPlanning && (
             <button
@@ -168,6 +178,19 @@ export default function PlannerInputPanel({
           </button>
         </div>
       </div>
+      {isPlanning && (
+        <div
+          role="status"
+          className="mt-2 flex items-center gap-2 text-xs font-medium text-blue-700 dark:text-blue-200"
+        >
+          <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+          {planningStage === 'preparing'
+            ? '正在处理参考图'
+            : planningStage === 'parsing'
+              ? '模型已返回，正在解析策划结果'
+              : '已提交请求，正在等待模型返回'}
+        </div>
+      )}
       {plannerError && (
         <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">
           <div className="mb-2 flex items-center justify-between gap-2">

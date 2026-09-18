@@ -2,6 +2,7 @@ import type { ApiProfile } from '../types'
 import { formatAmazonAPlusReferenceMaterial, formatAmazonListingReferenceMaterial } from './amazonKnowledge'
 import { getAmazonMarketplace, normalizeAmazonMarketplaceId, type AmazonMarketplaceId } from './amazonMarketplaces'
 import { assertLlmResponseOk, postLlmRequest, readLlmResponseText, resolveLlmModel } from './llmTransport'
+import { createLinkedAbortController } from './imageApiShared'
 import type { AmazonPromptDraft } from './amazonPrompt'
 import {
   getAPlusContentTypeLabel,
@@ -725,7 +726,9 @@ export async function callAmazonPlannerApi(options: {
   aPlusModuleSpecs?: Array<Partial<AmazonAPlusModuleSpec>>
   aPlusGenerationTier?: SizeTier
   signal?: AbortSignal
+  onStage?: (stage: 'requesting' | 'parsing') => void
 }): Promise<PlannerApiResult> {
+  const linkedAbort = createLinkedAbortController(options.profile.timeout, options.signal)
   const useChatCompletions = options.profile.apiMode === 'chat'
   const model = options.model?.trim() || resolveLlmModel(options.profile, useChatCompletions)
   const mode = options.mode ?? 'listing'
@@ -806,31 +809,42 @@ export async function callAmazonPlannerApi(options: {
   const sendRequest = (useChat: boolean) =>
     postLlmRequest({
       profile: options.profile,
-      signal: options.signal,
+      signal: linkedAbort.controller.signal,
       useChatCompletions: useChat,
       body: createRequestBody(useChat),
     })
 
-  let response = await sendRequest(useChatCompletions)
-  let retriedAsChat = false
-  if (!useChatCompletions && response.status === 524) {
-    retriedAsChat = true
-    response = await sendRequest(true)
-  }
+  try {
+    options.onStage?.('requesting')
+    let response = await sendRequest(useChatCompletions)
+    let retriedAsChat = false
+    if (!useChatCompletions && response.status === 524) {
+      retriedAsChat = true
+      response = await sendRequest(true)
+    }
 
-  await assertLlmResponseOk(
-    response,
-    response.status === 524
-      ? `HTTP 524：上游策划接口处理超时${retriedAsChat ? '，并已自动改用 Chat Completions 重试' : ''}。请稍后重试，或在 AI 策划配置中直接选择 Chat Completions。`
-      : undefined,
-  )
-  const text = await readLlmResponseText(response, retriedAsChat || useChatCompletions, {
-    emptyError: 'AI 策划接口未返回文本内容',
-    allowNonJsonText: false,
-  })
-  const payload = parsePlannerPayload(text)
-  if (platform === 'tiktok') return normalizeListingPlannerApiPayload(payload, [...getTikTokSlots(tiktokDesignType)])
-  return mode === 'aplus'
-    ? normalizeAPlusPlannerApiPayload(payload, aPlusType, aPlusGenerationTier, aPlusModuleSpecs, marketplaceId)
-    : normalizeListingPlannerApiPayload(payload, undefined, marketplaceId)
+    await assertLlmResponseOk(
+      response,
+      response.status === 524
+        ? `HTTP 524：上游策划接口处理超时${retriedAsChat ? '，并已自动改用 Chat Completions 重试' : ''}。请稍后重试，或在 AI 策划配置中直接选择 Chat Completions。`
+        : undefined,
+    )
+    options.onStage?.('parsing')
+    const text = await readLlmResponseText(response, retriedAsChat || useChatCompletions, {
+      emptyError: 'AI 策划接口未返回文本内容',
+      allowNonJsonText: false,
+    })
+    const payload = parsePlannerPayload(text)
+    if (platform === 'tiktok') return normalizeListingPlannerApiPayload(payload, [...getTikTokSlots(tiktokDesignType)])
+    return mode === 'aplus'
+      ? normalizeAPlusPlannerApiPayload(payload, aPlusType, aPlusGenerationTier, aPlusModuleSpecs, marketplaceId)
+      : normalizeListingPlannerApiPayload(payload, undefined, marketplaceId)
+  } catch (error) {
+    if (!options.signal?.aborted && linkedAbort.controller.signal.aborted) {
+      throw new Error(`AI 策划请求超过 ${options.profile.timeout} 秒，已自动停止。请检查接口状态或提高超时时间。`)
+    }
+    throw error
+  } finally {
+    linkedAbort.cleanup()
+  }
 }

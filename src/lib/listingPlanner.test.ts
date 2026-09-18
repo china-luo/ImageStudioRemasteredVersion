@@ -455,7 +455,8 @@ describe('callAmazonPlannerApi', () => {
 
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('https://api.example.com/v1/responses')
-    expect(init?.signal).toBe(controller.signal)
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
+    expect(init?.signal).not.toBe(controller.signal)
     const body = JSON.parse(String(init?.body))
     expect(body.instructions).toContain('The application only fixes the slot count and order')
     expect(body.instructions).toContain('Amazon Listing reference material for the planner')
