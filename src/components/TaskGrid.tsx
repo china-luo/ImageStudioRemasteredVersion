@@ -4,6 +4,7 @@ import { matchesTaskHistoryFilters } from '../lib/taskHistory'
 import TaskCard from './TaskCard'
 
 export default function TaskGrid() {
+  const PAGE_SIZE = 60
   const tasks = useStore((s) => s.tasks)
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
@@ -24,6 +25,7 @@ export default function TaskGrid() {
     currentPageX: number
     currentPageY: number
   } | null>(null)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const dragStart = useRef<{ pageX: number; pageY: number } | null>(null)
   const lastClientPoint = useRef<{ x: number; y: number } | null>(null)
   const hasDragged = useRef(false)
@@ -51,6 +53,12 @@ export default function TaskGrid() {
       }),
     )
   }, [tasks, searchQuery, filterStatus, filterFavorite, filterProductTitle, filterWorkflow, filterAspect])
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [searchQuery, filterStatus, filterFavorite, filterProductTitle, filterWorkflow, filterAspect])
+
+  const visibleTasks = filteredTasks.slice(0, visibleCount)
 
   const handleDelete = (task: (typeof tasks)[0]) => {
     setConfirmDialog({
@@ -304,8 +312,12 @@ export default function TaskGrid() {
         ref={gridRef}
         className="grid grid-cols-1 gap-4 pb-10 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3"
       >
-        {filteredTasks.map((task) => (
-          <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
+        {visibleTasks.map((task) => (
+          <div
+            key={task.id}
+            className="task-card-wrapper [content-visibility:auto] [contain-intrinsic-size:420px]"
+            data-task-id={task.id}
+          >
             <TaskCard
               task={task}
               onClick={(e) => {
@@ -330,6 +342,17 @@ export default function TaskGrid() {
           </div>
         ))}
       </div>
+      {visibleCount < filteredTasks.length && (
+        <div className="flex justify-center py-4">
+          <button
+            type="button"
+            className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+            onClick={() => setVisibleCount((count) => Math.min(count + PAGE_SIZE, filteredTasks.length))}
+          >
+            加载更多（已显示 {visibleTasks.length}/{filteredTasks.length}）
+          </button>
+        </div>
+      )}
       {selectionBox && (
         <div
           className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"

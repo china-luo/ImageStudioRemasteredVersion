@@ -6,6 +6,12 @@ import { callSopReverseApi } from '../lib/sopReverseApi'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { storeImage } from '../lib/db'
 import { extractEnglishImagePrompt, type SopForm } from '../lib/workspaceDrafts'
+import {
+  finishWorkspaceAnalysis,
+  isWorkspaceAnalysisCurrent,
+  startWorkspaceAnalysis,
+  stopWorkspaceAnalysis,
+} from '../lib/workspaceAnalysis'
 import Select from './Select'
 import { CloseIcon, CopyIcon, EditIcon, EyeIcon, ImportIcon, RefreshIcon, SettingsIcon } from './icons'
 
@@ -161,9 +167,8 @@ export default function SopReverseWorkspace() {
   const error = useStore((s) => s.sopDraft.error)
   const setSopDraft = useStore((s) => s.setSopDraft)
   const resetSopDraft = useStore((s) => s.resetSopDraft)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const isAnalyzing = useStore((s) => s.sopDraft.analysisStatus === 'running')
   const [showPromptModal, setShowPromptModal] = useState(false)
-  const abortControllerRef = useRef<AbortController | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const settings = useStore((s) => s.settings)
@@ -210,10 +215,14 @@ export default function SopReverseWorkspace() {
       return
     }
 
-    abortControllerRef.current?.abort()
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-    setIsAnalyzing(true)
+    const analysis = startWorkspaceAnalysis('sop')
+    const controller = analysis.controller
+    setSopDraft({
+      analysisStatus: 'running',
+      analysisRequestId: analysis.requestId,
+      analysisStartedAt: Date.now(),
+      analysisOperation: 'analyze',
+    })
     setError('')
 
     try {
@@ -223,23 +232,30 @@ export default function SopReverseWorkspace() {
         images: referenceImages.map((image) => ({ dataUrl: image.dataUrl, name: image.name })),
         signal: controller.signal,
       })
-      setSopDraft({ output: result, error: '' })
+      if (!isWorkspaceAnalysisCurrent('sop', analysis.requestId)) return
+      setSopDraft({
+        output: result,
+        error: '',
+        analysisStatus: 'done',
+        analysisRequestId: null,
+        analysisOperation: null,
+      })
       showToast('AI 拆解反推已完成', 'success')
     } catch (err) {
       if (controller.signal.aborted) return
       const message = err instanceof Error ? err.message : String(err)
-      setError(message)
+      if (isWorkspaceAnalysisCurrent('sop', analysis.requestId)) {
+        setSopDraft({ error: message, analysisStatus: 'error', analysisRequestId: null, analysisOperation: null })
+      }
       showToast(`拆图反推失败：${message}`, 'error')
     } finally {
-      if (abortControllerRef.current === controller) abortControllerRef.current = null
-      setIsAnalyzing(false)
+      finishWorkspaceAnalysis('sop', analysis.requestId)
     }
   }
 
   const stopAnalyze = () => {
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
-    setIsAnalyzing(false)
+    const requestId = stopWorkspaceAnalysis('sop')
+    if (requestId) setSopDraft({ analysisStatus: 'stopped', analysisRequestId: null, analysisOperation: null })
     showToast('已停止拆图反推', 'info')
   }
 
@@ -266,10 +282,8 @@ export default function SopReverseWorkspace() {
   }
 
   const resetForm = () => {
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
+    stopWorkspaceAnalysis('sop')
     resetSopDraft()
-    setIsAnalyzing(false)
     setShowPromptModal(false)
     showToast('SOP 表单已重置', 'info')
   }
