@@ -143,4 +143,28 @@ describe('Amazon planner API lifecycle', () => {
     await vi.advanceTimersByTimeAsync(2_000)
     await rejection
   })
+
+  it('stops product information extraction at the configured timeout', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
+              once: true,
+            })
+          }),
+      ),
+    )
+    const profile = createDefaultOpenAIProfile({ apiMode: 'chat', apiKey: 'test', timeout: 2 })
+    const request = callAmazonProductExtractionApi({
+      listingText: 'Travel mug listing',
+      profile,
+    })
+
+    const rejection = expect(request).rejects.toThrow('产品信息提取超过 2 秒，已自动停止')
+    await vi.advanceTimersByTimeAsync(2_000)
+    await rejection
+  })
 })

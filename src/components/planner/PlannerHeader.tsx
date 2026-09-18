@@ -9,6 +9,7 @@ interface PlannerHeaderProps {
   resolution: '2k' | '4k'
   historyOpen: boolean
   historyCount: number
+  disabled?: boolean
   onPlatformChange: (platform: CommercePlannerPlatform) => void
   onModeChange: (mode: AmazonPlannerMode) => void
   onTiktokDesignTypeChange: (designType: TiktokDesignType) => void
@@ -23,6 +24,7 @@ export default function PlannerHeader({
   resolution,
   historyOpen,
   historyCount,
+  disabled = false,
   onPlatformChange,
   onModeChange,
   onTiktokDesignTypeChange,
@@ -54,7 +56,8 @@ export default function PlannerHeader({
                 key={item}
                 type="button"
                 onClick={() => onPlatformChange(item)}
-                className={`h-8 rounded-lg px-3 text-sm font-medium transition ${platform === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                disabled={disabled}
+                className={`h-8 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${platform === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
               >
                 {label}
               </button>
@@ -73,7 +76,8 @@ export default function PlannerHeader({
                 key={item}
                 type="button"
                 onClick={() => onModeChange(item)}
-                className={`h-8 rounded-lg px-3 text-sm font-medium transition ${mode === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                disabled={disabled}
+                className={`h-8 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${mode === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
               >
                 {label}
               </button>
@@ -92,7 +96,8 @@ export default function PlannerHeader({
                 key={item}
                 type="button"
                 onClick={() => onTiktokDesignTypeChange(item)}
-                className={`h-8 rounded-lg px-3 text-sm font-medium transition ${tiktokDesignType === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                disabled={disabled}
+                className={`h-8 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${tiktokDesignType === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
               >
                 {label}
               </button>
@@ -107,7 +112,8 @@ export default function PlannerHeader({
               key={item}
               type="button"
               onClick={() => onResolutionChange(item)}
-              className={`h-8 min-w-14 rounded-lg px-3 text-sm font-medium transition ${resolution === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              disabled={disabled}
+              className={`h-8 min-w-14 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${resolution === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               {item.toUpperCase()}
             </button>
@@ -116,7 +122,8 @@ export default function PlannerHeader({
         <button
           type="button"
           onClick={onToggleHistory}
-          className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition ${historyOpen ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+          disabled={disabled}
+          className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${historyOpen ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
         >
           <HistoryIcon className="h-4 w-4" />
           策划历史

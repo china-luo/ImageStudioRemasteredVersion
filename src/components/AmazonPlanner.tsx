@@ -183,6 +183,7 @@ export default function AmazonPlanner() {
   const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
   const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>({})
   const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(null)
+  const isPlannerRequestBusy = isPlanning || isExtractingProductInfo
   const activeWorkflow: TaskWorkflow =
     plannerPlatform === 'tiktok'
       ? tiktokDesignType === 'detail'
@@ -285,6 +286,16 @@ export default function AmazonPlanner() {
   const plannerProfileValidation = plannerProfile
     ? validateApiProfile(plannerProfile)
     : '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置'
+  const extractionInputSignature = [
+    listingText,
+    plannerPlatform,
+    marketplaceId,
+    plannerProfile?.id ?? '',
+    plannerProfile?.model ?? '',
+    inputImages.map((image) => image.id).join(','),
+  ].join('\u0001')
+  const extractionInputSignatureRef = useRef(extractionInputSignature)
+  extractionInputSignatureRef.current = extractionInputSignature
   const plannerApiLabel = plannerProfile ? getApiModeLabel(plannerProfile.apiMode) : 'Responses API'
   const plannerModelOptions = [
     ...(plannerProfile?.model &&
@@ -1188,10 +1199,19 @@ export default function AmazonPlanner() {
         },
       })
       if (controller.signal.aborted) return
+      if (extractionInputSignatureRef.current !== extractionInputSignature) {
+        setPlannerError('提取完成前输入已发生变化，旧结果未填入。请使用当前内容重新提取。')
+        showToast('输入已变化，未应用旧的提取结果', 'info')
+        return
+      }
       const nextDraft: AmazonPromptDraft = { ...draft, ...workflow.result }
       setDraft(nextDraft)
       setReferencePayloadNotice(workflow.referencePayloadNotice)
-      updateCurrentPlannerSession({ draft: toSessionDraft(nextDraft) })
+      try {
+        await savePlannerSession({ draft: toSessionDraft(nextDraft) })
+      } catch (err) {
+        showToast(`策划历史保存失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      }
       showToast('产品信息已填入下方，可继续 AI 策划', 'success')
     } catch (err) {
       if (controller.signal.aborted || isAbortError(err)) return
@@ -1639,6 +1659,10 @@ export default function AmazonPlanner() {
   }
 
   const handleFiles = async (files: FileList | File[]) => {
+    if (isPlannerRequestBusy) {
+      showToast('AI 请求处理中，请先停止或等待完成', 'info')
+      return
+    }
     const accepted = Array.from(files).filter((file) => file.type.startsWith('image/'))
     if (accepted.length === 0) {
       showToast('请选择图片文件', 'error')
@@ -1698,6 +1722,7 @@ export default function AmazonPlanner() {
           resolution={resolution}
           historyOpen={showPlannerHistory}
           historyCount={plannerSessions.length}
+          disabled={isPlannerRequestBusy}
           onPlatformChange={changePlannerPlatform}
           onModeChange={changePlannerMode}
           onTiktokDesignTypeChange={changeTiktokDesignType}
@@ -1785,18 +1810,18 @@ export default function AmazonPlanner() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                  disabled={atImageLimit}
-                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${atImageLimit ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+                  onClick={() => !atImageLimit && !isPlannerRequestBusy && fileInputRef.current?.click()}
+                  disabled={atImageLimit || isPlannerRequestBusy}
+                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${atImageLimit || isPlannerRequestBusy ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
                 >
                   <PlusIcon className="h-4 w-4" />
                   上传参考图
                 </button>
                 <button
                   type="button"
-                  onClick={() => !atImageLimit && cameraInputRef.current?.click()}
-                  disabled={atImageLimit}
-                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition sm:hidden ${atImageLimit ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+                  onClick={() => !atImageLimit && !isPlannerRequestBusy && cameraInputRef.current?.click()}
+                  disabled={atImageLimit || isPlannerRequestBusy}
+                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition sm:hidden ${atImageLimit || isPlannerRequestBusy ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
                 >
                   <PhotoIcon className="h-4 w-4" />
                   拍照
@@ -1808,7 +1833,8 @@ export default function AmazonPlanner() {
                       clearInputImages()
                       updateCurrentPlannerSession({ referenceImageIds: [] })
                     }}
-                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-400/20 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-400/10"
+                    disabled={isPlannerRequestBusy}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-400/20 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-400/10"
                   >
                     <TrashIcon className="h-4 w-4" />
                     清空
@@ -1828,6 +1854,7 @@ export default function AmazonPlanner() {
             {inputImages.length > 0 ? (
               <PlannerReferenceImageGrid
                 images={inputImages}
+                disabled={isPlannerRequestBusy}
                 onRemove={(index) => {
                   const nextReferenceImageIds = inputImages
                     .filter((_, imageIndex) => imageIndex !== index)
@@ -1839,8 +1866,9 @@ export default function AmazonPlanner() {
             ) : (
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="mt-3 flex min-h-[88px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-center transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-white/[0.12] dark:bg-gray-900 dark:hover:border-blue-400/50 dark:hover:bg-blue-400/10"
+                onClick={() => !isPlannerRequestBusy && fileInputRef.current?.click()}
+                disabled={isPlannerRequestBusy}
+                className="mt-3 flex min-h-[88px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-center transition hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:opacity-60 dark:border-white/[0.12] dark:bg-gray-900 dark:hover:border-blue-400/50 dark:hover:bg-blue-400/10 dark:disabled:bg-white/[0.04]"
               >
                 <PhotoIcon className="h-5 w-5 text-gray-400" />
                 <span className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-200">上传产品参考图</span>
@@ -1859,6 +1887,7 @@ export default function AmazonPlanner() {
               type="file"
               accept="image/*"
               multiple
+              disabled={isPlannerRequestBusy}
               className="hidden"
               onChange={handleFileUpload}
             />
@@ -1867,6 +1896,7 @@ export default function AmazonPlanner() {
               type="file"
               accept="image/*"
               capture="environment"
+              disabled={isPlannerRequestBusy}
               className="hidden"
               onChange={handleFileUpload}
             />

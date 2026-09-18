@@ -95,7 +95,7 @@ export default function PlannerInputPanel({
         </div>
       )}
       {plannerPlatform === 'amazon' && (
-        <MarketplaceControls marketplaceId={marketplaceId} onChange={onMarketplaceChange} />
+        <MarketplaceControls marketplaceId={marketplaceId} onChange={onMarketplaceChange} disabled={isBusy} />
       )}
       {plannerMode === 'aplus' && (
         <div className="mt-3 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
@@ -104,7 +104,8 @@ export default function PlannerInputPanel({
               key={type}
               type="button"
               onClick={() => onAPlusTypeChange(type)}
-              className={`h-8 rounded-lg px-3 text-sm font-medium transition ${aPlusType === type ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              disabled={isBusy}
+              className={`h-8 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${aPlusType === type ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               {getAPlusContentTypeLabel(type)}
             </button>
@@ -116,7 +117,8 @@ export default function PlannerInputPanel({
         <textarea
           value={listingText}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onListingTextChange(event.target.value)}
-          className={`${fieldClass} min-h-[138px] resize-y`}
+          disabled={isBusy}
+          className={`${fieldClass} min-h-[138px] resize-y disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:disabled:bg-white/[0.04] dark:disabled:text-gray-500`}
           placeholder={
             plannerMode === 'aplus'
               ? 'Title: ...\n\nAbout this item\n- Bullet 1...\n- Bullet 2...\n\nBrand story / tone: ...'
@@ -132,7 +134,7 @@ export default function PlannerInputPanel({
           <Select
             value={plannerProfile?.model ?? ''}
             onChange={(value) => onPlannerModelChange(String(value))}
-            disabled={!plannerProfile}
+            disabled={!plannerProfile || isBusy}
             options={plannerModelOptions}
             className={`h-10 rounded-xl border bg-white px-3 text-sm text-gray-800 outline-none dark:bg-gray-950 dark:text-gray-100 ${plannerProfileValidation ? 'border-amber-300 dark:border-amber-400/40' : 'border-gray-200 dark:border-white/[0.08]'}`}
           />
@@ -186,7 +188,8 @@ export default function PlannerInputPanel({
             <button
               type="button"
               onClick={onClearListingPlan}
-              className="inline-flex h-10 items-center rounded-xl px-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+              disabled={isBusy}
+              className="inline-flex h-10 items-center rounded-xl px-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
             >
               清空
             </button>
@@ -194,7 +197,8 @@ export default function PlannerInputPanel({
           <button
             type="button"
             onClick={onOpenSettings}
-            className="inline-flex h-10 items-center rounded-xl px-3 text-sm font-medium text-blue-600 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-400/10"
+            disabled={isBusy}
+            className="inline-flex h-10 items-center rounded-xl px-3 text-sm font-medium text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-400/10"
           >
             设置
           </button>

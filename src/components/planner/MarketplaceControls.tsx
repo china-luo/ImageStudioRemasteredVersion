@@ -3,9 +3,10 @@ import { AMAZON_MARKETPLACES, getAmazonMarketplace, type AmazonMarketplaceId } f
 interface MarketplaceControlsProps {
   marketplaceId: AmazonMarketplaceId
   onChange: (marketplaceId: AmazonMarketplaceId) => void
+  disabled?: boolean
 }
 
-export default function MarketplaceControls({ marketplaceId, onChange }: MarketplaceControlsProps) {
+export default function MarketplaceControls({ marketplaceId, onChange, disabled = false }: MarketplaceControlsProps) {
   const marketplace = getAmazonMarketplace(marketplaceId)
 
   return (
@@ -19,7 +20,8 @@ export default function MarketplaceControls({ marketplaceId, onChange }: Marketp
       <select
         value={marketplaceId}
         onChange={(event) => onChange(event.target.value as AmazonMarketplaceId)}
-        className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-sm font-semibold text-gray-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-100"
+        disabled={disabled}
+        className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-sm font-semibold text-gray-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-100 dark:disabled:bg-white/[0.04] dark:disabled:text-gray-500"
       >
         {AMAZON_MARKETPLACES.map((option) => (
           <option key={option.id} value={option.id}>
