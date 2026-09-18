@@ -7,7 +7,7 @@ import type {
 } from '../../lib/listingPlanner'
 import type { AmazonMarketplaceId } from '../../lib/amazonMarketplaces'
 import type { ApiProfile } from '../../types'
-import { CloseIcon } from '../icons'
+import { ArrowDownIcon, CloseIcon } from '../icons'
 import MarketplaceControls from './MarketplaceControls'
 import Select from '../Select'
 
@@ -34,7 +34,9 @@ type PlannerInputPanelProps = {
   plannerModelOptions: PlannerModelOption[]
   onPlannerModelChange: (value: string) => void
   isPlanning: boolean
+  isExtractingProductInfo: boolean
   planningStage: 'idle' | 'preparing' | 'requesting' | 'parsing'
+  onExtractProductInfo: () => void
   onConfirmCreatePlan: () => void
   onStopPlan: () => void
   hasListingContent: boolean
@@ -67,7 +69,9 @@ export default function PlannerInputPanel({
   plannerModelOptions,
   onPlannerModelChange,
   isPlanning,
+  isExtractingProductInfo,
   planningStage,
+  onExtractProductInfo,
   onConfirmCreatePlan,
   onStopPlan,
   hasListingContent,
@@ -78,6 +82,8 @@ export default function PlannerInputPanel({
   fieldClass,
   labelClass,
 }: PlannerInputPanelProps) {
+  const isBusy = isPlanning || isExtractingProductInfo
+
   return (
     <>
       {plannerGuideActive && <div className={`${guideHintClass} mt-3`}>{guideMessage}</div>}
@@ -136,9 +142,25 @@ export default function PlannerInputPanel({
         >
           <button
             type="button"
+            onClick={onExtractProductInfo}
+            disabled={isBusy || Boolean(plannerProfileValidation)}
+            title="只提取产品信息并填入下方，不生成图片策划"
+            className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold transition ${isBusy ? 'cursor-wait border-gray-200 bg-gray-100 text-gray-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-600' : plannerProfileValidation ? 'cursor-not-allowed border-gray-200 bg-gray-50 text-gray-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-600' : 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50 dark:border-blue-400/25 dark:bg-gray-950 dark:text-blue-200 dark:hover:bg-blue-400/10'}`}
+          >
+            <ArrowDownIcon className="h-4 w-4" />
+            {isExtractingProductInfo
+              ? planningStage === 'preparing'
+                ? '准备参考图...'
+                : planningStage === 'parsing'
+                  ? '填写信息...'
+                  : '提取中...'
+              : '提取信息'}
+          </button>
+          <button
+            type="button"
             onClick={onConfirmCreatePlan}
-            disabled={isPlanning || Boolean(plannerProfileValidation)}
-            className={`inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold text-white transition ${isPlanning ? 'cursor-wait bg-gray-400' : plannerProfileValidation ? 'cursor-not-allowed bg-gray-300 dark:bg-white/[0.12]' : 'bg-blue-600 hover:bg-blue-500'}`}
+            disabled={isBusy || Boolean(plannerProfileValidation)}
+            className={`inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold text-white transition ${isBusy ? 'cursor-wait bg-gray-400' : plannerProfileValidation ? 'cursor-not-allowed bg-gray-300 dark:bg-white/[0.12]' : 'bg-blue-600 hover:bg-blue-500'}`}
           >
             {isPlanning
               ? planningStage === 'preparing'
@@ -150,7 +172,7 @@ export default function PlannerInputPanel({
                 ? 'AI策划A+'
                 : 'AI策划'}
           </button>
-          {isPlanning && (
+          {isBusy && (
             <button
               type="button"
               onClick={onStopPlan}
@@ -178,23 +200,29 @@ export default function PlannerInputPanel({
           </button>
         </div>
       </div>
-      {isPlanning && (
+      {isBusy && (
         <div
           role="status"
           className="mt-2 flex items-center gap-2 text-xs font-medium text-blue-700 dark:text-blue-200"
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-          {planningStage === 'preparing'
-            ? '正在处理参考图'
-            : planningStage === 'parsing'
-              ? '模型已返回，正在解析策划结果'
-              : '已提交请求，正在等待模型返回'}
+          {isExtractingProductInfo
+            ? planningStage === 'preparing'
+              ? '正在处理参考图'
+              : planningStage === 'parsing'
+                ? '模型已返回，正在填写产品信息'
+                : '已提交请求，正在提取产品信息'
+            : planningStage === 'preparing'
+              ? '正在处理参考图'
+              : planningStage === 'parsing'
+                ? '模型已返回，正在解析策划结果'
+                : '已提交请求，正在等待模型返回'}
         </div>
       )}
       {plannerError && (
         <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="font-semibold">AI 策划失败详情</span>
+            <span className="font-semibold">AI 处理失败详情</span>
             <button
               type="button"
               onClick={onCopyPlannerError}

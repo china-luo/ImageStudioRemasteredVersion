@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDefaultOpenAIProfile } from './apiProfiles'
 import { DEFAULT_AMAZON_PROMPT_DRAFT } from './amazonPrompt'
-import { callAmazonPlannerApi } from './listingPlannerApi'
+import { callAmazonPlannerApi, callAmazonProductExtractionApi } from './listingPlannerApi'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -38,6 +38,59 @@ function createPlannerPayload() {
 }
 
 describe('Amazon planner API lifecycle', () => {
+  it('extracts product fields without requesting image plans', async () => {
+    const onStage = vi.fn()
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify({
+              product: {
+                title: 'Travel mug',
+                category: 'Kitchen',
+                brand: 'Acme T1',
+                color: 'black',
+                material: 'stainless steel',
+                audience: 'commuters',
+                packageIncludes: 'mug and lid',
+              },
+              sellingPoints: ['leak resistant', 'keeps drinks cold'],
+              scene: 'Office desk and commuting use.',
+              forbidden: 'Do not add a straw or gift box.',
+            }),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const profile = createDefaultOpenAIProfile({ apiMode: 'responses', apiKey: 'test', timeout: 5 })
+
+    const result = await callAmazonProductExtractionApi({
+      listingText: 'Travel mug listing',
+      profile,
+      marketplaceId: 'de',
+      onStage,
+    })
+
+    expect(result).toEqual({
+      productTitle: 'Travel mug',
+      category: 'Kitchen',
+      brand: 'Acme T1',
+      color: 'black',
+      material: 'stainless steel',
+      audience: 'commuters',
+      sellingPoints: 'leak resistant\nkeeps drinks cold',
+      packageIncludes: 'mug and lid',
+      scene: 'Office desk and commuting use.',
+      forbidden: 'Do not add a straw or gift box.',
+    })
+    expect(onStage.mock.calls).toEqual([['requesting'], ['parsing']])
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.text.format.name).toBe('commerce_product_information')
+    expect(body.instructions).toContain('德国站 (Amazon.de)')
+    expect(body.instructions).toContain('Do not return image plans')
+  })
+
   it('reports request and parsing stages', async () => {
     const onStage = vi.fn()
     vi.stubGlobal(

@@ -67,6 +67,7 @@ import PlannerInputPanel from './planner/PlannerInputPanel'
 import PlannerReferenceImageGrid from './planner/PlannerReferenceImageGrid'
 import {
   createAmazonPlannerPlan,
+  extractAmazonProductInfo,
   generatePlannerStyleImages,
   retryPlannerStyleImage,
   useAmazonPlannerController,
@@ -172,6 +173,7 @@ export default function AmazonPlanner() {
   const [currentPlannerSessionId, setCurrentPlannerSessionId] = useState<string | null>(null)
   const [showPlannerHistory, setShowPlannerHistory] = useState(false)
   const [isPlanning, setIsPlanning] = useState(false)
+  const [isExtractingProductInfo, setIsExtractingProductInfo] = useState(false)
   const [planningStage, setPlanningStage] = useState<'idle' | 'preparing' | 'requesting' | 'parsing'>('idle')
   const [plannerError, setPlannerError] = useState('')
   const [isPreparingReferencePayload, setIsPreparingReferencePayload] = useState(false)
@@ -1143,6 +1145,68 @@ export default function AmazonPlanner() {
     )
   }
 
+  const runExtractProductInfo = async () => {
+    if (plannerAbortControllerRef.current) {
+      showToast('AI 正在处理中', 'info')
+      return
+    }
+    if (!listingText.trim()) {
+      showToast('请先粘贴标题和五点描述', 'error')
+      return
+    }
+    if (!plannerProfile) {
+      setPlannerError(
+        '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置。\n\n请在设置 -> API 中创建或选择一个文本模型配置。',
+      )
+      showToast('AI 策划配置缺失', 'error')
+      return
+    }
+    if (plannerProfileValidation) {
+      setPlannerError(`AI 策划配置「${plannerProfile.name}」不完整：${plannerProfileValidation}`)
+      showToast('AI 策划配置不完整', 'error')
+      return
+    }
+
+    const controller = new AbortController()
+    plannerAbortControllerRef.current = controller
+    setIsExtractingProductInfo(true)
+    setPlanningStage(inputImages.length > 0 ? 'preparing' : 'requesting')
+    setPlannerError('')
+    try {
+      setIsPreparingReferencePayload(inputImages.length > 0)
+      setReferencePayloadNotice('')
+      const workflow = await extractAmazonProductInfo({
+        listingText,
+        profile: plannerProfile,
+        referenceImageDataUrls: inputImages.map((image) => image.dataUrl),
+        platform: plannerPlatform,
+        marketplaceId,
+        signal: controller.signal,
+        onStage: (stage) => {
+          setPlanningStage(stage)
+          if (stage !== 'preparing') setIsPreparingReferencePayload(false)
+        },
+      })
+      if (controller.signal.aborted) return
+      const nextDraft: AmazonPromptDraft = { ...draft, ...workflow.result }
+      setDraft(nextDraft)
+      setReferencePayloadNotice(workflow.referencePayloadNotice)
+      updateCurrentPlannerSession({ draft: toSessionDraft(nextDraft) })
+      showToast('产品信息已填入下方，可继续 AI 策划', 'success')
+    } catch (err) {
+      if (controller.signal.aborted || isAbortError(err)) return
+      setPlannerError(getPlannerFailureDetail(err))
+      showToast('产品信息提取失败，请查看详情', 'error')
+    } finally {
+      setIsPreparingReferencePayload(false)
+      if (plannerAbortControllerRef.current === controller) {
+        plannerAbortControllerRef.current = null
+        setIsExtractingProductInfo(false)
+        setPlanningStage('idle')
+      }
+    }
+  }
+
   const runCreateAiPlan = async () => {
     if (plannerAbortControllerRef.current) {
       showToast('AI 策划正在进行中', 'info')
@@ -1281,11 +1345,13 @@ export default function AmazonPlanner() {
   const stopAiPlan = () => {
     const controller = plannerAbortControllerRef.current
     if (!controller) return
+    const stoppedExtraction = isExtractingProductInfo
     controller.abort()
     plannerAbortControllerRef.current = null
     setIsPlanning(false)
+    setIsExtractingProductInfo(false)
     setPlanningStage('idle')
-    showToast('AI 策划已停止', 'info')
+    showToast(stoppedExtraction ? '产品信息提取已停止' : 'AI 策划已停止', 'info')
   }
 
   const selectStyleCandidate = (index: number) => {
@@ -1689,7 +1755,9 @@ export default function AmazonPlanner() {
               plannerModelOptions={plannerModelOptions}
               onPlannerModelChange={changePlannerModel}
               isPlanning={isPlanning}
+              isExtractingProductInfo={isExtractingProductInfo}
               planningStage={planningStage}
+              onExtractProductInfo={() => void runExtractProductInfo()}
               onConfirmCreatePlan={confirmCreateAiPlan}
               onStopPlan={stopAiPlan}
               hasListingContent={Boolean(listingText.trim() || imagePlans.length > 0 || aPlusPlans.length > 0)}
