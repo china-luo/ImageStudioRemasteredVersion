@@ -1,86 +1,207 @@
-# 跨境Image工作台
+<!-- markdownlint-disable MD013 MD033 MD041 -->
 
-面向 Amazon 与 TikTok Shop 商品图二次创作的图片设计工作台，支持商品主图、卖点图、详情图、A+ 模块策划、竞品拆图反推与 VOC 评论分析。
+<p align="center">
+  <img src="./public/pwa-icon.png" width="88" alt="跨境Image工作台图标" />
+</p>
 
-维护者：[@china-luo](https://github.com/china-luo/ImageStudioRemasteredVersion)
+<h1 align="center">跨境Image工作台</h1>
 
-## 如何使用
+<p align="center">
+  面向 Amazon 与 TikTok Shop 的本地优先 AI 商品图片生产工作台。<br />
+  从 Listing 信息提取、图片策划和风格板，到批量生成、编辑、复盘与交付，在一个界面完成。
+</p>
 
-### 在线使用
+<p align="center">
+  <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/ci.yml"><img src="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest"><img src="https://img.shields.io/github/v/release/china-luo/ImageStudioRemasteredVersion?display_name=tag" alt="GitHub Release" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/china-luo/ImageStudioRemasteredVersion" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" />
+</p>
 
-打开在线版本：
+<p align="center">
+  <a href="https://china-luo.github.io/ImageStudioRemasteredVersion/">在线体验</a>
+  · <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest">下载 Windows 版</a>
+  · <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/issues">反馈问题</a>
+</p>
 
-[https://china-luo.github.io/ImageStudioRemasteredVersion/](https://china-luo.github.io/ImageStudioRemasteredVersion/)
+![跨境Image工作台 Amazon Listing 智能策划界面](./docs/images/workbench-overview.png)
+
+## 为什么使用它
+
+跨境Image工作台不是单一的“输入 Prompt、等待图片”页面。它把电商图片生产拆成可检查、可停止、可恢复的步骤，让商品事实、平台规范、视觉风格和最终交付保持在同一条工作流中。
+
+- **面向真实电商流程**：覆盖 Amazon Listing、Amazon A+、TikTok Shop 主图与详情图。
+- **先策划再生产**：先提取商品信息，生成逐张方案和动态风格候选，再批量生图。
+- **商品事实优先**：标题、五点描述和参考图共同约束材质、颜色、配件、卖点与禁用元素。
+- **多模型、多服务商**：文本策划和图片生成使用独立配置，按工作流选择合适模型。
+- **本地优先**：任务、图片和策划历史保存在本地；桌面版凭据使用系统加密存储。
+- **接近交付而非演示**：支持筛选、收藏、复用、批量选择、编号命名和 ZIP 打包。
+
+## 完整图片生产流程
+
+```text
+标题 / 五点描述 + 产品参考图
+                ↓
+          AI 提取商品信息
+                ↓
+ Amazon / TikTok 逐张图片策划
+                ↓
+    3 组动态风格候选与风格板
+                ↓
+      单图校对 / Prompt 微调
+                ↓
+          批量提交图片生成
+                ↓
+       编辑、筛选、ZIP 交付
+```
+
+1. 粘贴标题、五点描述或产品说明，并上传产品实拍、包装或结构参考图。
+2. 使用“提取信息”调用文本模型，自动填写类目、品牌/型号、颜色、材质、目标人群、卖点、包装清单、场景和禁用元素。
+3. 使用“AI策划”生成完整图片位方案、中文策划说明和英文生图提示词。
+4. 根据本次商品和市场信息生成 3 个动态风格方向，并选择风格板保持系列一致性。
+5. 逐张检查或编辑提示词，也可以勾选多个图片位批量生成。
+6. 在历史记录中复用、收藏和筛选结果，最终按顺序打包为 ZIP 下载。
+
+AI 请求支持阶段状态、停止和超时控制。请求进行期间会锁定标题、站点、模型及参考图等输入，页面切换后任务和工作区状态仍可继续管理。
+
+## 核心功能
+
+| 工作区 | 能力 |
+| --- | --- |
+| **图片生成** | 最多 16 张产品参考图、`@图` 精确引用、尺寸/质量/格式参数、任务重试、结果复用与二次编辑 |
+| **Amazon Listing** | US、JP、DE、FR、IT、ES 站点；固定规划 `MAIN + PT01-PT06` 7 个图片位；站点语言和可见文案约束 |
+| **Amazon A+** | 普通、标准、高级和移动端 A+ 模块编排；模块尺寸、文案方向、提示词与批量生成 |
+| **TikTok Shop** | 美国站商品主图 6 图方案、移动端详情图 8 图方案，以及对应的平台内容约束 |
+| **动态风格系统** | 基于商品资料生成 3 个风格候选和系列风格说明；Amazon MAIN 主图保持白底规则，附图/A+/TikTok 使用选定风格板 |
+| **图片编辑** | 支持首页生图模型与 Seedream Pro 编辑引擎；画布缩放、拖动、区域标注、撤销/重做和连续编辑 |
+| **拆图反推** | 结合竞品图、自家商品资料和 SOP，输出中文拆解、迁移方案、英文 image prompt 与 negative prompt |
+| **VOC 评论** | 通过 Shulex OpenAPI 按 ASIN 获取评论，或导入 CSV/XLSX；生成痛点、卖点、Listing、A+ 和图片策略报告 |
+| **AI 人物打标** | 为已确认需要披露的图片或视频写入 Amazon 要求的 XMP 标记，支持单文件和 ZIP 批量交付；不会识别人脸，也不会上传媒体 |
+| **历史与交付** | 搜索、来源/状态/形状筛选、收藏、批量删除、批量下载；Web 端生成带清单的 ZIP，桌面端可选择目录保存多张图片 |
+
+## 快速开始
+
+### 在线体验
+
+访问 [GitHub Pages 在线版](https://china-luo.github.io/ImageStudioRemasteredVersion/)。
+
+在线版是纯静态应用，浏览器会直接请求你配置的 API。上游接口必须允许浏览器跨域（CORS）；如果出现 `Failed to fetch`，建议使用 Windows 桌面版、本地开发代理或自行部署同源代理。
 
 ### Windows 桌面版
 
-下载最新安装包：
+从 [Releases](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest) 下载最新的 x64 安装包。桌面版通过受控的 Electron 主进程请求 API，更适合日常生产和需要规避浏览器跨域限制的场景。
 
-[ImageStudioRemasteredVersion-Setup-V1.5.4-2026-07-23-x64.exe](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/download/v1.5.4/ImageStudioRemasteredVersion-Setup-V1.5.4-2026-07-23-x64.exe)
+### 从源码运行
 
-最新发布页：
+要求：Node.js 20 或更高版本，推荐使用 CI 同款 Node.js 24。
 
-[V1.5.4 - 2026-07-23](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v1.5.4)
+```bash
+git clone https://github.com/china-luo/ImageStudioRemasteredVersion.git
+cd ImageStudioRemasteredVersion
+npm install
+npm run dev
+```
 
-### 基本流程
+打开 `http://127.0.0.1:5173/`。Windows 用户也可以直接运行 `start-amazon-image-studio.bat`，脚本会检查依赖并启动本地服务。
 
-1. 打开“设置”，配置可用的图片生成或文本分析 API。
-2. 在顶部选择功能板块：图片生成、拆图反推或 VOC 评论。
-3. 上传产品实拍、包装、结构图或竞品图作为参考。
-4. 在输入框中描述生成目标，或使用 `@图` 精确指定某张参考图。
-5. 生成结果后，可继续编辑、复用、收藏、下载或批量管理历史记录。
+生产构建与桌面预览：
 
-## 功能
+```bash
+npm run build
+npm run preview
+npm run desktop
+```
 
-### 图片生成工作台
+### Docker
 
-- Amazon Listing 图：支持主图、卖点图、场景图、尺寸图、包装图等图片方向。
-- Amazon A+ 图：支持 A+ 模块策划、模块文案方向和图片生成提示词。
-- TikTok Shop 图：支持商品主图和移动端详情图设计流程。
-- 参考图生成：可上传产品实拍图、包装图、结构图作为生成参考。
-- `@图` 引用：在输入框中指定某一张参考图，让修改要求更明确。
+本地构建静态 Web 镜像：
 
-### AI 策划
+```bash
+docker build -f deploy/Dockerfile -t amazon-image-studio .
+docker run --rm -p 8080:80 amazon-image-studio
+```
 
-- 根据商品标题、五点描述或产品资料生成逐张图片方案。
-- 输出适合图片模型使用的英文提示词。
-- 支持 Amazon / TikTok Shop 不同平台的图片表达逻辑。
-- AI 策划面板可直接选择 `gpt-5.5` 或 `gpt-5.6-sol`，也兼容已有的自定义模型。
-- Amazon MAIN 主图不附加风格板；附图、A+ 和 TikTok 图片提交前必须选择风格板。
-- 最多可上传 16 张产品参考图，策划生成的隐藏风格板单独附加，不占上传数量。
+打开 `http://localhost:8080/`。默认镜像不启用 API 代理；代理环境变量和部署边界见 [部署文档](./docs/deployment.md)。
 
-### 拆图反推
+## API 配置
 
-- 上传竞品图片后，分析图片解决的购买疑问、信息层级、构图和风格。
-- 输出可迁移到自家产品的图片结构建议。
-- 生成可直接用于图片模型的英文 image prompt 和 negative prompt。
+首次使用时，打开右上角 **设置 → API 配置**。建议至少建立两个配置：
 
-### VOC 评论分析
+| 用途 | API 模式 | 说明 |
+| --- | --- | --- |
+| 图片生成 | Images API / 支持图片输出的 Chat Completions | 用于首页生图、风格板和最终商品图 |
+| AI 策划 | Responses API / Chat Completions | 用于信息提取、Listing/A+/TikTok 策划 |
+| 拆图反推 | Responses API / Chat Completions | 可与策划共用，也可以独立配置 |
+| VOC 分析 | Responses API / Chat Completions | 评论数据分析；ASIN 抓取另需 Shulex OpenAPI Key |
 
-- 支持导入 Amazon 评论 CSV / XLSX 文件。
-- 提取用户痛点、正向卖点、竞品机会和高频需求。
-- 输出标题、五点描述、A+ 内容和图片策略建议。
+内置支持：
 
-### 历史记录与管理
+- OpenAI 及 OpenAI-compatible API
+- OpenRouter 图片模型
+- fal.ai
+- 火山方舟 Seedream
+- 可导入的自定义图片服务商配置
 
-- 支持历史记录筛选、搜索、复用、收藏和删除。
-- 支持下载单张图片或批量下载结果图。
-- 支持复用历史任务的提示词、参数和参考图。
+API Key 不会提交到本仓库。Web 版将 Key 保存在当前标签页的 `sessionStorage`；Windows 桌面版使用系统加密凭据存储。调用费用由你配置的服务商直接计费。
 
-### 配置能力
+## 数据与隐私
 
-- 支持 OpenAI Images / Responses API。
-- 支持 OpenRouter 图片模型。
-- 支持 fal.ai。
-- 支持自定义 OpenAI 兼容图片接口。
-- 本地浏览器运行时支持动态 API 代理，可直接修改 API URL 并解决接口跨域限制。
+- 任务、图片缓存、工作区草稿和策划历史主要保存在浏览器 IndexedDB 中。
+- SOP 与 VOC 草稿在切换页面后保留；正在执行的任务由共享任务队列继续管理。
+- AI 人物打标完全在本地写入元数据，不上传媒体，也不负责判断图片中是否存在 AI 人物。
+- 图片生成、策划、拆图和 VOC AI 分析会把你主动提交的文本/图片发送到所选 API 服务商。
+- 使用浏览器清理站点数据会删除本地记录；可在设置中使用数据导入/导出功能进行迁移或备份。
 
-## 构建、安装包与部署
+## 开发
 
-- 技术整改进度：`docs/technical-rectification-progress.md`
-- Windows 安装包只走 `npm run build:installer`，说明见 `docs/packaging.md`
-- Cloudflare / Vercel / GitHub Pages 均为静态托管，不提供 API 代理，说明见 `docs/deployment.md`
+```bash
+npm run typecheck          # TypeScript 检查
+npm run lint               # ESLint
+npm run format:check       # Prettier 检查
+npm run test               # Vitest 单元测试
+npm run test:e2e           # Playwright 端到端测试
+npm run test:electron      # Electron IPC 测试
+npm run build              # 生产构建
+```
 
-## 赞助
+构建 Windows 安装包：
 
-应用内“设置 - 关于”和支持提示弹窗提供赞助入口。
+```powershell
+npm run build:installer
+```
+
+安装包版本、命名、NSIS 前置工具和验证命令见 [Windows 打包文档](./docs/packaging.md)。
+
+## 技术栈
+
+- React 19 + TypeScript + Vite
+- Tailwind CSS
+- Zustand
+- IndexedDB
+- Electron + NSIS
+- Vitest + Playwright
+- Cloudflare Pages / GitHub Pages / Docker 静态部署
+
+## 项目文档
+
+- [部署与 API 请求策略](./docs/deployment.md)
+- [Windows 安装包](./docs/packaging.md)
+- [Amazon 图片规范与附图策划逻辑](./docs/knowledge/亚马逊图片规范与附图策划逻辑.md)
+- [TikTok Shop 美国站商品图规范](./docs/knowledge/TikTok%20Shop%20美国站商品主图与详情图规范.md)
+- [更新日志](./CHANGELOG.md)
+
+## 参与贡献
+
+欢迎提交 Issue 和 Pull Request。提交代码前请至少运行：
+
+```bash
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+```
+
+## License
+
+[MIT](./LICENSE) © [china-luo](https://github.com/china-luo)
