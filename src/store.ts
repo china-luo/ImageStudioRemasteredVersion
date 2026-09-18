@@ -108,6 +108,7 @@ import { hasActualParams } from './lib/taskRecovery'
 import { createTaskRecoveryManager } from './lib/taskRecoveryManager'
 import { createTaskSubmissionService, type SubmitTaskWithInputOptions } from './lib/taskSubmissionService'
 import { createTaskExecutionService, getTaskApiProfile } from './lib/taskExecutionService'
+import { taskExecutionQueue } from './lib/taskExecutionQueue'
 import { collectReferencedImageIdsFromState } from './lib/taskImageReferences'
 import {
   deleteImageIfUnreferenced as deleteImageIfUnreferencedFromService,
@@ -1212,7 +1213,7 @@ function getTaskSubmissionService() {
     storeInputImage: async (dataUrl) => storeImage(dataUrl),
     cacheImage,
     putTask,
-    executeTask: (taskId) => void executeTask(taskId),
+    executeTask: (taskId) => taskExecutionQueue.enqueue(taskId, () => executeTask(taskId)),
   })
 }
 
@@ -2522,7 +2523,7 @@ export async function submitTaskWithInput(options: SubmitTaskWithInputOptions): 
     storeInputImage: async (dataUrl) => storeImage(dataUrl),
     cacheImage,
     putTask,
-    executeTask: (taskId) => void executeTask(taskId),
+    executeTask: (taskId) => taskExecutionQueue.enqueue(taskId, () => executeTask(taskId)),
   }).submitWithInput(options)
 }
 

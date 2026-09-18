@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { downloadImageIds } from './downloadImages'
+import { downloadImageIds, downloadImageIdsAsZip } from './downloadImages'
 
 describe('desktop image downloads', () => {
   afterEach(() => {
@@ -106,5 +106,42 @@ describe('desktop image downloads', () => {
       failCount: 0,
     })
     expect(downloadedNames).toEqual(['browser-01.webp', 'browser-02.webp'])
+  })
+
+  it('packages batch delivery as one zip and reports progress', async () => {
+    const anchor = { href: '', download: '', click: vi.fn() }
+    const progress = vi.fn()
+    vi.stubGlobal('window', { setTimeout })
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => anchor),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+    })
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:zip'),
+      revokeObjectURL: vi.fn(),
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        blob: async () => new Blob(['image'], { type: 'image/png' }),
+      })),
+    )
+
+    await expect(
+      downloadImageIdsAsZip(['data:image/png;base64,YQ==', 'data:image/png;base64,Yg=='], 'delivery', progress),
+    ).resolves.toEqual({
+      archiveName: 'delivery.zip',
+      successCount: 2,
+      failCount: 0,
+      canceled: false,
+      failedImageIds: [],
+    })
+    expect(anchor.download).toBe('delivery.zip')
+    expect(anchor.click).toHaveBeenCalledOnce()
+    expect(progress.mock.calls).toEqual([
+      [1, 2],
+      [2, 2],
+    ])
   })
 })

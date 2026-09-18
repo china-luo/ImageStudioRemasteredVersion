@@ -1,7 +1,7 @@
 const path = require('node:path')
 const fs = require('node:fs')
 const dns = require('node:dns')
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, net, safeStorage, shell } = require('electron')
 const { createIpcHandlers } = require('./ipcHandlers.cjs')
 
 const APP_TITLE = '跨境Image工作台'
@@ -58,7 +58,13 @@ ipcMain.handle('image-studio:finish-image-save', (event) => {
   selectedImageSaveDirectories.delete(event.sender.id)
 })
 
-const ipcHandlers = createIpcHandlers({ app, fs, safeStorage, lookupHost: (hostname) => dns.promises.lookup(hostname, { all: true }) })
+const ipcHandlers = createIpcHandlers({
+  app,
+  fs,
+  safeStorage,
+  fetchImpl: net.fetch.bind(net),
+  lookupHost: (hostname) => dns.promises.lookup(hostname, { all: true }),
+})
 
 ipcMain.handle('image-studio:fetch', ipcHandlers.fetch)
 

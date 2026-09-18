@@ -1,4 +1,5 @@
 import { ensureImageCached } from './imageCache'
+import { strToU8, zipSync } from 'fflate'
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -11,6 +12,11 @@ export interface DownloadImagesResult {
   successCount: number
   failCount: number
   canceled: boolean
+}
+
+export interface DownloadZipResult extends DownloadImagesResult {
+  archiveName: string | null
+  failedImageIds: string[]
 }
 
 export function formatExportFileTime(date: Date): string {
@@ -74,6 +80,59 @@ export async function downloadImageIds(imageIds: string[], fileNameBase = 'image
   }
 
   return { successCount, failCount, canceled: false }
+}
+
+export async function downloadImageIdsAsZip(
+  imageIds: string[],
+  fileNameBase = 'images',
+  onProgress?: (completed: number, total: number) => void,
+): Promise<DownloadZipResult> {
+  if (imageIds.length === 0) {
+    return { archiveName: null, successCount: 0, failCount: 0, canceled: false, failedImageIds: [] }
+  }
+
+  const files: Record<string, Uint8Array> = {}
+  const failedImageIds: string[] = []
+  for (let index = 0; index < imageIds.length; index++) {
+    const imageId = imageIds[index]
+    try {
+      const blob = await getImageBlob(imageId)
+      const order = String(index + 1).padStart(3, '0')
+      files[`${fileNameBase}-${order}.${getBlobExtension(blob)}`] = new Uint8Array(await blob.arrayBuffer())
+    } catch (error) {
+      console.error(error)
+      failedImageIds.push(imageId)
+    } finally {
+      onProgress?.(index + 1, imageIds.length)
+    }
+  }
+
+  if (Object.keys(files).length === 0) {
+    return { archiveName: null, successCount: 0, failCount: failedImageIds.length, canceled: false, failedImageIds }
+  }
+
+  files['manifest.json'] = strToU8(
+    JSON.stringify(
+      {
+        exportedAt: new Date().toISOString(),
+        successCount: Object.keys(files).length,
+        failedImageIds,
+      },
+      null,
+      2,
+    ),
+  )
+  const archiveName = `${fileNameBase}.zip`
+  const zipBytes = zipSync(files)
+  const zipBuffer = zipBytes.buffer.slice(zipBytes.byteOffset, zipBytes.byteOffset + zipBytes.byteLength) as ArrayBuffer
+  triggerDownload(new Blob([zipBuffer], { type: 'application/zip' }), archiveName)
+  return {
+    archiveName,
+    successCount: Object.keys(files).length - 1,
+    failCount: failedImageIds.length,
+    canceled: false,
+    failedImageIds,
+  }
 }
 
 async function getImageBlob(imageIdOrUrl: string): Promise<Blob> {

@@ -25,6 +25,10 @@ export interface SopWorkspaceDraft {
   output: string
   error: string
   updatedAt: number
+  analysisStatus: 'idle' | 'running' | 'done' | 'error' | 'stopped'
+  analysisRequestId: string | null
+  analysisStartedAt: number | null
+  analysisOperation: 'analyze' | null
 }
 
 export type VocSourceMode = 'asin' | 'csv'
@@ -41,6 +45,10 @@ export interface VocWorkspaceDraft {
   statusText: string
   error: string
   updatedAt: number
+  analysisStatus: 'idle' | 'running' | 'done' | 'error' | 'stopped'
+  analysisRequestId: string | null
+  analysisStartedAt: number | null
+  analysisOperation: 'fetch' | 'analyze' | null
 }
 
 export const DEFAULT_SOP_FORM: SopForm = {
@@ -62,6 +70,10 @@ export const DEFAULT_SOP_DRAFT: SopWorkspaceDraft = {
   output: '',
   error: '',
   updatedAt: 0,
+  analysisStatus: 'idle',
+  analysisRequestId: null,
+  analysisStartedAt: null,
+  analysisOperation: null,
 }
 
 export const DEFAULT_VOC_DRAFT: VocWorkspaceDraft = {
@@ -76,6 +88,10 @@ export const DEFAULT_VOC_DRAFT: VocWorkspaceDraft = {
   statusText: '',
   error: '',
   updatedAt: 0,
+  analysisStatus: 'idle',
+  analysisRequestId: null,
+  analysisStartedAt: null,
+  analysisOperation: null,
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -116,6 +132,13 @@ export function normalizeSopDraft(value: unknown): SopWorkspaceDraft {
     output: readString(draft.output),
     error: readString(draft.error),
     updatedAt: typeof draft.updatedAt === 'number' && Number.isFinite(draft.updatedAt) ? draft.updatedAt : 0,
+    analysisStatus: readAnalysisStatus(draft.analysisStatus),
+    analysisRequestId: typeof draft.analysisRequestId === 'string' ? draft.analysisRequestId : null,
+    analysisStartedAt:
+      typeof draft.analysisStartedAt === 'number' && Number.isFinite(draft.analysisStartedAt)
+        ? draft.analysisStartedAt
+        : null,
+    analysisOperation: draft.analysisOperation === 'analyze' ? 'analyze' : null,
   }
 }
 
@@ -140,7 +163,20 @@ export function normalizeVocDraft(value: unknown): VocWorkspaceDraft {
     statusText: readString(draft.statusText),
     error: readString(draft.error),
     updatedAt: typeof draft.updatedAt === 'number' && Number.isFinite(draft.updatedAt) ? draft.updatedAt : 0,
+    analysisStatus: readAnalysisStatus(draft.analysisStatus),
+    analysisRequestId: typeof draft.analysisRequestId === 'string' ? draft.analysisRequestId : null,
+    analysisStartedAt:
+      typeof draft.analysisStartedAt === 'number' && Number.isFinite(draft.analysisStartedAt)
+        ? draft.analysisStartedAt
+        : null,
+    analysisOperation:
+      draft.analysisOperation === 'fetch' || draft.analysisOperation === 'analyze' ? draft.analysisOperation : null,
   }
+}
+
+function readAnalysisStatus(value: unknown): SopWorkspaceDraft['analysisStatus'] {
+  if (value === 'running') return 'stopped'
+  return value === 'done' || value === 'error' || value === 'stopped' ? value : 'idle'
 }
 
 export function persistableSopDraft(draft: SopWorkspaceDraft): SopWorkspaceDraft {

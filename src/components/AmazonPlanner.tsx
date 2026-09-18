@@ -49,7 +49,7 @@ import { deleteAmazonPlannerSession, getAllAmazonPlannerSessions } from '../lib/
 import { normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { resolvePlannerStyleReference } from '../lib/plannerActionPolicy'
 import { DEFAULT_PARAMS } from '../types'
-import type { AmazonPlannerSession } from '../types'
+import type { AmazonPlannerSession, TaskRecord, TaskWorkflow } from '../types'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -67,6 +67,7 @@ import PlannerInputPanel from './planner/PlannerInputPanel'
 import PlannerReferenceImageGrid from './planner/PlannerReferenceImageGrid'
 import {
   createAmazonPlannerPlan,
+  extractAmazonProductInfo,
   generatePlannerStyleImages,
   retryPlannerStyleImage,
   useAmazonPlannerController,
@@ -116,6 +117,7 @@ const GUIDE_HINT_CLASS =
 const API_MAX_IMAGES = 16
 
 export default function AmazonPlanner() {
+  const tasks = useStore((s) => s.tasks)
   const params = useStore((s) => s.params)
   const inputImages = useStore((s) => s.inputImages)
   const settings = useStore((s) => s.settings)
@@ -171,12 +173,32 @@ export default function AmazonPlanner() {
   const [currentPlannerSessionId, setCurrentPlannerSessionId] = useState<string | null>(null)
   const [showPlannerHistory, setShowPlannerHistory] = useState(false)
   const [isPlanning, setIsPlanning] = useState(false)
+  const [isExtractingProductInfo, setIsExtractingProductInfo] = useState(false)
+  const [planningStage, setPlanningStage] = useState<'idle' | 'preparing' | 'requesting' | 'parsing'>('idle')
   const [plannerError, setPlannerError] = useState('')
   const [isPreparingReferencePayload, setIsPreparingReferencePayload] = useState(false)
   const [referencePayloadNotice, setReferencePayloadNotice] = useState('')
   const [actionProgress, setActionProgress] = useState<PlannerActionProgressMap>({})
+  const [batchSelectedIndexes, setBatchSelectedIndexes] = useState<number[]>([])
+  const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
   const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>({})
   const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(null)
+  const isPlannerRequestBusy = isPlanning || isExtractingProductInfo
+  const activeWorkflow: TaskWorkflow =
+    plannerPlatform === 'tiktok'
+      ? tiktokDesignType === 'detail'
+        ? 'tiktok-detail'
+        : 'tiktok-main'
+      : plannerMode === 'aplus'
+        ? 'amazon-aplus'
+        : 'amazon-listing'
+  const getPlanTask = (slot: string) =>
+    tasks.find(
+      (task) =>
+        task.category?.workflow === activeWorkflow &&
+        task.category.amazonSlot === slot &&
+        task.category.productTitle === draft.productTitle.trim(),
+    )
   const resolutionTier = resolution === '4k' ? '4K' : '2K'
   const aPlusSpecs = useMemo(
     () => normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecsByType[aPlusType]),
@@ -264,6 +286,16 @@ export default function AmazonPlanner() {
   const plannerProfileValidation = plannerProfile
     ? validateApiProfile(plannerProfile)
     : '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置'
+  const extractionInputSignature = [
+    listingText,
+    plannerPlatform,
+    marketplaceId,
+    plannerProfile?.id ?? '',
+    plannerProfile?.model ?? '',
+    inputImages.map((image) => image.id).join(','),
+  ].join('\u0001')
+  const extractionInputSignatureRef = useRef(extractionInputSignature)
+  extractionInputSignatureRef.current = extractionInputSignature
   const plannerApiLabel = plannerProfile ? getApiModeLabel(plannerProfile.apiMode) : 'Responses API'
   const plannerModelOptions = [
     ...(plannerProfile?.model &&
@@ -614,6 +646,102 @@ export default function AmazonPlanner() {
         if (submitted) markActionProgress(submittedActionKey, 'submitted')
       })
     })
+  }
+
+  const toggleBatchPlan = (index: number) => {
+    setBatchSelectedIndexes((current) =>
+      current.includes(index) ? current.filter((item) => item !== index) : [...current, index].sort((a, b) => a - b),
+    )
+  }
+
+  const selectAllBatchPlans = () => {
+    const count = plannerMode === 'aplus' ? aPlusPlansWithSizes.length : imagePlans.length
+    setBatchSelectedIndexes((current) => (current.length === count ? [] : Array.from({ length: count }, (_, i) => i)))
+  }
+
+  const selectFailedBatchPlans = () => {
+    const plans = plannerMode === 'aplus' ? aPlusPlansWithSizes : imagePlans
+    setBatchSelectedIndexes(plans.flatMap((plan, index) => (getPlanTask(plan.slot)?.status === 'error' ? [index] : [])))
+  }
+
+  const submitBatchPlans = async () => {
+    if (isBatchSubmitting) return
+    const indexes = batchSelectedIndexes.length
+      ? batchSelectedIndexes
+      : plannerMode === 'aplus'
+        ? aPlusPlansWithSizes.map((_, index) => index)
+        : imagePlans.map((_, index) => index)
+    if (!indexes.length) {
+      showToast('请先完成 AI 策划', 'error')
+      return
+    }
+    if (inputImages.length > API_MAX_IMAGES) {
+      showToast(`上传参考图不能超过 ${API_MAX_IMAGES} 张`, 'error')
+      return
+    }
+
+    const originalInputImages = [...useStore.getState().inputImages]
+    setIsBatchSubmitting(true)
+    let submitted = 0
+    try {
+      for (const index of indexes) {
+        const plan = plannerMode === 'aplus' ? aPlusPlansWithSizes[index] : imagePlans[index]
+        if (!plan) continue
+        const isMain = plannerMode === 'listing' && isCommerceMainSlot(plannerPlatform, plan.slot)
+        const needsStyle = plannerPlatform === 'tiktok' || plannerMode === 'aplus' || !isMain
+        if (needsStyle && !selectedStyleImage?.imageId) {
+          showToast(`「${plan.slot}」需要先选择风格板`, 'error')
+          continue
+        }
+        const actionKey = getPlannerActionKey(plannerMode, index, plan.slot)
+        const prompt =
+          promptOverrides[actionKey]?.trim() ||
+          (plannerMode === 'aplus'
+            ? buildAmazonAPlusPlanPrompt({
+                ...plan,
+                seriesStyleGuide: activeSeriesStyleGuide,
+                styleReferenceAttached: needsStyle,
+                styleDensityMode,
+                marketplaceId,
+              })
+            : (plannerPlatform === 'tiktok' ? buildTiktokPlanPrompt : buildAmazonPlanPrompt)({
+                ...plan,
+                seriesStyleGuide: isMain ? null : activeSeriesStyleGuide,
+                styleReferenceAttached: needsStyle,
+                styleDensityMode,
+                marketplaceId,
+              }))
+        const category: NonNullable<TaskRecord['category']> = {
+          productTitle: draft.productTitle.trim(),
+          workflow: activeWorkflow,
+          amazonSlot: plan.slot,
+          ...(plannerPlatform === 'amazon' ? { marketplaceId } : {}),
+          ...(plannerPlatform === 'tiktok' ? { platform: 'tiktok' as const, tiktokDesignType } : {}),
+          ...(plannerMode === 'aplus' ? { aPlusType } : {}),
+          ...(needsStyle && selectedStyleImage?.imageId ? { styleReferenceImageId: selectedStyleImage.imageId } : {}),
+        }
+        const state = useStore.getState()
+        useStore.setState({
+          prompt: '',
+          inputImages: originalInputImages,
+          params: {
+            ...state.params,
+            size: plannerMode === 'aplus' ? (plan as AmazonAPlusPlan).generationSize : targetSize,
+            n: 1,
+          },
+          pendingTaskCategory: { mode: 'prompt-match', prompt: '', apiPrompt: prompt, category },
+        })
+        if (await submitTask()) {
+          markActionProgress(actionKey, 'submitted')
+          submitted += 1
+        }
+      }
+      useStore.setState({ inputImages: originalInputImages })
+      showToast(`已提交 ${submitted} 个图片任务`, submitted ? 'success' : 'error')
+      setBatchSelectedIndexes([])
+    } finally {
+      setIsBatchSubmitting(false)
+    }
   }
 
   const copyPrompt = async () => {
@@ -1028,6 +1156,77 @@ export default function AmazonPlanner() {
     )
   }
 
+  const runExtractProductInfo = async () => {
+    if (plannerAbortControllerRef.current) {
+      showToast('AI 正在处理中', 'info')
+      return
+    }
+    if (!listingText.trim()) {
+      showToast('请先粘贴标题和五点描述', 'error')
+      return
+    }
+    if (!plannerProfile) {
+      setPlannerError(
+        '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置。\n\n请在设置 -> API 中创建或选择一个文本模型配置。',
+      )
+      showToast('AI 策划配置缺失', 'error')
+      return
+    }
+    if (plannerProfileValidation) {
+      setPlannerError(`AI 策划配置「${plannerProfile.name}」不完整：${plannerProfileValidation}`)
+      showToast('AI 策划配置不完整', 'error')
+      return
+    }
+
+    const controller = new AbortController()
+    plannerAbortControllerRef.current = controller
+    setIsExtractingProductInfo(true)
+    setPlanningStage(inputImages.length > 0 ? 'preparing' : 'requesting')
+    setPlannerError('')
+    try {
+      setIsPreparingReferencePayload(inputImages.length > 0)
+      setReferencePayloadNotice('')
+      const workflow = await extractAmazonProductInfo({
+        listingText,
+        profile: plannerProfile,
+        referenceImageDataUrls: inputImages.map((image) => image.dataUrl),
+        platform: plannerPlatform,
+        marketplaceId,
+        signal: controller.signal,
+        onStage: (stage) => {
+          setPlanningStage(stage)
+          if (stage !== 'preparing') setIsPreparingReferencePayload(false)
+        },
+      })
+      if (controller.signal.aborted) return
+      if (extractionInputSignatureRef.current !== extractionInputSignature) {
+        setPlannerError('提取完成前输入已发生变化，旧结果未填入。请使用当前内容重新提取。')
+        showToast('输入已变化，未应用旧的提取结果', 'info')
+        return
+      }
+      const nextDraft: AmazonPromptDraft = { ...draft, ...workflow.result }
+      setDraft(nextDraft)
+      setReferencePayloadNotice(workflow.referencePayloadNotice)
+      try {
+        await savePlannerSession({ draft: toSessionDraft(nextDraft) })
+      } catch (err) {
+        showToast(`策划历史保存失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      }
+      showToast('产品信息已填入下方，可继续 AI 策划', 'success')
+    } catch (err) {
+      if (controller.signal.aborted || isAbortError(err)) return
+      setPlannerError(getPlannerFailureDetail(err))
+      showToast('产品信息提取失败，请查看详情', 'error')
+    } finally {
+      setIsPreparingReferencePayload(false)
+      if (plannerAbortControllerRef.current === controller) {
+        plannerAbortControllerRef.current = null
+        setIsExtractingProductInfo(false)
+        setPlanningStage('idle')
+      }
+    }
+  }
+
   const runCreateAiPlan = async () => {
     if (plannerAbortControllerRef.current) {
       showToast('AI 策划正在进行中', 'info')
@@ -1054,6 +1253,7 @@ export default function AmazonPlanner() {
     const controller = new AbortController()
     plannerAbortControllerRef.current = controller
     setIsPlanning(true)
+    setPlanningStage(inputImages.length > 0 ? 'preparing' : 'requesting')
     setPlannerError('')
     try {
       setIsPreparingReferencePayload(inputImages.length > 0)
@@ -1071,6 +1271,10 @@ export default function AmazonPlanner() {
         aPlusModuleSpecs: aPlusSpecs,
         aPlusGenerationTier: resolutionTier,
         signal: controller.signal,
+        onStage: (stage) => {
+          setPlanningStage(stage)
+          if (stage !== 'preparing') setIsPreparingReferencePayload(false)
+        },
       })
       if (controller.signal.aborted) return
       setReferencePayloadNotice(workflow.referencePayloadNotice)
@@ -1084,6 +1288,7 @@ export default function AmazonPlanner() {
       if (plannerAbortControllerRef.current === controller) {
         plannerAbortControllerRef.current = null
         setIsPlanning(false)
+        setPlanningStage('idle')
       }
     }
   }
@@ -1160,10 +1365,13 @@ export default function AmazonPlanner() {
   const stopAiPlan = () => {
     const controller = plannerAbortControllerRef.current
     if (!controller) return
+    const stoppedExtraction = isExtractingProductInfo
     controller.abort()
     plannerAbortControllerRef.current = null
     setIsPlanning(false)
-    showToast('AI 策划已停止', 'info')
+    setIsExtractingProductInfo(false)
+    setPlanningStage('idle')
+    showToast(stoppedExtraction ? '产品信息提取已停止' : 'AI 策划已停止', 'info')
   }
 
   const selectStyleCandidate = (index: number) => {
@@ -1451,6 +1659,10 @@ export default function AmazonPlanner() {
   }
 
   const handleFiles = async (files: FileList | File[]) => {
+    if (isPlannerRequestBusy) {
+      showToast('AI 请求处理中，请先停止或等待完成', 'info')
+      return
+    }
     const accepted = Array.from(files).filter((file) => file.type.startsWith('image/'))
     if (accepted.length === 0) {
       showToast('请选择图片文件', 'error')
@@ -1510,6 +1722,7 @@ export default function AmazonPlanner() {
           resolution={resolution}
           historyOpen={showPlannerHistory}
           historyCount={plannerSessions.length}
+          disabled={isPlannerRequestBusy}
           onPlatformChange={changePlannerPlatform}
           onModeChange={changePlannerMode}
           onTiktokDesignTypeChange={changeTiktokDesignType}
@@ -1567,6 +1780,9 @@ export default function AmazonPlanner() {
               plannerModelOptions={plannerModelOptions}
               onPlannerModelChange={changePlannerModel}
               isPlanning={isPlanning}
+              isExtractingProductInfo={isExtractingProductInfo}
+              planningStage={planningStage}
+              onExtractProductInfo={() => void runExtractProductInfo()}
               onConfirmCreatePlan={confirmCreateAiPlan}
               onStopPlan={stopAiPlan}
               hasListingContent={Boolean(listingText.trim() || imagePlans.length > 0 || aPlusPlans.length > 0)}
@@ -1594,18 +1810,18 @@ export default function AmazonPlanner() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                  disabled={atImageLimit}
-                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${atImageLimit ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+                  onClick={() => !atImageLimit && !isPlannerRequestBusy && fileInputRef.current?.click()}
+                  disabled={atImageLimit || isPlannerRequestBusy}
+                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${atImageLimit || isPlannerRequestBusy ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
                 >
                   <PlusIcon className="h-4 w-4" />
                   上传参考图
                 </button>
                 <button
                   type="button"
-                  onClick={() => !atImageLimit && cameraInputRef.current?.click()}
-                  disabled={atImageLimit}
-                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition sm:hidden ${atImageLimit ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+                  onClick={() => !atImageLimit && !isPlannerRequestBusy && cameraInputRef.current?.click()}
+                  disabled={atImageLimit || isPlannerRequestBusy}
+                  className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition sm:hidden ${atImageLimit || isPlannerRequestBusy ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.04] dark:text-gray-500' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
                 >
                   <PhotoIcon className="h-4 w-4" />
                   拍照
@@ -1617,7 +1833,8 @@ export default function AmazonPlanner() {
                       clearInputImages()
                       updateCurrentPlannerSession({ referenceImageIds: [] })
                     }}
-                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-400/20 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-400/10"
+                    disabled={isPlannerRequestBusy}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-400/20 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-400/10"
                   >
                     <TrashIcon className="h-4 w-4" />
                     清空
@@ -1637,6 +1854,7 @@ export default function AmazonPlanner() {
             {inputImages.length > 0 ? (
               <PlannerReferenceImageGrid
                 images={inputImages}
+                disabled={isPlannerRequestBusy}
                 onRemove={(index) => {
                   const nextReferenceImageIds = inputImages
                     .filter((_, imageIndex) => imageIndex !== index)
@@ -1648,8 +1866,9 @@ export default function AmazonPlanner() {
             ) : (
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="mt-3 flex min-h-[88px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-center transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-white/[0.12] dark:bg-gray-900 dark:hover:border-blue-400/50 dark:hover:bg-blue-400/10"
+                onClick={() => !isPlannerRequestBusy && fileInputRef.current?.click()}
+                disabled={isPlannerRequestBusy}
+                className="mt-3 flex min-h-[88px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-center transition hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:opacity-60 dark:border-white/[0.12] dark:bg-gray-900 dark:hover:border-blue-400/50 dark:hover:bg-blue-400/10 dark:disabled:bg-white/[0.04]"
               >
                 <PhotoIcon className="h-5 w-5 text-gray-400" />
                 <span className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-200">上传产品参考图</span>
@@ -1668,6 +1887,7 @@ export default function AmazonPlanner() {
               type="file"
               accept="image/*"
               multiple
+              disabled={isPlannerRequestBusy}
               className="hidden"
               onChange={handleFileUpload}
             />
@@ -1676,6 +1896,7 @@ export default function AmazonPlanner() {
               type="file"
               accept="image/*"
               capture="environment"
+              disabled={isPlannerRequestBusy}
               className="hidden"
               onChange={handleFileUpload}
             />
@@ -2101,48 +2322,95 @@ export default function AmazonPlanner() {
                     选择图片位后，生成按钮会切换到对应提示词。
                   </div>
                 </div>
-                <span className="shrink-0 rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
-                  {imagePlans.length} 张
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllBatchPlans}
+                    className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]"
+                  >
+                    {batchSelectedIndexes.length === imagePlans.length ? '清空' : '全选'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={selectFailedBatchPlans}
+                    className="rounded-lg border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-400/20 dark:text-red-200 dark:hover:bg-red-400/10"
+                  >
+                    选失败
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitBatchPlans()}
+                    disabled={isBatchSubmitting}
+                    className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isBatchSubmitting
+                      ? '批量提交中…'
+                      : `批量生成${batchSelectedIndexes.length ? ` ${batchSelectedIndexes.length}` : ''}`}
+                  </button>
+                </div>
               </div>
               <div className={PLAN_LIST_CLASS}>
                 {imagePlans.map((plan, index) => {
                   const isSelected = selectedPlanIndex === index
                   const planActionProgress = actionProgress[getPlannerActionKey('listing', index, plan.slot)]
+                  const planTask = getPlanTask(plan.slot)
                   return (
-                    <button
-                      key={`${plan.slot}-${index}`}
-                      type="button"
-                      onClick={() => selectPlan(index)}
-                      className={`rounded-xl border p-3 text-left transition ${isSelected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-500/15 dark:border-blue-400/70 dark:bg-blue-500/10' : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:hover:bg-white/[0.05]'}`}
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${isSelected ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-white/[0.08] dark:text-gray-300'}`}
-                        >
-                          {plan.slot}
-                        </span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{plan.label}</span>
-                        {isSelected && (
-                          <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                            当前
-                          </span>
-                        )}
-                        {planActionProgress && (
+                    <div key={`${plan.slot}-${index}`} className="relative">
+                      <input
+                        type="checkbox"
+                        checked={batchSelectedIndexes.includes(index)}
+                        onChange={() => toggleBatchPlan(index)}
+                        aria-label={`选择 ${plan.slot} 批量生成`}
+                        className="absolute left-3 top-3 z-10 h-4 w-4 accent-blue-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => selectPlan(index)}
+                        className={`w-full rounded-xl border p-3 pl-10 text-left transition ${isSelected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-500/15 dark:border-blue-400/70 dark:bg-blue-500/10' : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:hover:bg-white/[0.05]'}`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
                           <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${planActionProgress === 'submitted' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'}`}
+                            className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${isSelected ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-white/[0.08] dark:text-gray-300'}`}
                           >
-                            {planActionProgress === 'submitted' ? '已提交' : '已准备'}
+                            {plan.slot}
                           </span>
-                        )}
-                      </div>
-                      <div className="mt-2 line-clamp-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
-                        {getPlanSummary(plan.planMarkdown)}
-                      </div>
-                      <div className="mt-2 line-clamp-2 rounded-lg bg-white/70 px-2 py-1 text-[11px] leading-relaxed text-gray-500 dark:bg-white/[0.05] dark:text-gray-300">
-                        Negative：{plan.negativePrompt || '未提供'}
-                      </div>
-                    </button>
+                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{plan.label}</span>
+                          {isSelected && (
+                            <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              当前
+                            </span>
+                          )}
+                          {planTask?.status === 'running' && (
+                            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-400/10 dark:text-blue-200">
+                              生成中
+                            </span>
+                          )}
+                          {planTask?.status === 'done' && (
+                            <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              已完成
+                            </span>
+                          )}
+                          {planTask?.status === 'error' && (
+                            <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-400/10 dark:text-red-200">
+                              失败，可重试
+                            </span>
+                          )}
+                          {!planTask && planActionProgress && (
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${planActionProgress === 'submitted' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'}`}
+                            >
+                              {planActionProgress === 'submitted' ? '已提交' : '已准备'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-2 line-clamp-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                          {getPlanSummary(plan.planMarkdown)}
+                        </div>
+                        <div className="mt-2 line-clamp-2 rounded-lg bg-white/70 px-2 py-1 text-[11px] leading-relaxed text-gray-500 dark:bg-white/[0.05] dark:text-gray-300">
+                          Negative：{plan.negativePrompt || '未提供'}
+                        </div>
+                      </button>
+                    </div>
                   )
                 })}
               </div>
@@ -2158,68 +2426,117 @@ export default function AmazonPlanner() {
                     选择模块后，生成按钮会切换到对应 A+ 提示词与尺寸。
                   </div>
                 </div>
-                <span className="shrink-0 rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
-                  {aPlusPlansWithSizes.length} 张
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllBatchPlans}
+                    className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]"
+                  >
+                    {batchSelectedIndexes.length === aPlusPlansWithSizes.length ? '清空' : '全选'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={selectFailedBatchPlans}
+                    className="rounded-lg border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-400/20 dark:text-red-200 dark:hover:bg-red-400/10"
+                  >
+                    选失败
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitBatchPlans()}
+                    disabled={isBatchSubmitting}
+                    className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isBatchSubmitting
+                      ? '批量提交中…'
+                      : `批量生成${batchSelectedIndexes.length ? ` ${batchSelectedIndexes.length}` : ''}`}
+                  </button>
+                </div>
               </div>
               <div className={PLAN_LIST_CLASS}>
                 {aPlusPlansWithSizes.map((plan, index) => {
                   const isSelected = selectedAPlusPlanIndex === index
                   const externalText = formatAPlusModuleText(plan)
                   const planActionProgress = actionProgress[getPlannerActionKey('aplus', index, plan.slot)]
+                  const planTask = getPlanTask(plan.slot)
                   return (
-                    <button
-                      key={`${plan.slot}-${index}`}
-                      type="button"
-                      onClick={() => selectAPlusPlan(index)}
-                      className={`rounded-xl border p-3 text-left transition ${isSelected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-500/15 dark:border-blue-400/70 dark:bg-blue-500/10' : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:hover:bg-white/[0.05]'}`}
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${isSelected ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-white/[0.08] dark:text-gray-300'}`}
-                        >
-                          {plan.slot}
-                        </span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {getAPlusModuleDisplayName(plan)}
-                        </span>
-                        <span className="text-xs text-gray-400">{getAPlusModuleEnglishName(plan)}</span>
-                        {isSelected && (
-                          <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                            当前
-                          </span>
-                        )}
-                        {planActionProgress && (
+                    <div key={`${plan.slot}-${index}`} className="relative">
+                      <input
+                        type="checkbox"
+                        checked={batchSelectedIndexes.includes(index)}
+                        onChange={() => toggleBatchPlan(index)}
+                        aria-label={`选择 ${plan.slot} 批量生成`}
+                        className="absolute left-3 top-3 z-10 h-4 w-4 accent-blue-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => selectAPlusPlan(index)}
+                        className={`w-full rounded-xl border p-3 pl-10 text-left transition ${isSelected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-500/15 dark:border-blue-400/70 dark:bg-blue-500/10' : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:hover:bg-white/[0.05]'}`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
                           <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${planActionProgress === 'submitted' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'}`}
+                            className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${isSelected ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-white/[0.08] dark:text-gray-300'}`}
                           >
-                            {planActionProgress === 'submitted' ? '已提交' : '已准备'}
+                            {plan.slot}
                           </span>
-                        )}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                        <span className="rounded-md bg-white/70 px-2 py-0.5 dark:bg-white/[0.05]">
-                          上传 {plan.uploadSize}
-                        </span>
-                        <span className="rounded-md bg-white/70 px-2 py-0.5 dark:bg-white/[0.05]">
-                          生成 {plan.generationSize}
-                        </span>
-                      </div>
-                      <div className="mt-2 line-clamp-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
-                        {getPlanSummary(plan.planMarkdown)}
-                      </div>
-                      {(isAPlusTextModule(plan) || externalText) && externalText && (
-                        <div className="mt-2 rounded-lg bg-white/70 px-2 py-1 text-xs leading-relaxed text-gray-700 dark:bg-white/[0.05] dark:text-gray-200">
-                          {plan.textTitle && <div className="font-semibold">{plan.textTitle}</div>}
-                          {plan.textBody && (
-                            <div className="mt-0.5 line-clamp-2 text-gray-500 dark:text-gray-300">{plan.textBody}</div>
+                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            {getAPlusModuleDisplayName(plan)}
+                          </span>
+                          <span className="text-xs text-gray-400">{getAPlusModuleEnglishName(plan)}</span>
+                          {isSelected && (
+                            <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              当前
+                            </span>
+                          )}
+                          {planTask?.status === 'running' && (
+                            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-400/10 dark:text-blue-200">
+                              生成中
+                            </span>
+                          )}
+                          {planTask?.status === 'done' && (
+                            <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              已完成
+                            </span>
+                          )}
+                          {planTask?.status === 'error' && (
+                            <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-400/10 dark:text-red-200">
+                              失败，可重试
+                            </span>
+                          )}
+                          {!planTask && planActionProgress && (
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${planActionProgress === 'submitted' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'}`}
+                            >
+                              {planActionProgress === 'submitted' ? '已提交' : '已准备'}
+                            </span>
                           )}
                         </div>
-                      )}
-                      <div className="mt-2 line-clamp-2 rounded-lg bg-white/70 px-2 py-1 text-[11px] leading-relaxed text-gray-500 dark:bg-white/[0.05] dark:text-gray-300">
-                        Negative：{plan.negativePrompt || '未提供'}
-                      </div>
-                    </button>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                          <span className="rounded-md bg-white/70 px-2 py-0.5 dark:bg-white/[0.05]">
+                            上传 {plan.uploadSize}
+                          </span>
+                          <span className="rounded-md bg-white/70 px-2 py-0.5 dark:bg-white/[0.05]">
+                            生成 {plan.generationSize}
+                          </span>
+                        </div>
+                        <div className="mt-2 line-clamp-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                          {getPlanSummary(plan.planMarkdown)}
+                        </div>
+                        {(isAPlusTextModule(plan) || externalText) && externalText && (
+                          <div className="mt-2 rounded-lg bg-white/70 px-2 py-1 text-xs leading-relaxed text-gray-700 dark:bg-white/[0.05] dark:text-gray-200">
+                            {plan.textTitle && <div className="font-semibold">{plan.textTitle}</div>}
+                            {plan.textBody && (
+                              <div className="mt-0.5 line-clamp-2 text-gray-500 dark:text-gray-300">
+                                {plan.textBody}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="mt-2 line-clamp-2 rounded-lg bg-white/70 px-2 py-1 text-[11px] leading-relaxed text-gray-500 dark:bg-white/[0.05] dark:text-gray-300">
+                          Negative：{plan.negativePrompt || '未提供'}
+                        </div>
+                      </button>
+                    </div>
                   )
                 })}
               </div>

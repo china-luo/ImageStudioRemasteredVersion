@@ -13,6 +13,12 @@ import {
   SHULEX_REALTIME_MAX_REVIEWS,
 } from '../lib/vocAmazonReviewsApi'
 import { assertVocHasValidReviews } from '../lib/workspaceDrafts'
+import {
+  finishWorkspaceAnalysis,
+  isWorkspaceAnalysisCurrent,
+  startWorkspaceAnalysis,
+  stopWorkspaceAnalysis,
+} from '../lib/workspaceAnalysis'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import Select from './Select'
 import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, ImportIcon, RefreshIcon, SettingsIcon } from './icons'
@@ -65,7 +71,6 @@ export default function VocAmazonReviewsWorkspace() {
   const vocDraft = useStore((s) => s.vocDraft)
   const setVocDraft = useStore((s) => s.setVocDraft)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
 
   const sourceMode = vocDraft.sourceMode
   const asin = vocDraft.asin
@@ -87,8 +92,10 @@ export default function VocAmazonReviewsWorkspace() {
   const setAiReport = (nextReport: string) => setVocDraft({ aiReport: nextReport })
   const setStatusText = (nextStatus: string) => setVocDraft({ statusText: nextStatus })
   const setError = (nextError: string) => setVocDraft({ error: nextError })
-  const [isFetching, setIsFetching] = useState(false)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const analysisStatus = useStore((s) => s.vocDraft.analysisStatus)
+  const analysisOperation = useStore((s) => s.vocDraft.analysisOperation)
+  const isFetching = analysisStatus === 'running' && analysisOperation === 'fetch'
+  const isAnalyzing = analysisStatus === 'running' && analysisOperation === 'analyze'
   const [showVocConfig, setShowVocConfig] = useState(false)
   const [draftVocApiKey, setDraftVocApiKey] = useState(settings.vocApiKey)
   const [draftVocProfileId, setDraftVocProfileId] = useState(settings.vocProfileId)
@@ -114,10 +121,8 @@ export default function VocAmazonReviewsWorkspace() {
   )
 
   const stopCurrentTask = () => {
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
-    setIsFetching(false)
-    setIsAnalyzing(false)
+    stopWorkspaceAnalysis('voc')
+    setVocDraft({ analysisStatus: 'stopped', analysisRequestId: null, analysisOperation: null })
     setStatusText('已停止')
   }
 
@@ -141,11 +146,16 @@ export default function VocAmazonReviewsWorkspace() {
   }
 
   const fetchByAsin = async () => {
-    const controller = new AbortController()
-    abortControllerRef.current = controller
+    const analysis = startWorkspaceAnalysis('voc')
+    const controller = analysis.controller
+    setVocDraft({
+      analysisStatus: 'running',
+      analysisRequestId: analysis.requestId,
+      analysisStartedAt: Date.now(),
+      analysisOperation: 'fetch',
+    })
     setError('')
     setAiReport('')
-    setIsFetching(true)
     try {
       setStatusText('正在通过 Shulex OpenAPI 实时任务拉取 Amazon 评论')
       const envelope = await fetchShulexReviews({
@@ -155,9 +165,10 @@ export default function VocAmazonReviewsWorkspace() {
         apiKey: settings.vocApiKey,
         signal: controller.signal,
       })
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || !isWorkspaceAnalysisCurrent('voc', analysis.requestId)) return
       assertVocHasValidReviews(envelope)
       setReviewsEnvelope(envelope)
+      setVocDraft({ analysisStatus: 'done', analysisRequestId: null, analysisOperation: null })
       setStatusText(
         [
           `已抓取 ${envelope.reviews.length} 条评论`,
@@ -173,11 +184,12 @@ export default function VocAmazonReviewsWorkspace() {
     } catch (err) {
       if (controller.signal.aborted) return
       const message = err instanceof Error ? err.message : String(err)
-      setError(message)
+      if (isWorkspaceAnalysisCurrent('voc', analysis.requestId)) {
+        setVocDraft({ error: message, analysisStatus: 'error', analysisRequestId: null, analysisOperation: null })
+      }
       showToast(`VOC 拉取失败：${message}`, 'error')
     } finally {
-      if (abortControllerRef.current === controller) abortControllerRef.current = null
-      setIsFetching(false)
+      finishWorkspaceAnalysis('voc', analysis.requestId)
     }
   }
 
@@ -229,25 +241,33 @@ export default function VocAmazonReviewsWorkspace() {
       showToast(`请先配置 VOC AI：${profileValidation}`, 'error')
       return
     }
-    const controller = new AbortController()
-    abortControllerRef.current = controller
+    const analysis = startWorkspaceAnalysis('voc')
+    const controller = analysis.controller
+    setVocDraft({
+      analysisStatus: 'running',
+      analysisRequestId: analysis.requestId,
+      analysisStartedAt: Date.now(),
+      analysisOperation: 'analyze',
+    })
     setError('')
-    setIsAnalyzing(true)
     setStatusText('VOC AI 分析中')
     try {
       const prompt = buildVocAnalysisPrompt(reviewsEnvelope, productName, localSummary)
       const result = await callVocAnalysisApi(vocProfile, prompt, controller.signal)
+      if (!isWorkspaceAnalysisCurrent('voc', analysis.requestId)) return
       setAiReport(result)
+      setVocDraft({ analysisStatus: 'done', analysisRequestId: null, analysisOperation: null })
       setStatusText('VOC AI 分析完成')
       showToast('VOC AI 分析已完成', 'success')
     } catch (err) {
       if (controller.signal.aborted) return
       const message = err instanceof Error ? err.message : String(err)
-      setError(message)
+      if (isWorkspaceAnalysisCurrent('voc', analysis.requestId)) {
+        setVocDraft({ error: message, analysisStatus: 'error', analysisRequestId: null, analysisOperation: null })
+      }
       showToast(`VOC AI 分析失败：${message}`, 'error')
     } finally {
-      if (abortControllerRef.current === controller) abortControllerRef.current = null
-      setIsAnalyzing(false)
+      finishWorkspaceAnalysis('voc', analysis.requestId)
     }
   }
 

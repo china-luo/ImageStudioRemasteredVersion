@@ -4,9 +4,14 @@ import { CloseIcon } from '../icons'
 type PlannerReferenceImageGridProps = {
   images: InputImage[]
   onRemove: (index: number) => void
+  disabled?: boolean
 }
 
-export default function PlannerReferenceImageGrid({ images, onRemove }: PlannerReferenceImageGridProps) {
+export default function PlannerReferenceImageGrid({
+  images,
+  onRemove,
+  disabled = false,
+}: PlannerReferenceImageGridProps) {
   return (
     <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(64px,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,72px)]">
       {images.map((image, index) => (
@@ -21,7 +26,8 @@ export default function PlannerReferenceImageGrid({ images, onRemove }: PlannerR
           <button
             type="button"
             onClick={() => onRemove(index)}
-            className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-100 transition hover:bg-red-500 sm:opacity-0 sm:group-hover:opacity-100"
+            disabled={disabled}
+            className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-100 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-black/25 disabled:text-white/50 sm:opacity-0 sm:group-hover:opacity-100"
             aria-label={`删除参考图 ${index + 1}`}
           >
             <CloseIcon className="h-3.5 w-3.5" />
