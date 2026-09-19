@@ -270,14 +270,6 @@ export function getStyleGenerationFailureDetail(err: unknown): string {
   return summarizeGenerationError(err)
 }
 
-export function updateDraft<K extends keyof AmazonPromptDraft>(
-  draft: AmazonPromptDraft,
-  key: K,
-  value: AmazonPromptDraft[K],
-) {
-  return { ...draft, [key]: value }
-}
-
 export function isAbortError(err: unknown): boolean {
   return (
     (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') ||

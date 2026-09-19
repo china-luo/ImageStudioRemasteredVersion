@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { putAmazonPlannerSession } from '../../lib/db'
 import { storeImage } from '../../lib/db'
 import { callImageApi } from '../../lib/api'
-import { callAmazonPlannerApi, callAmazonProductExtractionApi } from '../../lib/listingPlannerApi'
+import { callAmazonPlannerApi } from '../../lib/listingPlannerApi'
 import type { PlannerApiResult } from '../../lib/listingPlannerApi'
 import { buildAmazonStyleCandidatePrompt } from '../../lib/listingPlanner'
 import { prepareReferenceImagePayload } from '../../lib/referenceImagePayload'
@@ -44,18 +44,6 @@ export async function requestAmazonPlannerPlan(options: {
   onStage?: (stage: 'requesting' | 'parsing') => void
 }) {
   return callAmazonPlannerApi(options)
-}
-
-export async function requestAmazonProductExtraction(options: {
-  listingText: string
-  profile: ApiProfile
-  referenceImageDataUrls: string[]
-  platform: CommercePlannerPlatform
-  marketplaceId: AmazonMarketplaceId
-  signal: AbortSignal
-  onStage?: (stage: 'requesting' | 'parsing') => void
-}) {
-  return callAmazonProductExtractionApi(options)
 }
 
 export async function requestPlannerStyleImage(options: {
@@ -137,23 +125,6 @@ export async function createAmazonPlannerPlan(
     signal: options.signal,
   })
   const result = await requestAmazonPlannerPlan({ ...options, referenceImageDataUrls: referencePayload.dataUrls })
-  return { result, referencePayloadNotice: referencePayload.notice }
-}
-
-export async function extractAmazonProductInfo(
-  options: Omit<Parameters<typeof requestAmazonProductExtraction>[0], 'referenceImageDataUrls'> & {
-    referenceImageDataUrls: string[]
-    onStage?: (stage: 'preparing' | 'requesting' | 'parsing') => void
-  },
-) {
-  options.onStage?.('preparing')
-  const referencePayload = await prepareReferenceImagePayload(options.referenceImageDataUrls, {
-    signal: options.signal,
-  })
-  const result = await requestAmazonProductExtraction({
-    ...options,
-    referenceImageDataUrls: referencePayload.dataUrls,
-  })
   return { result, referencePayloadNotice: referencePayload.notice }
 }
 

@@ -1,7 +1,8 @@
 import type { AmazonPlannerSession, TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
 
 const DB_NAME = 'amazon-image-studio'
-const DB_VERSION = 3
+const DB_VERSION = 4
+const PLANNER_HISTORY_RESET_VERSION = 4
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'
 const STORE_THUMBNAILS = 'thumbnails'
@@ -17,6 +18,7 @@ function openDB(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result
+      const oldVersion = (e as IDBVersionChangeEvent).oldVersion
       if (!db.objectStoreNames.contains(STORE_TASKS)) {
         db.createObjectStore(STORE_TASKS, { keyPath: 'id' })
       }
@@ -28,6 +30,13 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_AMAZON_PLANNER_SESSIONS)) {
         db.createObjectStore(STORE_AMAZON_PLANNER_SESSIONS, { keyPath: 'id' })
+      }
+      if (
+        oldVersion > 0 &&
+        oldVersion < PLANNER_HISTORY_RESET_VERSION &&
+        db.objectStoreNames.contains(STORE_AMAZON_PLANNER_SESSIONS)
+      ) {
+        req.transaction?.objectStore(STORE_AMAZON_PLANNER_SESSIONS).clear()
       }
     }
     req.onsuccess = () => resolve(req.result)

@@ -10,7 +10,7 @@ import {
   normalizeSettings,
   validateApiProfile,
 } from '../lib/apiProfiles'
-import { DEFAULT_AMAZON_PROMPT_DRAFT, type AmazonPromptDraft } from '../lib/amazonPrompt'
+import { type AmazonPromptDraft } from '../lib/amazonPrompt'
 import {
   buildAmazonAPlusPlanPrompt,
   buildAmazonPlanPrompt,
@@ -64,10 +64,10 @@ import {
 import PlannerHistoryDrawer from './planner/PlannerHistoryDrawer'
 import PlannerHeader from './planner/PlannerHeader'
 import PlannerInputPanel from './planner/PlannerInputPanel'
+import PlannerProductSummary from './planner/PlannerProductSummary'
 import PlannerReferenceImageGrid from './planner/PlannerReferenceImageGrid'
 import {
   createAmazonPlannerPlan,
-  extractAmazonProductInfo,
   generatePlannerStyleImages,
   retryPlannerStyleImage,
   useAmazonPlannerController,
@@ -95,7 +95,6 @@ import {
   isAbortError,
   sortPlannerSessions,
   toSessionDraft,
-  updateDraft,
   upsertStyleImageState,
   type APlusModuleSpecsByType,
   type PlannerActionProgress,
@@ -106,6 +105,8 @@ import {
   type StylePreviewState,
   type WorkflowStepStatus,
 } from './planner/plannerHelpers'
+
+import { readPlannerWorkspaceDraft, savePlannerWorkspaceDraft } from './planner/plannerWorkspaceDraft'
 
 const FIELD_CLASS =
   'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
@@ -137,53 +138,146 @@ export default function AmazonPlanner() {
   const plannerAbortControllerRef = useRef<AbortController | null>(null)
   const styleAbortControllerRef = useRef<AbortController | null>(null)
   const styleSectionRef = useRef<HTMLDivElement | null>(null)
-  const [draft, setDraft] = useState<AmazonPromptDraft>(DEFAULT_AMAZON_PROMPT_DRAFT)
-  const [resolution, setResolution] = useState<'2k' | '4k'>('2k')
-  const [plannerPlatform, setPlannerPlatform] = useState<CommercePlannerPlatform>('amazon')
-  const [marketplaceId, setMarketplaceId] = useState<AmazonMarketplaceId>(DEFAULT_AMAZON_MARKETPLACE_ID)
-  const [plannerMode, setPlannerMode] = useState<AmazonPlannerMode>('listing')
-  const [tiktokDesignType, setTiktokDesignType] = useState<TiktokDesignType>('main')
-  const [aPlusType, setAPlusType] = useState<APlusContentType>('standard-large')
-  const [aPlusModuleSpecsByType, setAPlusModuleSpecsByType] = useState<APlusModuleSpecsByType>({})
-  const [listingText, setListingText] = useState('')
-  const [imagePlans, setImagePlans] = useState<AmazonImagePlan[]>([])
-  const [aPlusPlans, setAPlusPlans] = useState<AmazonAPlusPlan[]>([])
+  const [workspaceDraft] = useState(readPlannerWorkspaceDraft)
+  const workspaceSaveErrorRef = useRef(false)
+  const [draft, setDraft] = useState<AmazonPromptDraft>(workspaceDraft.draft)
+  const [resolution, setResolution] = useState<'2k' | '4k'>(workspaceDraft.resolution)
+  const [plannerPlatform, setPlannerPlatform] = useState<CommercePlannerPlatform>(workspaceDraft.plannerPlatform)
+  const [marketplaceId, setMarketplaceId] = useState<AmazonMarketplaceId>(workspaceDraft.marketplaceId)
+  const [plannerMode, setPlannerMode] = useState<AmazonPlannerMode>(workspaceDraft.plannerMode)
+  const [tiktokDesignType, setTiktokDesignType] = useState<TiktokDesignType>(workspaceDraft.tiktokDesignType)
+  const [aPlusType, setAPlusType] = useState<APlusContentType>(workspaceDraft.aPlusType)
+  const [aPlusModuleSpecsByType, setAPlusModuleSpecsByType] = useState<APlusModuleSpecsByType>(
+    workspaceDraft.aPlusModuleSpecsByType,
+  )
+  const [listingText, setListingText] = useState(workspaceDraft.listingText)
+  const [imagePlans, setImagePlans] = useState<AmazonImagePlan[]>(workspaceDraft.imagePlans)
+  const [aPlusPlans, setAPlusPlans] = useState<AmazonAPlusPlan[]>(workspaceDraft.aPlusPlans)
   const [seriesStyleGuides, setSeriesStyleGuides] = useState<{
     listing: string
     aplus: string
     tiktokMain: string
     tiktokDetail: string
-  }>({
-    listing: '',
-    aplus: '',
-    tiktokMain: '',
-    tiktokDetail: '',
-  })
-  const [styleCandidates, setStyleCandidates] = useState<AmazonStyleCandidate[]>([])
-  const [styleImages, setStyleImages] = useState<StyleImageState[]>([])
+  }>(workspaceDraft.seriesStyleGuides)
+  const [styleCandidates, setStyleCandidates] = useState<AmazonStyleCandidate[]>(workspaceDraft.styleCandidates)
+  const [styleImages, setStyleImages] = useState<StyleImageState[]>(workspaceDraft.styleImages)
   const styleImagesRef = useRef<StyleImageState[]>([])
-  const [selectedStyleIndex, setSelectedStyleIndex] = useState<number | null>(null)
-  const [styleDensityMode, setStyleDensityMode] = useState<AmazonStyleDensityMode>('rich')
+  const [selectedStyleIndex, setSelectedStyleIndex] = useState<number | null>(workspaceDraft.selectedStyleIndex)
+  const [styleDensityMode, setStyleDensityMode] = useState<AmazonStyleDensityMode>(workspaceDraft.styleDensityMode)
   const [stylePreview, setStylePreview] = useState<StylePreviewState | null>(null)
   const [isGeneratingStyleImages, setIsGeneratingStyleImages] = useState(false)
-  const [styleError, setStyleError] = useState('')
-  const [selectedPlanIndex, setSelectedPlanIndex] = useState<number | null>(null)
-  const [selectedAPlusPlanIndex, setSelectedAPlusPlanIndex] = useState<number | null>(null)
+  const [styleError, setStyleError] = useState(workspaceDraft.styleError)
+  const [selectedPlanIndex, setSelectedPlanIndex] = useState<number | null>(workspaceDraft.selectedPlanIndex)
+  const [selectedAPlusPlanIndex, setSelectedAPlusPlanIndex] = useState<number | null>(
+    workspaceDraft.selectedAPlusPlanIndex,
+  )
   const [plannerSessions, setPlannerSessions] = useState<AmazonPlannerSession[]>([])
-  const [currentPlannerSessionId, setCurrentPlannerSessionId] = useState<string | null>(null)
+  const [currentPlannerSessionId, setCurrentPlannerSessionId] = useState<string | null>(
+    workspaceDraft.currentPlannerSessionId,
+  )
   const [showPlannerHistory, setShowPlannerHistory] = useState(false)
   const [isPlanning, setIsPlanning] = useState(false)
-  const [isExtractingProductInfo, setIsExtractingProductInfo] = useState(false)
   const [planningStage, setPlanningStage] = useState<'idle' | 'preparing' | 'requesting' | 'parsing'>('idle')
-  const [plannerError, setPlannerError] = useState('')
+  const [plannerError, setPlannerError] = useState(workspaceDraft.plannerError)
   const [isPreparingReferencePayload, setIsPreparingReferencePayload] = useState(false)
   const [referencePayloadNotice, setReferencePayloadNotice] = useState('')
-  const [actionProgress, setActionProgress] = useState<PlannerActionProgressMap>({})
-  const [batchSelectedIndexes, setBatchSelectedIndexes] = useState<number[]>([])
+  const [actionProgress, setActionProgress] = useState<PlannerActionProgressMap>(workspaceDraft.actionProgress)
+  const [batchSelectedIndexes, setBatchSelectedIndexes] = useState<number[]>(workspaceDraft.batchSelectedIndexes)
   const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
-  const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>({})
-  const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(null)
-  const isPlannerRequestBusy = isPlanning || isExtractingProductInfo
+  const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>(workspaceDraft.promptOverrides)
+  const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(workspaceDraft.promptEditor)
+  useEffect(() => {
+    try {
+      savePlannerWorkspaceDraft({
+        draft,
+        resolution,
+        plannerPlatform,
+        marketplaceId,
+        plannerMode,
+        tiktokDesignType,
+        aPlusType,
+        aPlusModuleSpecsByType,
+        listingText,
+        imagePlans,
+        aPlusPlans,
+        seriesStyleGuides,
+        styleCandidates,
+        styleImages,
+        selectedStyleIndex,
+        styleDensityMode,
+        styleError,
+        selectedPlanIndex,
+        selectedAPlusPlanIndex,
+        currentPlannerSessionId,
+        plannerError,
+        actionProgress,
+        batchSelectedIndexes,
+        promptOverrides,
+        promptEditor,
+      })
+      workspaceSaveErrorRef.current = false
+    } catch {
+      if (!workspaceSaveErrorRef.current) {
+        showToast('当前策划自动保存失败，请检查浏览器存储空间。', 'error')
+        workspaceSaveErrorRef.current = true
+      }
+    }
+  }, [
+    draft,
+    resolution,
+    plannerPlatform,
+    marketplaceId,
+    plannerMode,
+    tiktokDesignType,
+    aPlusType,
+    aPlusModuleSpecsByType,
+    listingText,
+    imagePlans,
+    aPlusPlans,
+    seriesStyleGuides,
+    styleCandidates,
+    styleImages,
+    selectedStyleIndex,
+    styleDensityMode,
+    styleError,
+    selectedPlanIndex,
+    selectedAPlusPlanIndex,
+    currentPlannerSessionId,
+    plannerError,
+    actionProgress,
+    batchSelectedIndexes,
+    promptOverrides,
+    promptEditor,
+    showToast,
+  ])
+
+  useEffect(() => {
+    let cancelled = false
+    const images = workspaceDraft.styleImages.filter((image) => image.status === 'done' && image.imageId)
+    void Promise.all(
+      images.map(async (image) => ({
+        imageId: image.imageId,
+        dataUrl: await ensureImageCached(image.imageId!).catch(() => null),
+      })),
+    ).then((restored) => {
+      if (cancelled || !restored.length) return
+      const byId = new Map(restored.map((image) => [image.imageId, image.dataUrl]))
+      setStyleImages((current) =>
+        current.map((image) => {
+          if (image.status !== 'done' || image.dataUrl || !byId.has(image.imageId)) return image
+          const dataUrl = byId.get(image.imageId)
+          return dataUrl
+            ? { ...image, dataUrl }
+            : { ...image, status: 'error', error: '风格板图片不存在，请重新生成。' }
+        }),
+      )
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceDraft])
+
+  const isPlannerRequestBusy = isPlanning
   const activeWorkflow: TaskWorkflow =
     plannerPlatform === 'tiktok'
       ? tiktokDesignType === 'detail'
@@ -286,16 +380,6 @@ export default function AmazonPlanner() {
   const plannerProfileValidation = plannerProfile
     ? validateApiProfile(plannerProfile)
     : '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置'
-  const extractionInputSignature = [
-    listingText,
-    plannerPlatform,
-    marketplaceId,
-    plannerProfile?.id ?? '',
-    plannerProfile?.model ?? '',
-    inputImages.map((image) => image.id).join(','),
-  ].join('\u0001')
-  const extractionInputSignatureRef = useRef(extractionInputSignature)
-  extractionInputSignatureRef.current = extractionInputSignature
   const plannerApiLabel = plannerProfile ? getApiModeLabel(plannerProfile.apiMode) : 'Responses API'
   const plannerModelOptions = [
     ...(plannerProfile?.model &&
@@ -1156,77 +1240,6 @@ export default function AmazonPlanner() {
     )
   }
 
-  const runExtractProductInfo = async () => {
-    if (plannerAbortControllerRef.current) {
-      showToast('AI 正在处理中', 'info')
-      return
-    }
-    if (!listingText.trim()) {
-      showToast('请先粘贴标题和五点描述', 'error')
-      return
-    }
-    if (!plannerProfile) {
-      setPlannerError(
-        '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置。\n\n请在设置 -> API 中创建或选择一个文本模型配置。',
-      )
-      showToast('AI 策划配置缺失', 'error')
-      return
-    }
-    if (plannerProfileValidation) {
-      setPlannerError(`AI 策划配置「${plannerProfile.name}」不完整：${plannerProfileValidation}`)
-      showToast('AI 策划配置不完整', 'error')
-      return
-    }
-
-    const controller = new AbortController()
-    plannerAbortControllerRef.current = controller
-    setIsExtractingProductInfo(true)
-    setPlanningStage(inputImages.length > 0 ? 'preparing' : 'requesting')
-    setPlannerError('')
-    try {
-      setIsPreparingReferencePayload(inputImages.length > 0)
-      setReferencePayloadNotice('')
-      const workflow = await extractAmazonProductInfo({
-        listingText,
-        profile: plannerProfile,
-        referenceImageDataUrls: inputImages.map((image) => image.dataUrl),
-        platform: plannerPlatform,
-        marketplaceId,
-        signal: controller.signal,
-        onStage: (stage) => {
-          setPlanningStage(stage)
-          if (stage !== 'preparing') setIsPreparingReferencePayload(false)
-        },
-      })
-      if (controller.signal.aborted) return
-      if (extractionInputSignatureRef.current !== extractionInputSignature) {
-        setPlannerError('提取完成前输入已发生变化，旧结果未填入。请使用当前内容重新提取。')
-        showToast('输入已变化，未应用旧的提取结果', 'info')
-        return
-      }
-      const nextDraft: AmazonPromptDraft = { ...draft, ...workflow.result }
-      setDraft(nextDraft)
-      setReferencePayloadNotice(workflow.referencePayloadNotice)
-      try {
-        await savePlannerSession({ draft: toSessionDraft(nextDraft) })
-      } catch (err) {
-        showToast(`策划历史保存失败：${err instanceof Error ? err.message : String(err)}`, 'error')
-      }
-      showToast('产品信息已填入下方，可继续 AI 策划', 'success')
-    } catch (err) {
-      if (controller.signal.aborted || isAbortError(err)) return
-      setPlannerError(getPlannerFailureDetail(err))
-      showToast('产品信息提取失败，请查看详情', 'error')
-    } finally {
-      setIsPreparingReferencePayload(false)
-      if (plannerAbortControllerRef.current === controller) {
-        plannerAbortControllerRef.current = null
-        setIsExtractingProductInfo(false)
-        setPlanningStage('idle')
-      }
-    }
-  }
-
   const runCreateAiPlan = async () => {
     if (plannerAbortControllerRef.current) {
       showToast('AI 策划正在进行中', 'info')
@@ -1365,13 +1378,11 @@ export default function AmazonPlanner() {
   const stopAiPlan = () => {
     const controller = plannerAbortControllerRef.current
     if (!controller) return
-    const stoppedExtraction = isExtractingProductInfo
     controller.abort()
     plannerAbortControllerRef.current = null
     setIsPlanning(false)
-    setIsExtractingProductInfo(false)
     setPlanningStage('idle')
-    showToast(stoppedExtraction ? '产品信息提取已停止' : 'AI 策划已停止', 'info')
+    showToast('AI 策划已停止', 'info')
   }
 
   const selectStyleCandidate = (index: number) => {
@@ -1635,6 +1646,8 @@ export default function AmazonPlanner() {
     setCurrentPlannerSessionId(session.id)
     setShowPlannerHistory(false)
     setActionProgress({})
+    setPromptOverrides({})
+    setPromptEditor(null)
     showToast('策划历史已恢复', 'success')
   }
 
@@ -1780,9 +1793,7 @@ export default function AmazonPlanner() {
               plannerModelOptions={plannerModelOptions}
               onPlannerModelChange={changePlannerModel}
               isPlanning={isPlanning}
-              isExtractingProductInfo={isExtractingProductInfo}
               planningStage={planningStage}
-              onExtractProductInfo={() => void runExtractProductInfo()}
               onConfirmCreatePlan={confirmCreateAiPlan}
               onStopPlan={stopAiPlan}
               hasListingContent={Boolean(listingText.trim() || imagePlans.length > 0 || aPlusPlans.length > 0)}
@@ -1902,98 +1913,7 @@ export default function AmazonPlanner() {
             />
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <label>
-              <span className={LABEL_CLASS}>商品标题</span>
-              <input
-                value={draft.productTitle}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'productTitle', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例：Stainless Steel Insulated Travel Mug"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>类目</span>
-              <input
-                value={draft.category}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'category', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例：Kitchen / Sports / Home"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>品牌 / 型号</span>
-              <input
-                value={draft.brand}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'brand', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="只填商品真实品牌或型号"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>颜色</span>
-              <input
-                value={draft.color}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'color', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例：matte black"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>材质 / 表面工艺</span>
-              <input
-                value={draft.material}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'material', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例：304 stainless steel, silicone lid"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>目标人群</span>
-              <input
-                value={draft.audience}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'audience', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例：commuters, office workers"
-              />
-            </label>
-            <label className="md:col-span-2">
-              <span className={LABEL_CLASS}>卖点</span>
-              <textarea
-                value={draft.sellingPoints}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'sellingPoints', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[86px] resize-y`}
-                placeholder="一行一个卖点，或用分号分隔"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>包装清单</span>
-              <textarea
-                value={draft.packageIncludes}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'packageIncludes', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[76px] resize-y`}
-                placeholder="例：1 mug, 1 lid, 1 straw"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>场景 / 构图</span>
-              <textarea
-                value={draft.scene}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'scene', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[76px] resize-y`}
-                placeholder="例：白底产品构图 / 厨房台面场景 / 尺寸标注信息图"
-              />
-            </label>
-            <label className="md:col-span-2">
-              <span className={LABEL_CLASS}>禁用元素</span>
-              <input
-                value={draft.forbidden}
-                onChange={(event) => setDraft((current) => updateDraft(current, 'forbidden', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例：do not show phone, laptop, gift box"
-              />
-            </label>
-          </div>
+          <PlannerProductSummary draft={draft} />
         </div>
 
         <div className="p-4 sm:p-5">

@@ -29,18 +29,14 @@ interface PlannerApiPayload {
     color?: string
     material?: string
     audience?: string
-    packageIncludes?: string
+    packageIncludes?: unknown
   }
   sellingPoints?: string[]
-  scene?: string
-  forbidden?: string
   seriesStyleGuide?: string
   styleCandidates?: AmazonStyleCandidate[]
   imagePlans?: Array<Partial<AmazonImagePlan>>
   aPlusPlans?: Array<Partial<AmazonAPlusPlan>>
 }
-
-export type AmazonProductExtractionResult = Omit<AmazonPromptDraft, 'kind'>
 
 export interface PlannerApiResult {
   mode: AmazonPlannerMode
@@ -73,25 +69,6 @@ const SELLING_POINTS_SCHEMA = {
   minItems: 1,
   maxItems: 5,
   items: { type: 'string' },
-} as const
-
-const PRODUCT_EXTRACTION_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    product: PRODUCT_SCHEMA,
-    sellingPoints: SELLING_POINTS_SCHEMA,
-    scene: {
-      type: 'string',
-      description: 'Concise product-supported usage scenes or composition suggestions. Use an empty string if unknown.',
-    },
-    forbidden: {
-      type: 'string',
-      description:
-        'Concise product-specific elements or unsupported claims that image generation must avoid. Use an empty string if none are supported by the source.',
-    },
-  },
-  required: ['product', 'sellingPoints', 'scene', 'forbidden'],
 } as const
 
 const CHINESE_LABEL_SCHEMA = {
@@ -320,6 +297,15 @@ function normalizePlan(
   }
 }
 
+function normalizePackageIncludes(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (!Array.isArray(value)) return ''
+  return value
+    .filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
+    .map((item) => item.trim())
+    .join('\n')
+}
+
 function normalizeParsedListing(payload: PlannerApiPayload): ListingParseResult {
   const product = payload.product ?? {}
   const sellingPoints = Array.isArray(payload.sellingPoints)
@@ -340,7 +326,7 @@ function normalizeParsedListing(payload: PlannerApiPayload): ListingParseResult 
       color: product.color?.trim() ?? '',
       material: product.material?.trim() ?? '',
       audience: product.audience?.trim() ?? '',
-      packageIncludes: product.packageIncludes?.trim() ?? '',
+      packageIncludes: normalizePackageIncludes(product.packageIncludes),
       sellingPoints: sellingPoints.join('\n'),
     },
   }
@@ -680,53 +666,6 @@ function buildResponsesPlannerInput(text: string, referenceImageDataUrls: string
   ]
 }
 
-function buildProductExtractionInstructions(platform: CommercePlannerPlatform, marketplaceId?: AmazonMarketplaceId) {
-  const marketplace = getAmazonMarketplace(marketplaceId)
-  const channel = platform === 'tiktok' ? 'TikTok Shop US' : `${marketplace.label} (${marketplace.domain})`
-  return [
-    'You extract verified product information for a commerce image-planning workflow.',
-    `Target sales channel: ${channel}.`,
-    'Use the supplied listing text and optional product reference images as the only factual sources.',
-    'Extract the product title, category, real brand/model, color, material or surface finish, target audience, package contents, and up to five selling points.',
-    'Infer conservatively. Never invent a brand, model, material, dimensions, functions, accessories, package contents, certifications, performance claims, or target audience unsupported by the source.',
-    'Use an empty string when a field is unknown. Keep selling points factual and concise.',
-    'For scene, suggest concise usage scenes or compositions that follow directly from the product facts and target channel.',
-    'For forbidden, list only product-specific misleading elements or unsupported claims that image generation should avoid; otherwise return an empty string.',
-    'Return a valid JSON object only. Do not return image plans, style candidates, Markdown fences, comments, or explanatory text.',
-  ].join('\n')
-}
-
-function buildProductExtractionInputText(
-  listingText: string,
-  platform: CommercePlannerPlatform,
-  marketplaceId?: AmazonMarketplaceId,
-) {
-  const marketplace = getAmazonMarketplace(marketplaceId)
-  const channel = platform === 'tiktok' ? 'TikTok Shop US' : `${marketplace.label} (${marketplace.domain})`
-  return [
-    `Extract the product information below for ${channel}.`,
-    'Reference images, when attached, may be used to verify appearance, color, structure, material cues, and included items.',
-    '',
-    listingText,
-  ].join('\n')
-}
-
-function normalizeProductExtractionPayload(payload: PlannerApiPayload): AmazonProductExtractionResult {
-  const parsed = normalizeParsedListing(payload)
-  return {
-    productTitle: parsed.title,
-    category: parsed.inferred.category ?? '',
-    brand: parsed.inferred.brand ?? '',
-    color: parsed.inferred.color ?? '',
-    material: parsed.inferred.material ?? '',
-    audience: parsed.inferred.audience ?? '',
-    sellingPoints: parsed.bullets.join('\n'),
-    packageIncludes: parsed.inferred.packageIncludes ?? '',
-    scene: typeof payload.scene === 'string' ? payload.scene.trim() : '',
-    forbidden: typeof payload.forbidden === 'string' ? payload.forbidden.trim() : '',
-  }
-}
-
 function buildChatPlannerSchemaGuide(
   mode: AmazonPlannerMode,
   aPlusType: APlusContentType,
@@ -735,12 +674,13 @@ function buildChatPlannerSchemaGuide(
   marketplaceId?: AmazonMarketplaceId,
   aPlusModuleSpecs?: AmazonAPlusModuleSpec[],
 ) {
-  const productFields = 'product { title, category, color, material, audience, packageIncludes }'
+  const productFields =
+    'product { title, category, brand, color, material, audience, packageIncludes }, sellingPoints string[]'
   const styleFields = 'seriesStyleGuide string, styleCandidates array of exactly 3 style options'
   if (platform === 'tiktok') {
     const slots = getTikTokSlots(tiktokDesignType)
     return [
-      `Return JSON with: ${productFields}, sellingPoints string[], ${styleFields}, imagePlans array.`,
+      `Return JSON with: ${productFields}, ${styleFields}, imagePlans array.`,
       `imagePlans must contain exactly ${slots.length} items in this order: ${slots.join(', ')}.`,
       'Each imagePlans item must include: slot, label, planMarkdown, prompt, negativePrompt.',
     ].join('\n')
@@ -750,7 +690,7 @@ function buildChatPlannerSchemaGuide(
     const specs = normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecs)
     const marketplace = getAmazonMarketplace(marketplaceId)
     return [
-      `Return JSON with: ${productFields}, sellingPoints string[], ${styleFields}, aPlusPlans array.`,
+      `Return JSON with: ${productFields}, ${styleFields}, aPlusPlans array.`,
       `aPlusPlans must contain exactly ${specs.length} items in this order: ${specs.map((spec) => spec.slot).join(', ')}.`,
       'Each aPlusPlans item must include: slot, label, moduleType, planMarkdown, textTitle, textBody, prompt, negativePrompt.',
       `textTitle/textBody and visible on-image copy must use natural ${marketplace.copyLanguage} for ${marketplace.domain}; prompt and negativePrompt should remain English.`,
@@ -759,7 +699,7 @@ function buildChatPlannerSchemaGuide(
 
   const marketplace = getAmazonMarketplace(marketplaceId)
   return [
-    `Return JSON with: ${productFields}, sellingPoints string[], ${styleFields}, imagePlans array.`,
+    `Return JSON with: ${productFields}, ${styleFields}, imagePlans array.`,
     'imagePlans must contain exactly 7 items in this order: MAIN, PT01, PT02, PT03, PT04, PT05, PT06.',
     'Each imagePlans item must include: slot, label, planMarkdown, prompt, negativePrompt.',
     `Visible on-image copy inside prompt must use natural ${marketplace.copyLanguage} for ${marketplace.domain}; prompt and negativePrompt should remain English.`,
@@ -780,87 +720,6 @@ function buildChatPlannerSystemPrompt(
     'Return a valid JSON object only. Do not output Markdown fences, comments, or any text outside the JSON object.',
     buildChatPlannerSchemaGuide(mode, aPlusType, platform, tiktokDesignType, marketplaceId, aPlusModuleSpecs),
   ].join('\n\n')
-}
-
-export async function callAmazonProductExtractionApi(options: {
-  listingText: string
-  profile: ApiProfile
-  referenceImageDataUrls?: string[]
-  model?: string
-  platform?: CommercePlannerPlatform
-  marketplaceId?: AmazonMarketplaceId
-  signal?: AbortSignal
-  onStage?: (stage: 'requesting' | 'parsing') => void
-}): Promise<AmazonProductExtractionResult> {
-  const linkedAbort = createLinkedAbortController(options.profile.timeout, options.signal)
-  const useChatCompletions = options.profile.apiMode === 'chat'
-  const model = options.model?.trim() || resolveLlmModel(options.profile, useChatCompletions)
-  const platform = options.platform ?? 'amazon'
-  const marketplaceId = normalizeAmazonMarketplaceId(options.marketplaceId)
-  const referenceImageDataUrls = options.referenceImageDataUrls ?? []
-  const instructions = buildProductExtractionInstructions(platform, marketplaceId)
-  const inputText = buildProductExtractionInputText(options.listingText, platform, marketplaceId)
-  const createRequestBody = (useChat: boolean) =>
-    useChat
-      ? {
-          model,
-          messages: [
-            { role: 'system', content: instructions },
-            { role: 'user', content: buildChatPlannerUserContent(inputText, referenceImageDataUrls) },
-          ],
-          response_format: { type: 'json_object' },
-          stream: false,
-        }
-      : {
-          model,
-          instructions,
-          input: buildResponsesPlannerInput(inputText, referenceImageDataUrls),
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'commerce_product_information',
-              strict: true,
-              schema: PRODUCT_EXTRACTION_SCHEMA,
-            },
-          },
-          stream: false,
-        }
-  const sendRequest = (useChat: boolean) =>
-    postLlmRequest({
-      profile: options.profile,
-      signal: linkedAbort.controller.signal,
-      useChatCompletions: useChat,
-      body: createRequestBody(useChat),
-    })
-
-  try {
-    options.onStage?.('requesting')
-    let response = await sendRequest(useChatCompletions)
-    let retriedAsChat = false
-    if (!useChatCompletions && response.status === 524) {
-      retriedAsChat = true
-      response = await sendRequest(true)
-    }
-    await assertLlmResponseOk(
-      response,
-      response.status === 524
-        ? `HTTP 524：上游产品信息提取接口处理超时${retriedAsChat ? '，并已自动改用 Chat Completions 重试' : ''}。请稍后重试。`
-        : undefined,
-    )
-    options.onStage?.('parsing')
-    const text = await readLlmResponseText(response, retriedAsChat || useChatCompletions, {
-      emptyError: '产品信息提取接口未返回文本内容',
-      allowNonJsonText: false,
-    })
-    return normalizeProductExtractionPayload(parsePlannerPayload(text))
-  } catch (error) {
-    if (!options.signal?.aborted && linkedAbort.controller.signal.aborted) {
-      throw new Error(`产品信息提取超过 ${options.profile.timeout} 秒，已自动停止。请检查接口状态或提高超时时间。`)
-    }
-    throw error
-  } finally {
-    linkedAbort.cleanup()
-  }
 }
 
 export async function callAmazonPlannerApi(options: {
