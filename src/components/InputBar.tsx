@@ -110,7 +110,7 @@ function AtImageOptionThumb({ option }: { option: AtImageOption }) {
   )
 }
 
-export default function InputBar() {
+export default function InputBar({ inline = false, projectId }: { inline?: boolean; projectId?: string }) {
   const prompt = useStore((s) => s.prompt)
   const setPrompt = useStore((s) => s.setPrompt)
   const inputImages = useStore((s) => s.inputImages)
@@ -314,8 +314,20 @@ export default function InputBar() {
       : ''
   const promptPlaceholder = '描述你想生成的图片，可输入 @ 来指定参考图...'
   const submitCurrentMode = useCallback(() => {
+    if (projectId) {
+      const state = useStore.getState()
+      const pending = state.pendingTaskCategory
+      const matches =
+        pending?.category.projectId === projectId &&
+        (pending.mode === 'next-submit' || pending.prompt.trim() === state.prompt.trim())
+      if (!matches)
+        state.setPendingTaskCategory({
+          mode: 'next-submit',
+          category: { workflow: 'gallery', projectId, projectSlotId: 'manual', amazonSlot: '自由生成' },
+        })
+    }
     void submitTask()
-  }, [])
+  }, [projectId])
   const syncPromptFromContentEditable = useCallback(() => {
     const el = textareaRef.current
     if (!el) return
@@ -1616,7 +1628,11 @@ export default function InputBar() {
 
       <div
         data-input-bar
-        className="home-input-dock pointer-events-none fixed bottom-4 left-1/2 z-30 w-full max-w-4xl -translate-x-1/2 px-3 transition-all duration-300 sm:bottom-6 sm:px-4 lg:bottom-6 lg:left-auto lg:top-20 lg:flex lg:max-w-none lg:translate-x-0 lg:flex-col lg:px-0"
+        className={
+          inline
+            ? 'studio-inline-input'
+            : 'home-input-dock pointer-events-none fixed bottom-4 left-1/2 z-30 w-full max-w-4xl -translate-x-1/2 px-3 transition-all duration-300 sm:bottom-6 sm:px-4 lg:bottom-6 lg:left-auto lg:top-20 lg:flex lg:max-w-none lg:translate-x-0 lg:flex-col lg:px-0'
+        }
       >
         {selectedTaskIds.length > 0 && (
           <SelectionToolbar

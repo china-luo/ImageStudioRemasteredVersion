@@ -26,6 +26,9 @@ import {
   putTask,
 } from './db'
 import { deleteUnreferencedImageIds, useStore } from '../store'
+import { getAllGenerationProjects, putGenerationProject, clearGenerationProjects } from './db'
+import { rememberActiveProject, PROJECT_DATA_EVENT, PROJECT_JOURNAL_KEY } from './generationProjects'
+import { PLANNER_WORKSPACE_KEY } from '../components/planner/plannerWorkspaceDraft'
 
 export interface ClearOptions {
   clearConfig?: boolean
@@ -46,6 +49,12 @@ export async function clearData(options: ClearOptions = { clearConfig: true, cle
   const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, showToast } = useStore.getState()
 
   if (options.clearTasks) {
+    await clearGenerationProjects()
+    if (typeof sessionStorage !== 'undefined') {
+      rememberActiveProject(null)
+      sessionStorage.removeItem(PLANNER_WORKSPACE_KEY)
+      sessionStorage.removeItem(PROJECT_JOURNAL_KEY)
+    }
     await dbClearTasks()
     await dbClearAmazonPlannerSessions()
     await clearImages()
@@ -58,6 +67,7 @@ export async function clearData(options: ClearOptions = { clearConfig: true, cle
     })
     clearInputImages()
     clearMaskDraft()
+    if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event(PROJECT_DATA_EVENT))
   }
 
   if (options.clearConfig) {
@@ -73,6 +83,7 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
   try {
     const tasks = options.exportTasks ? await getAllTasks() : []
     const amazonPlannerSessions = options.exportTasks ? await getAllAmazonPlannerSessions() : []
+    const generationProjects = options.exportTasks ? await getAllGenerationProjects() : []
     const images = options.exportTasks ? await getAllImages() : []
     const { settings, agentConversations } = useStore.getState()
     const exportedAt = Date.now()
@@ -143,7 +154,7 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
     }
 
     const manifest: ExportData = {
-      version: 4,
+      version: 5,
       exportedAt: new Date(exportedAt).toISOString(),
     }
 
@@ -152,6 +163,7 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
       manifest.tasks = tasks
       manifest.agentConversations = agentConversations
       manifest.amazonPlannerSessions = amazonPlannerSessions
+      manifest.generationProjects = generationProjects
       manifest.imageFiles = imageFiles
       manifest.thumbnailFiles = thumbnailFiles
     }
@@ -231,6 +243,9 @@ export async function importData(
       for (const session of data.amazonPlannerSessions ?? []) {
         await putAmazonPlannerSession(session)
       }
+      for (const project of data.generationProjects ?? []) {
+        await putGenerationProject(project)
+      }
 
       const tasks = await getAllTasks()
       useStore.getState().setTasks(tasks)
@@ -251,6 +266,7 @@ export async function importData(
       })
       await deleteUnreferencedImageIds(legacyIntermediateImageIds)
       scheduleThumbnailBackfill(importedImageIds)
+      if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event(PROJECT_DATA_EVENT))
     }
 
     if (options.importConfig && data.settings) {

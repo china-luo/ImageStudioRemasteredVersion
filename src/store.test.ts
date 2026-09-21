@@ -13,21 +13,33 @@ import { resetSecretStoreForTests } from './lib/secretStore'
 import type {
   AgentConversation,
   AmazonPlannerSession,
+  GenerationProject,
   ExportData,
   StoredImage,
   StoredImageThumbnail,
   TaskRecord,
 } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
+import { createGenerationProject } from './lib/generationProjects'
+import { getAllGenerationProjects, putGenerationProject, clearGenerationProjects } from './lib/db'
 vi.mock('./lib/db', () => {
   const tasks = new Map<string, TaskRecord>()
   const amazonPlannerSessions = new Map<string, AmazonPlannerSession>()
+  const generationProjects = new Map<string, GenerationProject>()
   const images = new Map<string, StoredImage>()
   const thumbnails = new Map<string, StoredImageThumbnail>()
   let imageSeq = 0
 
   return {
     CURRENT_THUMBNAIL_VERSION: 2,
+    getAllGenerationProjects: async () => [...generationProjects.values()],
+    putGenerationProject: async (project: GenerationProject) => {
+      generationProjects.set(project.id, project)
+      return project.revision + 1
+    },
+    clearGenerationProjects: async () => {
+      generationProjects.clear()
+    },
     getAllTasks: async () => [...tasks.values()],
     putTask: async (task: TaskRecord) => {
       tasks.set(task.id, task)
@@ -1251,6 +1263,7 @@ describe('data import', () => {
 
 describe('data export and clearing', () => {
   beforeEach(async () => {
+    await clearGenerationProjects()
     await clearAmazonPlannerSessions()
     await clearImages()
     useStore.setState({
@@ -1263,6 +1276,12 @@ describe('data export and clearing', () => {
   })
 
   it('exports Amazon planner session history in the backup manifest', async () => {
+    const project = createGenerationProject()
+    project.name = 'Saved mug project'
+    project.referenceImageIds = ['image-a']
+    project.workspace.promptOverrides = { 'listing:0:MAIN': 'Custom prompt' }
+    project.finals = { 'slot-1': { taskId: 'task-1', imageId: 'style-image-a' } }
+    await putGenerationProject(project)
     const session = amazonPlannerSession({
       id: 'exported-planner-session',
       referenceImageIds: ['image-a'],
@@ -1305,11 +1324,15 @@ describe('data export and clearing', () => {
     const buffer = await blob.arrayBuffer()
     const unzipped = unzipSync(new Uint8Array(buffer))
     const manifest = JSON.parse(strFromU8(unzipped['manifest.json'])) as ExportData
-    expect(manifest.version).toBe(4)
+    expect(manifest.version).toBe(5)
     expect(manifest.amazonPlannerSessions).toEqual([session])
+    expect(manifest.generationProjects).toEqual([project])
     expect(manifest.imageFiles).toHaveProperty('image-a')
     expect(manifest.imageFiles).toHaveProperty('style-image-a')
     expect(clickedDownloads[0]?.download).toContain('amazon-image-studio-backup')
+    await clearGenerationProjects()
+    expect(await importData({ arrayBuffer: async () => buffer } as File, { importTasks: true })).toBe(true)
+    expect(await getAllGenerationProjects()).toEqual([project])
 
     createObjectUrl.mockRestore()
     revokeObjectUrl.mockRestore()
@@ -1326,6 +1349,17 @@ describe('data export and clearing', () => {
     await removeTask(deletedTask)
 
     expect(await (await import('./lib/db')).getImage(plannerImageId)).toBeDefined()
+  })
+
+  it('keeps an inactive project reference when deleting the last task that used it', async () => {
+    const project = createGenerationProject()
+    project.referenceImageIds = ['project-only-reference']
+    await putGenerationProject(project)
+    await putImage({ id: 'project-only-reference', dataUrl: 'data:image/png;base64,AQID', source: 'upload' })
+    const deleted = task({ outputImages: ['project-only-reference'] })
+    useStore.setState({ tasks: [deleted], inputImages: [] })
+    await removeTask(deleted)
+    expect(await (await import('./lib/db')).getImage('project-only-reference')).toBeDefined()
   })
 
   it('strips API keys from exported settings', async () => {

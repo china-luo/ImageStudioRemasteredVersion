@@ -19,6 +19,8 @@ import type {
   ResponsesOutputItem,
 } from './types'
 import { DEFAULT_PARAMS } from './types'
+import { getAllGenerationProjects } from './lib/db'
+import { readProjectJournal } from './lib/generationProjects'
 import {
   createSettingsForApiProfile,
   DEFAULT_SETTINGS,
@@ -207,6 +209,13 @@ function createNextSubmitTaskCategory(task: TaskRecord): NonNullable<TaskRecord[
 
   if (isTiktokTaskWorkflow(workflow)) {
     const category: NonNullable<TaskRecord['category']> = {
+      ...(task.category?.projectId
+        ? {
+            projectId: task.category.projectId,
+            projectSlotId: task.category.projectSlotId,
+            amazonSlot: task.category.amazonSlot,
+          }
+        : {}),
       workflow,
       platform: 'tiktok',
       tiktokDesignType: workflow === 'tiktok-detail' ? 'detail' : 'main',
@@ -221,6 +230,11 @@ function createNextSubmitTaskCategory(task: TaskRecord): NonNullable<TaskRecord[
   const amazonSlot = task.category?.amazonSlot?.trim() || historyCategory.amazonSlot
   const aPlusType = task.category?.aPlusType ?? historyCategory.aPlusType
   const category: NonNullable<TaskRecord['category']> = { workflow }
+  if (task.category?.projectId) {
+    category.projectId = task.category.projectId
+    category.projectSlotId = task.category.projectSlotId
+  }
+  if (task.category?.marketplaceId) category.marketplaceId = task.category.marketplaceId
 
   if (hasExplicitProductTitle || productTitle) category.productTitle = productTitle
   if (amazonSlot) category.amazonSlot = amazonSlot
@@ -577,6 +591,7 @@ export async function deleteImageIfUnreferenced(imageId: string) {
       imageId,
       state: createImageReferenceState(),
       getPlannerSessions: getAllAmazonPlannerSessions,
+      getGenerationProjects: getAllGenerationProjects,
       deleteImage,
       forgetCachedImage,
     })
@@ -1445,6 +1460,10 @@ export async function initStore() {
     agentConversations: useStore.getState().agentConversations,
     agentInputDrafts: Object.values(useStore.getState().agentInputDrafts),
     plannerSessions: await getAllAmazonPlannerSessions(),
+    generationProjects: [
+      ...(await getAllGenerationProjects()),
+      ...[readProjectJournal()].filter((project) => project != null),
+    ],
     collectPlannerSessionImageIds: collectAmazonPlannerSessionImageIds,
   })
   const state = useStore.getState()
@@ -1790,6 +1809,7 @@ export async function deleteUnreferencedImageIds(imageIds: Iterable<string>) {
     candidates: imageIds,
     state: createImageReferenceState(),
     getPlannerSessions: getAllAmazonPlannerSessions,
+    getGenerationProjects: getAllGenerationProjects,
     deleteImage,
     forgetCachedImage,
   })

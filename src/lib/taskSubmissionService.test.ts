@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PARAMS } from '../types'
+import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
 import { createTaskSubmissionService } from './taskSubmissionService'
 
@@ -10,6 +10,8 @@ function createState() {
     tasks: [],
     setTasks: vi.fn(),
     showToast: vi.fn(),
+    clearInputImages: vi.fn(),
+    setPrompt: vi.fn(),
   }
 }
 
@@ -109,5 +111,47 @@ describe('task submission service', () => {
       expect.objectContaining({ id: 'gallery-1', category: { workflow: 'gallery' } }),
     )
     expect(executeTask).toHaveBeenCalledWith('gallery-1')
+    expect(state.clearInputImages).toHaveBeenCalledOnce()
+    expect(state.setPrompt).toHaveBeenCalledWith('')
+  })
+
+  it('preserves project reference inputs and project/slot identity through submit and retry', async () => {
+    const state = createState()
+    const saved: TaskRecord[] = []
+    const service = createTaskSubmissionService({
+      getState: () => state,
+      createId: () => `task-${saved.length}`,
+      ensureImageCached: async () => null,
+      getImage: async () => undefined,
+      putImage: async () => undefined,
+      storeInputImage: async () => undefined,
+      cacheImage: () => undefined,
+      putTask: async (task) => {
+        saved.push(task)
+      },
+      executeTask: () => undefined,
+    })
+    const category = {
+      workflow: 'amazon-listing' as const,
+      projectId: 'project-a',
+      projectSlotId: 'slot-a',
+      amazonSlot: 'MAIN',
+    }
+    await service.submitPrepared({
+      profile: state.settings.profiles[0],
+      requestSettings: state.settings,
+      prompt: 'Mug',
+      inputImages: [{ id: 'ref', dataUrl: 'image' }],
+      params: DEFAULT_PARAMS,
+      category,
+      maskTargetImageId: null,
+      maskImageId: null,
+      clearInputAfterSubmit: true,
+    })
+    expect(state.clearInputImages).not.toHaveBeenCalled()
+    await service.retry({ ...saved[0], status: 'error', error: 'temporary failure' })
+    expect(saved).toHaveLength(2)
+    expect(saved.map((item) => item.category)).toEqual([category, category])
+    expect(saved[1].id).not.toBe(saved[0].id)
   })
 })

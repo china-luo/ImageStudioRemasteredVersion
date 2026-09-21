@@ -212,7 +212,7 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
     state.setTasks([task, ...state.tasks])
     await deps.putTask(task)
     state.showToast('任务已提交', 'success')
-    if (options.clearInputAfterSubmit) {
+    if (options.clearInputAfterSubmit && !options.category.projectId) {
       state.setPrompt?.('')
       state.clearInputImages?.()
     }

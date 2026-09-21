@@ -149,8 +149,8 @@ export default function Header({
         data-no-drag-select
         className="safe-area-top fixed top-0 left-0 right-0 z-40 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80"
       >
-        <div className="safe-area-x safe-header-inner relative mx-auto flex max-w-7xl items-center justify-between">
-          <div className={`group/brand min-w-0 pr-3 ${onNavigate ? 'hidden lg:block' : ''}`}>
+        <div className="safe-area-x safe-header-inner relative mx-auto flex items-center justify-between">
+          <div className="group/brand min-w-0 pr-3">
             <h1 className="min-w-0 leading-none">
               <a
                 href={APP_REPOSITORY_URL}
@@ -185,65 +185,7 @@ export default function Header({
               </button>
             </span>
           </div>
-          {onNavigate && (
-            <nav className="mr-auto flex shrink-0 items-center gap-1 sm:hidden">
-              {(['home', 'editor', 'tagger'] as const).map((view) => (
-                <button
-                  key={view}
-                  type="button"
-                  onClick={() => onNavigate(view)}
-                  className={`rounded-lg px-1.5 py-1.5 text-[11px] font-semibold ${activeView === view ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/[0.06]'}`}
-                >
-                  {view === 'home' ? '首页' : view === 'editor' ? '图片编辑' : 'AI 人物打标'}
-                </button>
-              ))}
-            </nav>
-          )}
-          {onNavigate && (
-            <nav
-              className="absolute left-1/2 hidden min-w-0 -translate-x-1/2 items-center sm:flex"
-              aria-label="功能导航"
-            >
-              <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
-                {(
-                  [
-                    ['gallery', '图片生成'],
-                    ['editor', '图片编辑'],
-                    ['tagger', 'AI 人物打标'],
-                    ['sop', '拆图反推'],
-                    ['voc', 'VOC评论'],
-                  ] as const
-                ).map(([destination, label]) => {
-                  const selected =
-                    destination === 'editor'
-                      ? activeView === 'editor'
-                      : destination === 'tagger'
-                        ? activeView === 'tagger'
-                        : activeView === 'home' && appMode === destination
-                  return (
-                    <button
-                      key={destination}
-                      type="button"
-                      onClick={() => {
-                        if (destination === 'editor' || destination === 'tagger') onNavigate(destination)
-                        else {
-                          setAppMode(destination)
-                          onNavigate('home')
-                        }
-                      }}
-                      className={`h-8 rounded-lg px-3 text-sm font-medium transition-[color,background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-                        selected
-                          ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
-                          : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  )
-                })}
-              </div>
-            </nav>
-          )}
+
           <div className="flex shrink-0 items-center gap-1">
             {!isDesktopApp && !isPwaInstalled && (
               <div className="relative" {...installTooltip.handlers}>
@@ -311,41 +253,49 @@ export default function Header({
       <div className="safe-area-top invisible pointer-events-none" aria-hidden="true">
         <div className="safe-header-inner" />
       </div>
-      {activeView === 'home' && (
-        <div
-          data-no-drag-select
-          className="safe-area-x fixed left-0 right-0 top-[calc(var(--safe-area-top)+3.5rem)] z-30 border-b border-gray-200 bg-white/80 py-2 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80 sm:hidden"
-        >
-          <nav className="mx-auto flex max-w-7xl justify-center" aria-label="功能板块">
-            <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
-              {(
-                [
-                  ['gallery', '图片生成'],
-                  ['sop', '拆图反推'],
-                  ['voc', 'VOC评论'],
-                ] as const
-              ).map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => {
-                    setAppMode(mode)
-                    onNavigate?.('home')
-                  }}
-                  className={`h-8 rounded-lg px-4 text-sm font-medium transition-[color,background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-                    appMode === mode
-                      ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
-                      : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </nav>
-        </div>
+      {onNavigate && (
+        <nav className="studio-navigation" aria-label="功能导航">
+          <div className="studio-navigation-caption">工作空间</div>
+          {(
+            [
+              ['gallery', '图片生成', '策划与制作'],
+              ['editor', '图片编辑', '局部调整与重绘'],
+              ['sop', '拆图反推', '分析参考图'],
+              ['voc', 'VOC评论', '提炼用户需求'],
+              ['tagger', 'AI 人物打标', '媒体标记与导出'],
+            ] as const
+          ).map(([destination, label, description]) => {
+            const selected =
+              destination === 'editor' || destination === 'tagger'
+                ? activeView === destination
+                : activeView === 'home' && appMode === destination
+            return (
+              <button
+                key={destination}
+                type="button"
+                aria-current={selected ? 'page' : undefined}
+                onClick={() => {
+                  if (destination === 'editor' || destination === 'tagger') onNavigate(destination)
+                  else {
+                    setAppMode(destination)
+                    onNavigate('home')
+                  }
+                }}
+                className="studio-navigation-item"
+              >
+                <span>{label}</span>
+                <small>{description}</small>
+              </button>
+            )
+          })}
+          <div className="studio-navigation-note">
+            商品资料 → 图片策划
+            <br />
+            生成制作 → 筛选导出
+          </div>
+        </nav>
       )}
-      {activeView === 'home' && <div className="h-[52px] sm:hidden" aria-hidden="true" />}
+
       {showHelp && <HelpModal appMode="gallery" onClose={() => setShowHelp(false)} />}
       {showSupportQr && (
         <div

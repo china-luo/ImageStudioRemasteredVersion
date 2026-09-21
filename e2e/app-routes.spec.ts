@@ -15,6 +15,7 @@ test('shows a read-only planner product summary without a separate extraction ac
   await page.goto('/#/', { waitUntil: 'domcontentloaded' })
 
   const summary = page.getByRole('region', { name: 'AI 商品信息摘要' })
+  await page.locator('summary').filter({ hasText: 'AI 商品信息摘要' }).click()
   await expect(summary).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('button', { name: '提取信息', exact: true })).toHaveCount(0)
   await expect(summary.getByText('涉及工作流逻辑', { exact: true })).toBeVisible()
@@ -91,5 +92,5 @@ test('clears legacy planner sessions during the database v4 upgrade', async ({ p
           }),
       ),
     )
-    .toEqual({ version: 4, sessionCount: 0 })
+    .toEqual({ version: 5, sessionCount: 0 })
 })

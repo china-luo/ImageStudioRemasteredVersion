@@ -7,7 +7,6 @@ import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigration
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
-import InputBar from './components/InputBar'
 import DetailModal from './components/DetailModal'
 import Lightbox from './components/Lightbox'
 import ConfirmDialog from './components/ConfirmDialog'
@@ -17,8 +16,9 @@ import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
+import './workbench.css'
 
-const AmazonPlanner = lazy(() => import('./components/AmazonPlanner'))
+const GenerationWorkspace = lazy(() => import('./components/GenerationWorkspace'))
 const SopReverseWorkspace = lazy(() => import('./components/SopReverseWorkspace'))
 const VocAmazonReviewsWorkspace = lazy(() => import('./components/VocAmazonReviewsWorkspace'))
 const ImageEditorPage = lazy(() => import('./components/ImageEditorPage'))
@@ -45,6 +45,8 @@ export default function App() {
     return route.view
   })
   const [routeReady, setRouteReady] = useState(false)
+  const [storeReady, setStoreReady] = useState(false)
+  const [storeError, setStoreError] = useState('')
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -62,7 +64,12 @@ export default function App() {
       window.history.replaceState(null, '', nextUrl)
     }
 
-    initStore()
+    void initStore()
+      .then(() => setStoreReady(true))
+      .catch((error) => {
+        setStoreError(`数据加载失败：${String(error)}`)
+        useStore.getState().showToast(`数据加载失败：${String(error)}`, 'error')
+      })
     applyAppRoute(parseAppRoute(window.location.hash), setFeatureView)
     setRouteReady(true)
   }, [setSettings])
@@ -97,20 +104,10 @@ export default function App() {
 
   const navigateFeature = (view: AppFeatureView) => setFeatureView(view)
   return (
-    <>
+    <div className="studio-shell">
       <Header activeView={featureView} onNavigate={navigateFeature} />
-      <main
-        data-home-main
-        data-drag-select-surface
-        className={
-          featureView !== 'home'
-            ? 'pb-10'
-            : appMode === 'sop' || appMode === 'voc'
-              ? 'pb-10'
-              : 'home-main-with-dock pb-48 lg:pb-10'
-        }
-      >
-        <div className="safe-area-x max-w-7xl mx-auto lg:!px-6">
+      <main data-home-main data-drag-select-surface className="studio-main pb-10">
+        <div className="studio-content safe-area-x mx-auto">
           <Suspense fallback={<div className="py-16 text-center text-sm text-gray-500">页面加载中…</div>}>
             {featureView === 'editor' ? (
               <ImageEditorPage />
@@ -120,17 +117,28 @@ export default function App() {
               <SopReverseWorkspace />
             ) : appMode === 'voc' ? (
               <VocAmazonReviewsWorkspace />
+            ) : storeReady ? (
+              <GenerationWorkspace
+                resultsPanel={
+                  <>
+                    <SearchBar />
+                    <TaskGrid />
+                  </>
+                }
+              />
             ) : (
-              <>
-                <AmazonPlanner />
-                <SearchBar />
-                <TaskGrid />
-              </>
+              <div role={storeError ? 'alert' : 'status'} className="py-16 text-center text-gray-500">
+                {storeError || '正在加载图片数据…'}
+                {storeError && (
+                  <button className="ml-3 underline" onClick={() => window.location.reload()}>
+                    重新加载
+                  </button>
+                )}
+              </div>
             )}
           </Suspense>
         </div>
       </main>
-      {featureView === 'home' && appMode !== 'sop' && appMode !== 'voc' && <InputBar />}
       <DetailModal />
       <Lightbox />
       <ErrorBoundary
@@ -180,6 +188,6 @@ export default function App() {
       <MaskEditorModal />
       <ImageContextMenu />
       <SupportPromptModal />
-    </>
+    </div>
   )
 }

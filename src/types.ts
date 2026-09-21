@@ -1,4 +1,18 @@
 import type { AmazonMarketplaceId } from './lib/amazonMarketplaces'
+import type { PlannerWorkspaceDraft } from './components/planner/plannerWorkspaceDraft'
+
+export interface GenerationProject {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  revision: number
+  writerId?: string
+  workspace: PlannerWorkspaceDraft
+  referenceImageIds: string[]
+  finals: Record<string, { taskId: string; imageId: string }>
+  inputDraft?: { prompt: string; params: TaskParams }
+}
 
 // ===== 设置 =====
 
@@ -225,6 +239,8 @@ export interface TaskRecord {
   agentToolAction?: 'generate' | 'edit' | 'auto' | string
   /** 历史筛选分类元数据；旧任务可为空并由前端推断 */
   category?: {
+    projectId?: string
+    projectSlotId?: string
     productTitle?: string
     workflow?: TaskWorkflow
     amazonSlot?: string
@@ -537,6 +553,7 @@ export interface ExportData {
   tasks?: TaskRecord[]
   agentConversations?: AgentConversation[]
   amazonPlannerSessions?: AmazonPlannerSession[]
+  generationProjects?: GenerationProject[]
   /** imageId → 图片信息 */
   imageFiles?: Record<
     string,

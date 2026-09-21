@@ -1,7 +1,8 @@
-import type { AmazonPlannerSession, TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
+import type { AmazonPlannerSession, GenerationProject, TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
 
 const DB_NAME = 'amazon-image-studio'
-const DB_VERSION = 4
+const DB_VERSION = 5
+const STORE_GENERATION_PROJECTS = 'generationProjects'
 const PLANNER_HISTORY_RESET_VERSION = 4
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'
@@ -19,6 +20,9 @@ function openDB(): Promise<IDBDatabase> {
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result
       const oldVersion = (e as IDBVersionChangeEvent).oldVersion
+      if (!db.objectStoreNames.contains(STORE_GENERATION_PROJECTS)) {
+        db.createObjectStore(STORE_GENERATION_PROJECTS, { keyPath: 'id' })
+      }
       if (!db.objectStoreNames.contains(STORE_TASKS)) {
         db.createObjectStore(STORE_TASKS, { keyPath: 'id' })
       }
@@ -39,8 +43,12 @@ function openDB(): Promise<IDBDatabase> {
         req.transaction?.objectStore(STORE_AMAZON_PLANNER_SESSIONS).clear()
       }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      req.result.onversionchange = () => req.result.close()
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error)
+    req.onblocked = () => reject(new Error('本地数据库升级正在等待其他页面关闭，请关闭旧页面后重新加载。'))
   })
 }
 
@@ -55,13 +63,65 @@ function dbTransaction<T>(
         const tx = db.transaction(storeName, mode)
         const store = tx.objectStore(storeName)
         const req = fn(store)
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => reject(req.error)
+        tx.oncomplete = () => {
+          db.close()
+          resolve(req.result)
+        }
+        tx.onabort = () => {
+          db.close()
+          reject(tx.error ?? req.error)
+        }
+        tx.onerror = () => {
+          db.close()
+          reject(tx.error ?? req.error)
+        }
       }),
   )
 }
 
 // ===== Tasks =====
+
+export function getAllGenerationProjects(): Promise<GenerationProject[]> {
+  return dbTransaction(STORE_GENERATION_PROJECTS, 'readonly', (s) => s.getAll())
+}
+
+export function clearGenerationProjects(): Promise<undefined> {
+  return dbTransaction(STORE_GENERATION_PROJECTS, 'readwrite', (s) => s.clear())
+}
+
+// Compare revisions in the same transaction so another tab cannot silently overwrite a project.
+export async function putGenerationProject(project: GenerationProject, expectedRevision?: number): Promise<number> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_GENERATION_PROJECTS, 'readwrite')
+    const store = tx.objectStore(STORE_GENERATION_PROJECTS)
+    const read = store.get(project.id)
+    let revision = 0
+    let failure: Error | null = null
+    read.onsuccess = () => {
+      const current = read.result as GenerationProject | undefined
+      if (expectedRevision != null && (current?.revision ?? 0) !== expectedRevision) {
+        failure = new Error('该项目已在其他页面更新，请重新加载项目后继续。当前修改仍保留在本页。')
+        tx.abort()
+        return
+      }
+      revision = (current?.revision ?? 0) + 1
+      store.put({ ...project, revision })
+    }
+    tx.oncomplete = () => {
+      db.close()
+      resolve(revision)
+    }
+    tx.onabort = () => {
+      db.close()
+      reject(failure ?? tx.error ?? new Error('项目保存失败'))
+    }
+    tx.onerror = () => {
+      db.close()
+      reject(tx.error)
+    }
+  })
+}
 
 export function getAllTasks(): Promise<TaskRecord[]> {
   return dbTransaction(STORE_TASKS, 'readonly', (s) => s.getAll())

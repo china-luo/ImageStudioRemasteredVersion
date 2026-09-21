@@ -1,0 +1,279 @@
+import { expect, test, type Page } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
+import { strFromU8, unzipSync } from 'fflate'
+import { createGenerationProject, ACTIVE_PROJECT_KEY } from '../src/lib/generationProjects'
+import type { ApiProfile } from '../src/types'
+
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLz4QAAAABJRU5ErkJggg=='
+
+async function seedProject(page: Page) {
+  const project = createGenerationProject()
+  project.name = '随行杯项目'
+  project.referenceImageIds = ['project-reference']
+  project.workspace.listingText = 'Title: Travel mug\n- Leak-resistant lid'
+  project.workspace.draft.productTitle = 'Travel mug'
+  project.workspace.currentPlannerSessionId = 'plan-set-1'
+  project.workspace.selectedPlanIndex = 0
+  project.workspace.imagePlans = [
+    {
+      slot: 'MAIN',
+      label: '白底主图',
+      prompt: 'A travel mug on white.',
+      negativePrompt: '',
+      planMarkdown: '## 商品主图\n白底展示杯身和杯盖，保留真实比例。',
+    },
+  ]
+  const profile: ApiProfile = {
+    id: 'test-image-profile',
+    name: 'Test image API',
+    provider: 'openai',
+    apiKey: '',
+    timeout: 60,
+    codexCli: false,
+    baseUrl: 'https://image-api.test/v1',
+    model: 'gpt-image-2',
+    apiMode: 'images',
+    apiProxy: false,
+  }
+  await page.goto('/manifest.webmanifest')
+  await page.evaluate(
+    async ({ project, png, profile, settings, activeKey }) => {
+      localStorage.setItem(
+        'amazon-image-studio',
+        JSON.stringify({
+          state: { settings: { ...settings, profiles: [profile], activeProfileId: profile.id } },
+          version: 0,
+        }),
+      )
+      sessionStorage.setItem(
+        'amazon-image-studio-secrets',
+        JSON.stringify({
+          apiKey: 'test-only-placeholder',
+          vocApiKey: '',
+          profiles: { [profile.id]: 'test-only-placeholder' },
+        }),
+      )
+      sessionStorage.setItem(activeKey, project.id)
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('amazon-image-studio', 5)
+        request.onupgradeneeded = () => {
+          for (const name of ['tasks', 'images', 'thumbnails', 'amazonPlannerSessions', 'generationProjects'])
+            request.result.createObjectStore(name, { keyPath: 'id' })
+        }
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => {
+          const db = request.result
+          const tx = db.transaction(['generationProjects', 'images'], 'readwrite')
+          tx.objectStore('generationProjects').put(project)
+          tx.objectStore('images').put({
+            id: 'project-reference',
+            dataUrl: `data:image/png;base64,${png}`,
+            source: 'upload',
+            createdAt: Date.now(),
+          })
+          tx.oncomplete = () => {
+            db.close()
+            resolve()
+          }
+          tx.onerror = () => reject(tx.error)
+        }
+      })
+    },
+    {
+      project,
+      png: PNG,
+      profile,
+      settings: { clearInputAfterSubmit: true, persistInputOnRestart: true },
+      activeKey: ACTIVE_PROJECT_KEY,
+    },
+  )
+  await page.goto('/#/')
+  await expect(page.getByRole('textbox', { name: '项目名称', exact: true })).toHaveValue(project.name)
+  return project
+}
+
+async function stage(page: Page, name: string) {
+  await page
+    .getByRole('navigation', { name: '制作阶段' })
+    .getByRole('button', { name: new RegExp(name) })
+    .click()
+}
+
+test('database v5 adds projects without removing v4 planning history or images', async ({ page }) => {
+  await page.goto('/manifest.webmanifest')
+  await page.evaluate(async (png) => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('amazon-image-studio', 4)
+      request.onupgradeneeded = () => {
+        for (const name of ['tasks', 'images', 'thumbnails', 'amazonPlannerSessions'])
+          request.result.createObjectStore(name, { keyPath: 'id' })
+      }
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => {
+        const db = request.result,
+          tx = db.transaction(['amazonPlannerSessions', 'images'], 'readwrite')
+        tx.objectStore('amazonPlannerSessions').put({
+          id: 'v4-session',
+          title: 'Existing history',
+          referenceImageIds: ['v4-image'],
+          styleImages: [],
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        tx.objectStore('images').put({ id: 'v4-image', dataUrl: `data:image/png;base64,${png}` })
+        tx.oncomplete = () => {
+          db.close()
+          resolve()
+        }
+        tx.onerror = () => reject(tx.error)
+      }
+    })
+  }, PNG)
+  await page.goto('/#/')
+  await expect(page.getByRole('combobox', { name: '切换项目' })).toBeVisible()
+  const state = await page.evaluate(
+    () =>
+      new Promise<{ version: number; ids: string[]; image: boolean }>((resolve, reject) => {
+        const request = indexedDB.open('amazon-image-studio')
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => {
+          const db = request.result,
+            tx = db.transaction(['amazonPlannerSessions', 'images'])
+          const sessions = tx.objectStore('amazonPlannerSessions').getAllKeys(),
+            image = tx.objectStore('images').get('v4-image')
+          tx.oncomplete = () => {
+            resolve({ version: db.version, ids: sessions.result.map(String), image: Boolean(image.result) })
+            db.close()
+          }
+        }
+      }),
+  )
+  expect(state).toEqual({ version: 5, ids: ['v4-session'], image: true })
+})
+
+test('projects preserve independent drafts and references across switching, reload and a new tab', async ({
+  page,
+  context,
+}) => {
+  const project = await seedProject(page)
+  const input = page.getByRole('textbox', { name: '标题 / 五点描述', exact: true })
+  await input.fill('Project A draft edited')
+  await stage(page, '筛选与导出')
+  await page.locator('.studio-inline-input [contenteditable="true"]').fill('Project A manual prompt')
+  await page.getByRole('textbox', { name: '项目名称', exact: true }).fill('同名商品')
+  await page.getByRole('button', { name: '新建项目', exact: true }).click()
+  await expect(input).toHaveValue('')
+  await input.fill('Project B independent draft')
+  await page.getByRole('textbox', { name: '项目名称', exact: true }).fill('同名商品')
+  const secondId = await page.getByRole('combobox', { name: '切换项目' }).inputValue()
+  expect(secondId).not.toBe(project.id)
+  await page.getByRole('combobox', { name: '切换项目' }).selectOption(project.id)
+  await expect(input).toHaveValue('Project A draft edited')
+  await stage(page, '筛选与导出')
+  await expect(page.locator('.studio-inline-input [contenteditable="true"]')).toHaveText('Project A manual prompt')
+  await stage(page, '商品资料')
+  await page.reload()
+  await expect(input).toHaveValue('Project A draft edited')
+  await page.getByRole('combobox', { name: '切换项目' }).selectOption(secondId)
+  await expect(input).toHaveValue('Project B independent draft')
+  const otherTab = await context.newPage()
+  await otherTab.goto('/#/')
+  await otherTab.getByRole('combobox', { name: '切换项目' }).selectOption(project.id)
+  await expect(otherTab.getByRole('textbox', { name: '标题 / 五点描述', exact: true })).toHaveValue(
+    'Project A draft edited',
+  )
+  await expect
+    .poll(() =>
+      otherTab.evaluate(
+        () =>
+          new Promise<string[]>((resolve) => {
+            const request = indexedDB.open('amazon-image-studio')
+            request.onsuccess = () => {
+              const db = request.result
+              const read = db.transaction('images').objectStore('images').getAllKeys()
+              read.onsuccess = () => {
+                db.close()
+                resolve(read.result.map(String))
+              }
+            }
+          }),
+      ),
+    )
+    .toContain('project-reference')
+})
+
+test('generation versions remain associated with a renamed project and export only the selected final', async ({
+  page,
+}) => {
+  const project = await seedProject(page)
+  let requestCount = 0
+  await page.route('https://image-api.test/**', async (route) => {
+    requestCount++
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        output_format: 'png',
+        data: [{ url: `data:image/png;base64,${PNG}`, output_format: 'png' }],
+      }),
+    })
+  })
+  await stage(page, '图片制作')
+  await page.getByRole('button', { name: '提交生成', exact: true }).click()
+  const versions = page.getByRole('region', { name: '当前图片位版本', exact: true })
+  await expect(versions.getByText('已完成', { exact: true })).toHaveCount(1)
+  await page.getByRole('button', { name: '生成新版本', exact: true }).click()
+  await expect(versions.getByText('已完成', { exact: true })).toHaveCount(2)
+  expect(requestCount).toBe(2)
+  await versions.getByRole('button', { name: '选为定稿', exact: true }).nth(1).click()
+  await page.getByRole('textbox', { name: '项目名称', exact: true }).fill('Mug renamed')
+  await stage(page, '筛选与导出')
+  const results = page.getByRole('region', { name: '当前项目结果', exact: true })
+  await expect(results.getByRole('button', { name: '已定稿 · 取消', exact: true })).toHaveCount(1)
+  await page.reload()
+  await stage(page, '筛选与导出')
+  await expect(results.getByText('已完成', { exact: true })).toHaveCount(2)
+  const downloadEvent = page.waitForEvent('download')
+  await results.getByRole('button', { name: '导出定稿（1）', exact: true }).click()
+  const download = await downloadEvent
+  expect(download.suggestedFilename()).toBe('Mug renamed_定稿.zip')
+  const files = unzipSync(new Uint8Array(await readFile((await download.path())!)))
+  expect(Object.keys(files)).toEqual(['01_amazon-listing_MAIN.png', 'manifest.json'])
+  const manifest = JSON.parse(strFromU8(files['manifest.json']))
+  expect(manifest.projectId).toBe(project.id)
+  expect(manifest.images).toHaveLength(1)
+  const taskIds = await results
+    .locator('[data-project-task-id]')
+    .evaluateAll((items) => items.map((item) => item.getAttribute('data-project-task-id')))
+  expect(manifest.images[0].taskId).toBe(taskIds[1])
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.screenshot({ path: 'output/playwright/ui-phase2-results.png', fullPage: true })
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.screenshot({ path: 'output/playwright/ui-phase2-dark.png', fullPage: true, animations: 'disabled' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391)
+  await page.screenshot({ path: 'output/playwright/ui-phase2-mobile.png', fullPage: true, animations: 'disabled' })
+  await page.getByRole('button', { name: '新建项目', exact: true }).click()
+  await stage(page, '筛选与导出')
+  await expect(
+    page.getByRole('region', { name: '当前项目结果', exact: true }).locator('[data-project-task-id]'),
+  ).toHaveCount(0)
+})
+
+test('another tab cannot overwrite a newer project revision', async ({ page, context }) => {
+  const project = await seedProject(page)
+  const other = await context.newPage()
+  await other.goto('/#/')
+  await other.getByRole('combobox', { name: '切换项目' }).selectOption(project.id)
+  await page.getByRole('textbox', { name: '标题 / 五点描述', exact: true }).fill('New revision from first tab')
+  await expect(page.getByRole('status').filter({ hasText: '已自动保存' })).toBeVisible()
+  await other.getByRole('textbox', { name: '标题 / 五点描述', exact: true }).fill('Conflicting draft')
+  await expect(other.getByRole('alert')).toContainText('其他页面更新')
+  await other.getByRole('button', { name: '另存恢复副本', exact: true }).click()
+  await expect(other.getByRole('textbox', { name: '标题 / 五点描述', exact: true })).toHaveValue('Conflicting draft')
+  await page.reload()
+  await expect(page.getByRole('textbox', { name: '标题 / 五点描述', exact: true })).toHaveValue(
+    'New revision from first tab',
+  )
+})

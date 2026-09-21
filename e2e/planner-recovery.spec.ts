@@ -84,14 +84,28 @@ test('planner preserves recovered history, style images and prompt edits across 
   await input.fill('Updated after history restore')
   await page.reload()
   await expect(input).toHaveValue('Updated after history restore')
-  await expect(page.getByText('Recovery plan details', { exact: true }).first()).toBeVisible()
+  await page
+    .getByRole('navigation', { name: '制作阶段' })
+    .getByRole('button', { name: /策划与风格/ })
+    .click()
   await expect(page.getByRole('img', { name: 'Recovery style', exact: true })).toBeVisible()
   await expect(page.getByText(/已选择「Recovery style」/)).toBeVisible()
+  await page
+    .getByRole('navigation', { name: '制作阶段' })
+    .getByRole('button', { name: /图片制作/ })
+    .click()
+  await expect(
+    page.getByRole('region', { name: '当前方案内容' }).getByText('Recovery plan details', { exact: true }),
+  ).toBeVisible()
   await page.getByRole('button', { name: '提示词', exact: true }).first().click()
   const editor = page.locator('textarea[spellcheck="false"]')
   await editor.fill('Custom prompt after history restore')
   await page.getByRole('button', { name: '保存提示词', exact: true }).click()
   await page.reload()
+  await page
+    .getByRole('navigation', { name: '制作阶段' })
+    .getByRole('button', { name: /图片制作/ })
+    .click()
   await page.getByRole('button', { name: '提示词', exact: true }).first().click()
   await expect(editor).toHaveValue('Custom prompt after history restore')
 })

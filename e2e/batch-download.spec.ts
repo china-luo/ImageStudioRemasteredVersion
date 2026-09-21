@@ -59,6 +59,11 @@ async function seedGalleryTasks(page: import('@playwright/test').Page) {
     { outputImage: OUTPUT_IMAGE, dbName: DB_NAME, storeNames: STORE_NAMES },
   )
   await page.reload({ waitUntil: 'domcontentloaded' })
+  await page
+    .getByRole('navigation', { name: '制作阶段' })
+    .getByRole('button', { name: /筛选与导出/ })
+    .click()
+  await page.getByText('全部历史（含旧版及其他功能生成记录）', { exact: true }).click()
 }
 
 test('selects multiple gallery tasks and downloads their output images', async ({ page }) => {

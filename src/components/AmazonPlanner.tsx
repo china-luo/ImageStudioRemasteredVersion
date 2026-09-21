@@ -1,4 +1,12 @@
-﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
+﻿import {
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { addImageFromFile, ensureImageCached, submitTask, useStore } from '../store'
 import {
   DEFAULT_RESPONSES_MODEL,
@@ -49,7 +57,9 @@ import { deleteAmazonPlannerSession, getAllAmazonPlannerSessions } from '../lib/
 import { normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { resolvePlannerStyleReference } from '../lib/plannerActionPolicy'
 import { DEFAULT_PARAMS } from '../types'
-import type { AmazonPlannerSession, TaskRecord, TaskWorkflow } from '../types'
+import type { AmazonPlannerSession, GenerationProject, TaskRecord, TaskWorkflow } from '../types'
+import { projectSlotId, projectTasks } from '../lib/generationProjects'
+import ProjectResults, { type ProjectFinalChange } from './planner/ProjectResults'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -61,6 +71,7 @@ import {
   RefreshIcon,
   TrashIcon,
 } from './icons'
+import MarkdownRenderer from './MarkdownRenderer'
 import PlannerHistoryDrawer from './planner/PlannerHistoryDrawer'
 import PlannerHeader from './planner/PlannerHeader'
 import PlannerInputPanel from './planner/PlannerInputPanel'
@@ -106,7 +117,7 @@ import {
   type WorkflowStepStatus,
 } from './planner/plannerHelpers'
 
-import { readPlannerWorkspaceDraft, savePlannerWorkspaceDraft } from './planner/plannerWorkspaceDraft'
+import { savePlannerWorkspaceDraft, type PlannerWorkspaceDraft } from './planner/plannerWorkspaceDraft'
 
 const FIELD_CLASS =
   'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
@@ -117,7 +128,24 @@ const GUIDE_HINT_CLASS =
   'mb-3 rounded-lg border border-blue-200 bg-white/85 px-3 py-2 text-xs font-medium leading-relaxed text-blue-800 shadow-sm dark:border-blue-400/25 dark:bg-blue-400/10 dark:text-blue-100'
 const API_MAX_IMAGES = 16
 
-export default function AmazonPlanner() {
+type PlannerStage = 'details' | 'style' | 'production' | 'results'
+
+export default function AmazonPlanner({
+  resultsPanel,
+  generationPanel,
+  project,
+  onWorkspaceChange,
+  onBusyChange,
+  onFinalChange,
+}: {
+  resultsPanel: ReactNode
+  generationPanel: ReactNode
+  project: GenerationProject
+  onWorkspaceChange: (workspace: PlannerWorkspaceDraft, referenceImageIds: string[]) => void
+  onBusyChange: (busy: boolean) => void
+  onFinalChange: ProjectFinalChange
+}) {
+  const [stage, setStage] = useState<PlannerStage>('details')
   const tasks = useStore((s) => s.tasks)
   const params = useStore((s) => s.params)
   const inputImages = useStore((s) => s.inputImages)
@@ -138,7 +166,7 @@ export default function AmazonPlanner() {
   const plannerAbortControllerRef = useRef<AbortController | null>(null)
   const styleAbortControllerRef = useRef<AbortController | null>(null)
   const styleSectionRef = useRef<HTMLDivElement | null>(null)
-  const [workspaceDraft] = useState(readPlannerWorkspaceDraft)
+  const [workspaceDraft] = useState(() => project.workspace)
   const workspaceSaveErrorRef = useRef(false)
   const [draft, setDraft] = useState<AmazonPromptDraft>(workspaceDraft.draft)
   const [resolution, setResolution] = useState<'2k' | '4k'>(workspaceDraft.resolution)
@@ -184,11 +212,31 @@ export default function AmazonPlanner() {
   const [actionProgress, setActionProgress] = useState<PlannerActionProgressMap>(workspaceDraft.actionProgress)
   const [batchSelectedIndexes, setBatchSelectedIndexes] = useState<number[]>(workspaceDraft.batchSelectedIndexes)
   const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoadingProjectImages, setIsLoadingProjectImages] = useState(false)
   const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>(workspaceDraft.promptOverrides)
   const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(workspaceDraft.promptEditor)
   useEffect(() => {
+    onBusyChange(
+      isPlanning ||
+        isGeneratingStyleImages ||
+        isBatchSubmitting ||
+        isSubmitting ||
+        isPreparingReferencePayload ||
+        isLoadingProjectImages,
+    )
+  }, [
+    isPlanning,
+    isGeneratingStyleImages,
+    isBatchSubmitting,
+    isSubmitting,
+    isPreparingReferencePayload,
+    isLoadingProjectImages,
+    onBusyChange,
+  ])
+  useEffect(() => {
     try {
-      savePlannerWorkspaceDraft({
+      const nextWorkspace = {
         draft,
         resolution,
         plannerPlatform,
@@ -214,7 +262,12 @@ export default function AmazonPlanner() {
         batchSelectedIndexes,
         promptOverrides,
         promptEditor,
-      })
+      }
+      onWorkspaceChange(
+        nextWorkspace,
+        inputImages.map((image) => image.id),
+      )
+      savePlannerWorkspaceDraft(nextWorkspace)
       workspaceSaveErrorRef.current = false
     } catch {
       if (!workspaceSaveErrorRef.current) {
@@ -248,6 +301,8 @@ export default function AmazonPlanner() {
     batchSelectedIndexes,
     promptOverrides,
     promptEditor,
+    inputImages,
+    onWorkspaceChange,
     showToast,
   ])
 
@@ -286,13 +341,12 @@ export default function AmazonPlanner() {
       : plannerMode === 'aplus'
         ? 'amazon-aplus'
         : 'amazon-listing'
-  const getPlanTask = (slot: string) =>
-    tasks.find(
-      (task) =>
-        task.category?.workflow === activeWorkflow &&
-        task.category.amazonSlot === slot &&
-        task.category.productTitle === draft.productTitle.trim(),
+  const getProjectSlotId = (slot: string) =>
+    projectSlotId(
+      { plannerPlatform, marketplaceId, plannerMode, tiktokDesignType, aPlusType, currentPlannerSessionId },
+      slot,
     )
+  const getPlanTask = (slot: string) => projectTasks(tasks, project.id, getProjectSlotId(slot)).at(-1)
   const resolutionTier = resolution === '4k' ? '4K' : '2K'
   const aPlusSpecs = useMemo(
     () => normalizeAPlusModuleSpecs(aPlusType, aPlusModuleSpecsByType[aPlusType]),
@@ -413,7 +467,11 @@ export default function AmazonPlanner() {
   const actionLabel = plannerMode === 'aplus' ? selectedAPlusPlan?.label : selectedPlan?.label
   const showStickyActions = plannerMode === 'aplus' ? aPlusPlansWithSizes.length > 0 : imagePlans.length > 0
   const actionDisabled = plannerMode === 'aplus' ? !selectedAPlusPlan : !activePrompt.trim()
-  const submitDisabled = actionDisabled
+  const currentSlotRunning = Boolean(
+    actionSlot &&
+    projectTasks(tasks, project.id, getProjectSlotId(actionSlot)).some((task) => task.status === 'running'),
+  )
+  const submitDisabled = actionDisabled || isSubmitting || currentSlotRunning
   const hasPlanOptions = visiblePlanCount > 0
   const hasSelectedPlan = plannerMode === 'aplus' ? Boolean(selectedAPlusPlan) : Boolean(selectedPlan)
   const canGoPrev = visiblePlanCount > 0 && visiblePlanIndex != null && visiblePlanIndex > 0
@@ -687,6 +745,8 @@ export default function AmazonPlanner() {
       prompt: '',
       apiPrompt: hiddenSubmitPrompt,
       category: {
+        projectId: project.id,
+        projectSlotId: getProjectSlotId((plannerMode === 'aplus' ? selectedAPlusPlan?.slot : selectedPlan?.slot) ?? ''),
         productTitle: draft.productTitle.trim(),
         workflow:
           plannerPlatform === 'tiktok'
@@ -722,14 +782,18 @@ export default function AmazonPlanner() {
     return true
   }
 
-  const applyAndSubmit = () => {
+  const applyAndSubmit = async () => {
+    if (submitDisabled) return
     if (!applyPrompt({ requireStyle: true })) return
     const submittedActionKey = currentActionKey
-    queueMicrotask(() => {
-      void submitTask().then((submitted) => {
-        if (submitted) markActionProgress(submittedActionKey, 'submitted')
-      })
-    })
+    setIsSubmitting(true)
+    try {
+      if (await submitTask()) markActionProgress(submittedActionKey, 'submitted')
+    } catch (error) {
+      showToast(String(error), 'error')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const toggleBatchPlan = (index: number) => {
@@ -796,6 +860,8 @@ export default function AmazonPlanner() {
                 marketplaceId,
               }))
         const category: NonNullable<TaskRecord['category']> = {
+          projectId: project.id,
+          projectSlotId: getProjectSlotId(plan.slot),
           productTitle: draft.productTitle.trim(),
           workflow: activeWorkflow,
           amazonSlot: plan.slot,
@@ -1215,8 +1281,10 @@ export default function AmazonPlanner() {
     clearStyleBoardImages(false)
     setPlannerError('')
     setActionProgress({})
+    const nextSessionId = createPlannerSessionId()
+    setCurrentPlannerSessionId(nextSessionId)
     void savePlannerSession({
-      id: createPlannerSessionId(),
+      id: nextSessionId,
       platform: plannerPlatform,
       marketplaceId,
       tiktokDesignType,
@@ -1579,7 +1647,7 @@ export default function AmazonPlanner() {
     resetPlannerOutputs()
   }
 
-  const restorePlannerSession = async (session: AmazonPlannerSession) => {
+  const loadPlannerSession = async (session: AmazonPlannerSession) => {
     const restoredReferences = []
     for (const imageId of session.referenceImageIds) {
       const dataUrl = await ensureImageCached(imageId)
@@ -1651,6 +1719,17 @@ export default function AmazonPlanner() {
     showToast('策划历史已恢复', 'success')
   }
 
+  const restorePlannerSession = async (session: AmazonPlannerSession) => {
+    setIsLoadingProjectImages(true)
+    try {
+      await loadPlannerSession(session)
+    } catch (error) {
+      showToast(`策划历史恢复失败：${String(error)}`, 'error')
+    } finally {
+      setIsLoadingProjectImages(false)
+    }
+  }
+
   const removePlannerSession = async (sessionId: string) => {
     try {
       await deleteAmazonPlannerSession(sessionId)
@@ -1691,7 +1770,7 @@ export default function AmazonPlanner() {
     const remaining = API_MAX_IMAGES - currentCount
     const toAdd = accepted.slice(0, remaining)
     const discarded = accepted.length - toAdd.length
-
+    setIsLoadingProjectImages(true)
     try {
       for (const file of toAdd) {
         await addImageFromFile(file)
@@ -1714,6 +1793,8 @@ export default function AmazonPlanner() {
       showToast(added > 0 ? `已上传 ${added} 张参考图` : '参考图已存在', added > 0 ? 'success' : 'info')
     } catch (err) {
       showToast(`参考图上传失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setIsLoadingProjectImages(false)
     }
   }
 
@@ -1723,11 +1804,8 @@ export default function AmazonPlanner() {
   }
 
   return (
-    <section
-      data-no-drag-select
-      className="mt-6 rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-gray-900"
-    >
-      <div className="border-b border-gray-200 px-4 py-4 dark:border-white/[0.08] sm:px-5">
+    <section className="planner-workspace">
+      <div data-no-drag-select className="border-b border-gray-200 px-4 py-4 dark:border-white/[0.08] sm:px-5">
         <PlannerHeader
           platform={plannerPlatform}
           mode={plannerMode}
@@ -1753,9 +1831,48 @@ export default function AmazonPlanner() {
           />
         )}
       </div>
-
-      <div className="grid gap-0 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-        <div className="border-b border-gray-200 p-4 dark:border-white/[0.08] sm:p-5 lg:border-b-0 lg:border-r">
+      <nav data-no-drag-select aria-label="制作阶段" className="planner-stages">
+        {(
+          [
+            ['details', '商品资料', '标题、站点与参考图'],
+            ['style', '策划与风格', '查看候选并选择风格'],
+            ['production', '图片制作', '逐张检查与提交生成'],
+            ['results', '筛选与导出', '版本定稿与项目导出'],
+          ] as const
+        ).map(([value, label, description], index) => (
+          <button
+            type="button"
+            key={value}
+            aria-current={stage === value ? 'step' : undefined}
+            onClick={() => setStage(value)}
+            className="planner-stage"
+          >
+            <span className="planner-stage-number">{index + 1}</span>
+            <span>
+              <span className="block font-semibold">{label}</span>
+              <span className="planner-stage-description">{description}</span>
+            </span>
+          </button>
+        ))}
+      </nav>
+      <div data-no-drag-select className="planner-stage-status" role="status">
+        <span>
+          {isPlanning
+            ? 'AI 策划进行中，可切换阶段查看已有内容'
+            : isGeneratingStyleImages
+              ? '风格板生成中，可继续查看图片方案'
+              : hasPlanOptions
+                ? '已有 ' + visiblePlanCount + ' 个方案 · ' + (selectedStyleCandidate ? '已选择风格' : '风格待选择')
+                : '从商品资料开始，粘贴标题与五点描述后生成策划。'}
+        </span>
+        {hasPlanOptions && stage === 'details' && (
+          <button type="button" onClick={() => setStage('style')}>
+            查看策划与风格 →
+          </button>
+        )}
+      </div>
+      <div data-no-drag-select hidden={stage !== 'details'} className="planner-details">
+        <div className="min-w-0">
           <div className={`rounded-xl border p-3 shadow-sm transition ${getGuidePanelClass(plannerGuideActive)}`}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -1767,9 +1884,6 @@ export default function AmazonPlanner() {
                     ? '粘贴标题、五点描述或品牌说明，生成普通A+ / 标准A+ / 高级A+ / 手机A+模块编排和英文提示词。'
                     : '粘贴标题、五点描述或产品说明，生成 Main + PT01-PT06 的逐张方案和英文提示词。'}
                 </div>
-              </div>
-              <div className="rounded-lg bg-gray-100 px-2 py-1 text-[11px] font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
-                双配置
               </div>
             </div>
             <PlannerInputPanel
@@ -1805,8 +1919,93 @@ export default function AmazonPlanner() {
               labelClass={LABEL_CLASS}
             />
           </div>
-
-          <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950">
+          {plannerMode === 'aplus' && aPlusPlansWithSizes.length === 0 && (
+            <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">A+ 模块编排</div>
+                  <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    当前选择 {getAPlusContentTypeLabel(aPlusType)}，可先调整模块数量，再点击 AI策划A+。
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={restoreDefaultAPlusModules}
+                    disabled={isPlanning || aPlusSpecsAreDefault}
+                    title="恢复当前 A+ 类型默认模块"
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${!isPlanning && !aPlusSpecsAreDefault ? 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                  >
+                    <RefreshIcon className="h-3.5 w-3.5" />
+                    恢复默认
+                  </button>
+                  <span className="rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
+                    {aPlusSpecs.length} 张
+                  </span>
+                </div>
+              </div>
+              <div className={PLAN_LIST_CLASS}>
+                {aPlusSpecs.map((spec, index) => (
+                  <div
+                    key={spec.slot}
+                    className="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-2 dark:border-white/[0.08] dark:bg-gray-900"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">
+                            {spec.slot}
+                          </span>
+                          <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                            {getAPlusModuleDisplayName(spec)}
+                          </span>
+                          <span className="text-xs text-gray-400">{getAPlusModuleEnglishName(spec)}</span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                          上传 {getAPlusModuleUploadSize(spec)} · 生成{' '}
+                          {getAPlusModuleGenerationSize(spec, resolutionTier)}
+                          {isAPlusTextModule(spec) ? ' · 含标题/正文' : ''}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => addAPlusModuleAfter(index)}
+                          disabled={isPlanning || aPlusSpecs.length >= MAX_A_PLUS_MODULE_COUNT}
+                          aria-label={`在 ${spec.slot} 后添加同尺寸 A+ 模块`}
+                          title={
+                            aPlusSpecs.length >= MAX_A_PLUS_MODULE_COUNT
+                              ? `最多 ${MAX_A_PLUS_MODULE_COUNT} 张`
+                              : '添加同尺寸模块'
+                          }
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${!isPlanning && aPlusSpecs.length < MAX_A_PLUS_MODULE_COUNT ? 'border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200 dark:hover:bg-blue-400/20' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                        >
+                          <PlusIcon className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeAPlusModuleAt(index)}
+                          disabled={isPlanning || aPlusSpecs.length <= MIN_A_PLUS_MODULE_COUNT}
+                          aria-label={`删除 ${spec.slot} A+ 模块`}
+                          title={
+                            aPlusSpecs.length <= MIN_A_PLUS_MODULE_COUNT
+                              ? `至少保留 ${MIN_A_PLUS_MODULE_COUNT} 张`
+                              : '删除模块'
+                          }
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${!isPlanning && aPlusSpecs.length > MIN_A_PLUS_MODULE_COUNT ? 'border-red-100 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200 dark:hover:bg-red-400/20' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                        >
+                          <TrashIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="min-w-0">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">参考图</div>
@@ -1912,330 +2111,243 @@ export default function AmazonPlanner() {
               onChange={handleFileUpload}
             />
           </div>
-
-          <PlannerProductSummary draft={draft} />
+          <details className="planner-disclosure mt-4">
+            <summary>
+              AI 商品信息摘要 <span>查看模型识别的商品信息</span>
+            </summary>
+            <PlannerProductSummary draft={draft} />
+          </details>
         </div>
-
-        <div className="p-4 sm:p-5">
-          {showStickyActions && (
-            <>
-              <div
-                data-amazon-action-bar
-                className={`fixed left-3 right-3 top-[7.25rem] z-30 rounded-xl border p-3 shadow-lg shadow-gray-900/5 backdrop-blur transition dark:shadow-black/20 sm:sticky sm:left-auto sm:right-auto sm:top-20 sm:mb-4 ${getGuidePanelClass(actionBarGuideActive)}`}
-              >
-                <div className="flex flex-col gap-3">
-                  {actionBarGuideActive && <div className={GUIDE_HINT_CLASS}>{guideState.message}</div>}
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[11px] font-bold text-white">
-                          {actionSlot ?? (plannerMode === 'aplus' ? 'A+' : '当前')}
-                        </span>
-                        <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {actionLabel ?? (plannerMode === 'aplus' ? '请选择 A+ 模块' : '当前图片方案')}
-                        </span>
-                        <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-white/[0.08] dark:text-gray-300">
-                          {actionPositionLabel}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        {targetSize} / {generationParamLabel}
-                        {plannerMode === 'aplus' && selectedAPlusPlan
-                          ? ` · 上传建议 ${selectedAPlusPlan.uploadSize}`
-                          : ''}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => stepVisiblePlan(-1)}
-                        disabled={!canGoPrev}
-                        className={`inline-flex h-9 items-center gap-1 rounded-lg border px-2.5 text-xs font-medium transition ${canGoPrev ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
-                      >
-                        <ChevronLeftIcon className="h-3.5 w-3.5" />
-                        上一张
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => stepVisiblePlan(1)}
-                        disabled={!canGoNext}
-                        className={`inline-flex h-9 items-center gap-1 rounded-lg border px-2.5 text-xs font-medium transition ${currentActionSubmitted && canGoNext ? 'border-blue-600 bg-blue-600 text-white shadow-sm hover:bg-blue-500' : canGoNext ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
-                      >
-                        下一张
-                        <ChevronRightIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div
-                    className={`rounded-lg border px-3 py-2 text-xs font-medium ${currentActionSubmitted ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200' : currentActionFilled ? 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200' : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200'}`}
-                  >
-                    {actionGuidance}
-                    {mainStyleGuidance && (
-                      <span className="mt-1 block text-[11px] font-normal opacity-80">{mainStyleGuidance}</span>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    {actionProgressSteps.map((step) => (
-                      <div
-                        key={step.label}
-                        className={`rounded-lg border px-2 py-1.5 ${getActionStepClass(step.status)}`}
-                      >
-                        <div className="truncate text-[10px] font-bold">{step.label}</div>
-                        <div className="mt-0.5 truncate text-[10px] opacity-80">{step.detail}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-2">
-                    <button
-                      type="button"
-                      onClick={openPromptEditor}
-                      disabled={actionDisabled}
-                      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${actionDisabled ? 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
-                    >
-                      <EyeIcon className="h-3.5 w-3.5" />
-                      提示词
-                    </button>
-                    <button
-                      type="button"
-                      onClick={copyPrompt}
-                      disabled={actionDisabled}
-                      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${actionDisabled ? 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
-                    >
-                      <CopyIcon className="h-3.5 w-3.5" />
-                      复制
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyPrompt()}
-                      disabled={actionDisabled}
-                      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition ${actionDisabled ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : currentActionFilled ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200'}`}
-                    >
-                      {currentActionFilled ? (
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : (
-                        <PhotoIcon className="h-3.5 w-3.5" />
-                      )}
-                      {currentActionFilled ? '已准备' : '准备'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={applyAndSubmit}
-                      disabled={submitDisabled || currentActionSubmitted}
-                      className={`inline-flex h-9 items-center justify-center rounded-lg px-2 text-xs font-semibold transition ${currentActionSubmitted ? 'cursor-default bg-emerald-600 text-white' : submitDisabled ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
-                    >
-                      {currentActionSubmitted ? '已提交' : '提交生成'}
-                    </button>
-                  </div>
+      </div>
+      <div data-no-drag-select hidden={stage !== 'style'} className="planner-style-section">
+        {hasPlanOptions && (
+          <div
+            ref={styleSectionRef}
+            className={`mb-4 rounded-xl border p-3 transition ${getGuidePanelClass(styleGuideActive, 'muted')}`}
+          >
+            {styleGuideActive && <div className={GUIDE_HINT_CLASS}>{guideState.message}</div>}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">视觉风格选择</div>
+                <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {imageGenerationProfile
+                    ? `生成低清风格参考板时，将自动使用生图配置「${imageGenerationProfile.name}」${imageGenerationProfileValidation ? `（${imageGenerationProfileValidation}）` : ''}。`
+                    : imageGenerationProfileValidation}
                 </div>
               </div>
-              <div className="h-[218px] sm:hidden" aria-hidden="true" />
-            </>
-          )}
-          {hasPlanOptions && (
-            <div
-              ref={styleSectionRef}
-              className={`mb-4 rounded-xl border p-3 transition ${getGuidePanelClass(styleGuideActive, 'muted')}`}
-            >
-              {styleGuideActive && <div className={GUIDE_HINT_CLASS}>{guideState.message}</div>}
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">视觉风格选择</div>
-                  <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {imageGenerationProfile
-                      ? `生成低清风格参考板时，将自动使用生图配置「${imageGenerationProfile.name}」${imageGenerationProfileValidation ? `（${imageGenerationProfileValidation}）` : ''}。`
-                      : imageGenerationProfileValidation}
-                  </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex h-9 rounded-lg border border-gray-200 bg-white p-0.5 text-xs font-semibold dark:border-white/[0.08] dark:bg-gray-900">
+                  {STYLE_DENSITY_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => changeStyleDensityMode(option.value)}
+                      className={`rounded-md px-2.5 transition ${styleDensityMode === option.value ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-950' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="inline-flex h-9 rounded-lg border border-gray-200 bg-white p-0.5 text-xs font-semibold dark:border-white/[0.08] dark:bg-gray-900">
-                    {STYLE_DENSITY_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => changeStyleDensityMode(option.value)}
-                        className={`rounded-md px-2.5 transition ${styleDensityMode === option.value ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-950' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'}`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+                <button
+                  type="button"
+                  onClick={confirmGenerateStyleImages}
+                  disabled={isGeneratingStyleImages || activeStyleCandidates.length === 0}
+                  className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition ${isGeneratingStyleImages || activeStyleCandidates.length === 0 ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200'} ${guideState.target === 'style' ? 'ring-2 ring-blue-500/25 ring-offset-2 ring-offset-blue-50 dark:ring-offset-gray-950' : ''}`}
+                >
+                  <PhotoIcon className="h-4 w-4" />
+                  {isGeneratingStyleImages ? '生成中...' : '生成风格板'}
+                </button>
+                {isGeneratingStyleImages && (
                   <button
                     type="button"
-                    onClick={confirmGenerateStyleImages}
-                    disabled={isGeneratingStyleImages || activeStyleCandidates.length === 0}
-                    className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition ${isGeneratingStyleImages || activeStyleCandidates.length === 0 ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200'} ${guideState.target === 'style' ? 'ring-2 ring-blue-500/25 ring-offset-2 ring-offset-blue-50 dark:ring-offset-gray-950' : ''}`}
+                    onClick={stopGeneratingStyleImages}
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white transition hover:bg-red-500 dark:bg-red-500 dark:hover:bg-red-400"
                   >
-                    <PhotoIcon className="h-4 w-4" />
-                    {isGeneratingStyleImages ? '生成中...' : '生成风格板'}
+                    <CloseIcon className="h-4 w-4" />
+                    停止
                   </button>
-                  {isGeneratingStyleImages && (
-                    <button
-                      type="button"
-                      onClick={stopGeneratingStyleImages}
-                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white transition hover:bg-red-500 dark:bg-red-500 dark:hover:bg-red-400"
-                    >
-                      <CloseIcon className="h-4 w-4" />
-                      停止
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
-              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white/70 p-2.5 dark:border-white/[0.08] dark:bg-gray-950/40">
-                <div>
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">AI 策划风格候选</div>
-                      <div className="mt-0.5 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-                        使用 AI 策划返回的风格候选动态生成风格板。
-                      </div>
+            </div>
+            <div className="mt-3 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white/70 p-2.5 dark:border-white/[0.08] dark:bg-gray-950/40">
+              <div>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">AI 策划风格候选</div>
+                    <div className="mt-0.5 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                      使用 AI 策划返回的风格候选动态生成风格板。
                     </div>
-                    <span
-                      className={`rounded px-2 py-1 text-[11px] font-semibold ${styleCandidates.length ? 'bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-200' : 'bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-200'}`}
-                    >
-                      {styleCandidates.length ? `${styleCandidates.length} 个候选` : '暂无候选'}
-                    </span>
                   </div>
-                  {!styleCandidates.length && (
-                    <div className="rounded-lg border border-dashed border-gray-300 bg-white/60 px-3 py-4 text-center text-xs leading-relaxed text-gray-500 dark:border-white/[0.12] dark:bg-gray-900/50 dark:text-gray-400">
-                      当前策划结果没有风格候选。请重新执行 AI 策划后再生成风格板。
-                    </div>
-                  )}
+                  <span
+                    className={`rounded px-2 py-1 text-[11px] font-semibold ${styleCandidates.length ? 'bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-200' : 'bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-200'}`}
+                  >
+                    {styleCandidates.length ? `${styleCandidates.length} 个候选` : '暂无候选'}
+                  </span>
                 </div>
+                {!styleCandidates.length && (
+                  <div className="rounded-lg border border-dashed border-gray-300 bg-white/60 px-3 py-4 text-center text-xs leading-relaxed text-gray-500 dark:border-white/[0.12] dark:bg-gray-900/50 dark:text-gray-400">
+                    当前策划结果没有风格候选。请重新执行 AI 策划后再生成风格板。
+                  </div>
+                )}
               </div>
-              {styleError && (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">
-                  {styleError}
-                </div>
-              )}
-              {activeStyleCandidates.length > 0 && (
-                <div
-                  className={`mt-3 grid gap-2 rounded-xl transition sm:grid-cols-3 ${getGuideFocusClass(guideState.target === 'style-choice')}`}
-                >
-                  {activeStyleCandidates.map((candidate, index) => {
-                    const imageState = styleImages.find((image) => image.candidateIndex === index)
-                    const isSelected = selectedStyleIndex === index && imageState?.status === 'done'
-                    const previewImageId = imageState?.status === 'done' ? imageState.imageId : undefined
-                    const canSelect = Boolean(previewImageId)
-                    const canPreview = Boolean(previewImageId && imageState?.dataUrl)
-                    const canRetryStyleImage = imageState?.status === 'error' || imageState?.status === 'stopped'
-                    const canOpenFailureDetail = canRetryStyleImage
-                    return (
-                      <div
-                        key={`${candidate.label}-${index}`}
-                        onMouseEnter={(event) => updateStylePreview(candidate, imageState, event)}
-                        onMouseMove={(event) => updateStylePreview(candidate, imageState, event)}
-                        onMouseLeave={() => setStylePreview(null)}
-                        className={`relative min-w-0 overflow-hidden rounded-xl border text-left transition ${isSelected ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/15 dark:border-violet-300/70 dark:bg-violet-500/10' : canSelect ? 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:hover:bg-white/[0.05]' : 'border-gray-200 bg-white opacity-80 dark:border-white/[0.08] dark:bg-gray-900'}`}
-                      >
-                        {canPreview && previewImageId && (
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              openStylePreview(previewImageId)
-                            }}
-                            title="查看风格板大图"
-                            aria-label={`查看 ${candidate.label} 风格板大图`}
-                            className="absolute right-2 top-2 z-10 inline-flex h-8 items-center gap-1 rounded-lg bg-white/95 px-2 text-[11px] font-semibold text-gray-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white dark:bg-gray-950/90 dark:text-gray-100 dark:ring-white/10 dark:hover:bg-gray-900"
-                          >
-                            <EyeIcon className="h-3.5 w-3.5" />
-                            查看
-                          </button>
-                        )}
+            </div>
+            {styleError && (
+              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">
+                {styleError}
+              </div>
+            )}
+            {activeStyleCandidates.length > 0 && (
+              <div
+                className={`mt-3 grid gap-2 rounded-xl transition sm:grid-cols-3 ${getGuideFocusClass(guideState.target === 'style-choice')}`}
+              >
+                {activeStyleCandidates.map((candidate, index) => {
+                  const imageState = styleImages.find((image) => image.candidateIndex === index)
+                  const isSelected = selectedStyleIndex === index && imageState?.status === 'done'
+                  const previewImageId = imageState?.status === 'done' ? imageState.imageId : undefined
+                  const canSelect = Boolean(previewImageId)
+                  const canPreview = Boolean(previewImageId && imageState?.dataUrl)
+                  const canRetryStyleImage = imageState?.status === 'error' || imageState?.status === 'stopped'
+                  const canOpenFailureDetail = canRetryStyleImage
+                  return (
+                    <div
+                      key={`${candidate.label}-${index}`}
+                      onMouseEnter={(event) => updateStylePreview(candidate, imageState, event)}
+                      onMouseMove={(event) => updateStylePreview(candidate, imageState, event)}
+                      onMouseLeave={() => setStylePreview(null)}
+                      className={`relative min-w-0 overflow-hidden rounded-xl border text-left transition ${isSelected ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-500/15 dark:border-violet-300/70 dark:bg-violet-500/10' : canSelect ? 'border-gray-200 bg-white hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:hover:bg-white/[0.05]' : 'border-gray-200 bg-white opacity-80 dark:border-white/[0.08] dark:bg-gray-900'}`}
+                    >
+                      {canPreview && previewImageId && (
                         <button
                           type="button"
-                          onClick={() => {
-                            if (canSelect) {
-                              selectStyleCandidate(index)
-                              return
-                            }
-                            if (canOpenFailureDetail) openStyleFailureDetail(candidate, index, imageState)
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openStylePreview(previewImageId)
                           }}
-                          disabled={!canSelect && !canOpenFailureDetail}
-                          className="block h-full w-full text-left disabled:cursor-not-allowed"
+                          title="查看风格板大图"
+                          aria-label={`查看 ${candidate.label} 风格板大图`}
+                          className="absolute right-2 top-2 z-10 inline-flex h-8 items-center gap-1 rounded-lg bg-white/95 px-2 text-[11px] font-semibold text-gray-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white dark:bg-gray-950/90 dark:text-gray-100 dark:ring-white/10 dark:hover:bg-gray-900"
                         >
-                          <div className="aspect-square bg-gray-100 dark:bg-white/[0.04]">
-                            {imageState?.status === 'done' && imageState.dataUrl ? (
-                              <img
-                                src={imageState.dataUrl}
-                                alt={candidate.label}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-xs text-gray-400">
-                                <span>{getStyleImagePlaceholder(imageState?.status)}</span>
-                                {canOpenFailureDetail && (
-                                  <span className="rounded bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-600 dark:bg-red-400/10 dark:text-red-200">
-                                    点击查看 / 重试
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <div className="p-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="min-w-0 truncate text-xs font-semibold text-gray-900 dark:text-gray-100">
-                                {candidate.label}
-                              </span>
-                              {isSelected && (
-                                <span className="shrink-0 rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                  已选
+                          <EyeIcon className="h-3.5 w-3.5" />
+                          查看
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (canSelect) {
+                            selectStyleCandidate(index)
+                            return
+                          }
+                          if (canOpenFailureDetail) openStyleFailureDetail(candidate, index, imageState)
+                        }}
+                        disabled={!canSelect && !canOpenFailureDetail}
+                        className="block h-full w-full text-left disabled:cursor-not-allowed"
+                      >
+                        <div className="aspect-square bg-gray-100 dark:bg-white/[0.04]">
+                          {imageState?.status === 'done' && imageState.dataUrl ? (
+                            <img
+                              src={imageState.dataUrl}
+                              alt={candidate.label}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-xs text-gray-400">
+                              <span>{getStyleImagePlaceholder(imageState?.status)}</span>
+                              {canOpenFailureDetail && (
+                                <span className="rounded bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-600 dark:bg-red-400/10 dark:text-red-200">
+                                  点击查看 / 重试
                                 </span>
                               )}
                             </div>
-                            <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-                              {candidate.description}
-                            </div>
+                          )}
+                        </div>
+                        <div className="p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 truncate text-xs font-semibold text-gray-900 dark:text-gray-100">
+                              {candidate.label}
+                            </span>
+                            {isSelected && (
+                              <span className="shrink-0 rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                已选
+                              </span>
+                            )}
                           </div>
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-              {stylePreview && (
-                <div
-                  className="pointer-events-none fixed z-50 hidden w-[420px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl sm:block dark:border-white/[0.08] dark:bg-gray-950"
-                  style={{ left: stylePreview.left, top: stylePreview.top }}
-                >
-                  <img
-                    src={stylePreview.dataUrl}
-                    alt=""
-                    className="aspect-square w-full bg-gray-100 object-contain dark:bg-white/[0.04]"
-                  />
-                  <div className="border-t border-gray-100 p-3 dark:border-white/[0.08]">
-                    <div className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      {stylePreview.label}
+                          <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                            {candidate.description}
+                          </div>
+                        </div>
+                      </button>
                     </div>
-                    <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                      {stylePreview.description}
-                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {stylePreview && (
+              <div
+                className="pointer-events-none fixed z-50 hidden w-[420px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl sm:block dark:border-white/[0.08] dark:bg-gray-950"
+                style={{ left: stylePreview.left, top: stylePreview.top }}
+              >
+                <img
+                  src={stylePreview.dataUrl}
+                  alt=""
+                  className="aspect-square w-full bg-gray-100 object-contain dark:bg-white/[0.04]"
+                />
+                <div className="border-t border-gray-100 p-3 dark:border-white/[0.08]">
+                  <div className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {stylePreview.label}
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    {stylePreview.description}
                   </div>
                 </div>
-              )}
-              {selectedStyleCandidate && selectedStyleImage?.imageId && (
-                <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs leading-relaxed text-violet-800 dark:border-violet-300/20 dark:bg-violet-400/10 dark:text-violet-200">
-                  {isMainListingPlan
-                    ? `已选择「${selectedStyleCandidate.label}」，但当前 MAIN 主图不会附加这张风格板；切换到附图或 A+ 时才会作为隐藏参考。`
-                    : `已选择「${selectedStyleCandidate.label}」。正式生成时会隐藏附加这张风格参考板作为最后一张参考图，用于统一字体感觉、色板、光影、材质和标注样式，不复制其中占位文字、固定版式或产品摆放；风格板不占上传参考图数量。`}
-                </div>
-              )}
-              {uploadedReferenceLimitExceeded && (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
-                  上传参考图不能超过 {API_MAX_IMAGES} 张；风格板单独使用，不计入这个数量。
-                </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+            {selectedStyleCandidate && selectedStyleImage?.imageId && (
+              <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs leading-relaxed text-violet-800 dark:border-violet-300/20 dark:bg-violet-400/10 dark:text-violet-200">
+                {isMainListingPlan
+                  ? `已选择「${selectedStyleCandidate.label}」，但当前 MAIN 主图不会附加这张风格板；切换到附图或 A+ 时才会作为隐藏参考。`
+                  : `已选择「${selectedStyleCandidate.label}」。正式生成时会隐藏附加这张风格参考板作为最后一张参考图，用于统一字体感觉、色板、光影、材质和标注样式，不复制其中占位文字、固定版式或产品摆放；风格板不占上传参考图数量。`}
+              </div>
+            )}
+            {uploadedReferenceLimitExceeded && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
+                上传参考图不能超过 {API_MAX_IMAGES} 张；风格板单独使用，不计入这个数量。
+              </div>
+            )}
+          </div>
+        )}
+        {!hasPlanOptions && (
+          <div className="planner-empty">
+            <h3>先生成图片策划</h3>
+            <p>有了商品方案后，这里会显示风格候选和风格板。</p>
+            <button type="button" onClick={() => setStage('details')}>
+              填写商品资料
+            </button>
+          </div>
+        )}
+        {hasPlanOptions && (
+          <div className="planner-stage-footer">
+            <span>选定风格后，可逐张查看方案并生成图片。MAIN 主图保留原有白底规则。</span>
+            <button type="button" onClick={() => setStage('production')}>
+              进入图片制作 →
+            </button>
+          </div>
+        )}
+      </div>
+      <div
+        hidden={stage !== 'production' && stage !== 'results'}
+        className={'planner-production ' + (stage === 'results' ? 'planner-results-layout' : '')}
+      >
+        <aside
+          data-no-drag-select
+          hidden={stage !== 'production'}
+          aria-label="图片位列表"
+          className="planner-slot-list"
+        >
           {plannerMode === 'listing' && imagePlans.length > 0 && (
             <div className={`mb-4 rounded-xl border p-3 transition ${getGuidePanelClass(planListGuideActive)}`}>
               {planListGuideActive && <div className={GUIDE_HINT_CLASS}>{guideState.message}</div>}
-              <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="mb-3 flex flex-col gap-3">
                 <div>
                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">逐张策划</div>
                   <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -2339,7 +2451,7 @@ export default function AmazonPlanner() {
           {plannerMode === 'aplus' && aPlusPlansWithSizes.length > 0 && (
             <div className={`mb-4 rounded-xl border p-3 transition ${getGuidePanelClass(planListGuideActive)}`}>
               {planListGuideActive && <div className={GUIDE_HINT_CLASS}>{guideState.message}</div>}
-              <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="mb-3 flex flex-col gap-3">
                 <div>
                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">A+ 模块编排</div>
                   <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -2462,134 +2574,253 @@ export default function AmazonPlanner() {
               </div>
             </div>
           )}
-          {plannerMode === 'aplus' && aPlusPlansWithSizes.length === 0 && (
-            <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">A+ 模块编排</div>
-                  <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    当前选择 {getAPlusContentTypeLabel(aPlusType)}，可先调整模块数量，再点击 AI策划A+。
+          {!hasPlanOptions && (
+            <div className="planner-empty">
+              <h3>还没有图片方案</h3>
+              <p>先填写商品资料并生成策划。</p>
+              <button type="button" onClick={() => setStage('details')}>
+                返回商品资料
+              </button>
+            </div>
+          )}
+        </aside>
+        <section
+          data-no-drag-select
+          hidden={stage !== 'production'}
+          aria-label="当前方案内容"
+          className="planner-plan-content"
+        >
+          <div className="planner-panel-heading">
+            <div>
+              <p>当前图片方案</p>
+              <h3>{actionSlot ? actionSlot + ' · ' + actionLabel : '选择一个图片位'}</h3>
+            </div>
+            <span>{actionPositionLabel}</span>
+          </div>
+          {hasSelectedPlan ? (
+            <>
+              <MarkdownRenderer
+                key={currentActionKey}
+                content={(plannerMode === 'aplus' ? selectedAPlusPlan?.planMarkdown : selectedPlan?.planMarkdown) ?? ''}
+                className="planner-plan-markdown"
+              />
+              {plannerMode === 'aplus' && selectedAPlusPlan && (
+                <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                      A+ 文案 · {selectedAPlusPlan.slot}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={copyAPlusText}
+                      disabled={!selectedAPlusText.trim()}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${selectedAPlusText.trim() ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                    >
+                      <CopyIcon className="h-3.5 w-3.5" />
+                      复制文案
+                    </button>
+                  </div>
+                  <textarea
+                    value={
+                      selectedAPlusText ||
+                      (isAPlusTextModule(selectedAPlusPlan)
+                        ? '该模块暂未生成标题/正文文案。'
+                        : '当前模块通常不需要外部标题/正文文案。')
+                    }
+                    className="h-28 w-full resize-none rounded-lg border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200"
+                    spellCheck={false}
+                    readOnly
+                  />
+                  <div className="mt-2 text-[11px] text-gray-400">
+                    外部 A+ 文案用于亚马逊模块文本区，不会写入图片生成 Prompt。
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={restoreDefaultAPlusModules}
-                    disabled={isPlanning || aPlusSpecsAreDefault}
-                    title="恢复当前 A+ 类型默认模块"
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${!isPlanning && !aPlusSpecsAreDefault ? 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
-                  >
-                    <RefreshIcon className="h-3.5 w-3.5" />
-                    恢复默认
-                  </button>
-                  <span className="rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
-                    {aPlusSpecs.length} 张
-                  </span>
+              )}
+              <details className="planner-disclosure mt-4">
+                <summary>原始英文提示词与负面词</summary>
+                <div data-selectable-text className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed">
+                  {activeVisiblePrompt}
                 </div>
-              </div>
-              <div className={PLAN_LIST_CLASS}>
-                {aPlusSpecs.map((spec, index) => (
-                  <div
-                    key={spec.slot}
-                    className="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-2 dark:border-white/[0.08] dark:bg-gray-900"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="min-w-0 flex-1">
+              </details>
+              {actionSlot && (
+                <ProjectResults project={project} slotId={getProjectSlotId(actionSlot)} onFinalChange={onFinalChange} />
+              )}
+            </>
+          ) : (
+            <div className="planner-empty">
+              <p>选择左侧图片位，在这里查看完整策划内容。</p>
+            </div>
+          )}
+        </section>
+        <section hidden={stage !== 'results'} aria-label="生成记录与导出" className="planner-results">
+          <div className="planner-panel-heading">
+            <div>
+              <p>生成记录</p>
+              <h3>筛选图片与批量导出</h3>
+            </div>
+          </div>
+          <ProjectResults project={project} onFinalChange={onFinalChange} />
+          <details className="mt-6">
+            <summary className="cursor-pointer py-3 text-sm font-medium">全部历史（含旧版及其他功能生成记录）</summary>
+            {resultsPanel}
+          </details>
+        </section>
+        <aside data-no-drag-select aria-label="生成操作与设置" className="planner-generation-settings">
+          <div data-no-drag-select hidden={stage !== 'production'}>
+            {showStickyActions && (
+              <>
+                <div
+                  data-amazon-action-bar
+                  className={`rounded-xl border p-3 transition ${getGuidePanelClass(actionBarGuideActive)}`}
+                >
+                  <div className="flex flex-col gap-3">
+                    {actionBarGuideActive && <div className={GUIDE_HINT_CLASS}>{guideState.message}</div>}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-600 dark:bg-white/[0.08] dark:text-gray-300">
-                            {spec.slot}
+                          <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                            {actionSlot ?? (plannerMode === 'aplus' ? 'A+' : '当前')}
                           </span>
-                          <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                            {getAPlusModuleDisplayName(spec)}
+                          <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            {actionLabel ?? (plannerMode === 'aplus' ? '请选择 A+ 模块' : '当前图片方案')}
                           </span>
-                          <span className="text-xs text-gray-400">{getAPlusModuleEnglishName(spec)}</span>
+                          <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-white/[0.08] dark:text-gray-300">
+                            {actionPositionLabel}
+                          </span>
                         </div>
                         <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                          上传 {getAPlusModuleUploadSize(spec)} · 生成{' '}
-                          {getAPlusModuleGenerationSize(spec, resolutionTier)}
-                          {isAPlusTextModule(spec) ? ' · 含标题/正文' : ''}
+                          {targetSize} / {generationParamLabel}
+                          {plannerMode === 'aplus' && selectedAPlusPlan
+                            ? ` · 上传建议 ${selectedAPlusPlan.uploadSize}`
+                            : ''}
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => addAPlusModuleAfter(index)}
-                          disabled={isPlanning || aPlusSpecs.length >= MAX_A_PLUS_MODULE_COUNT}
-                          aria-label={`在 ${spec.slot} 后添加同尺寸 A+ 模块`}
-                          title={
-                            aPlusSpecs.length >= MAX_A_PLUS_MODULE_COUNT
-                              ? `最多 ${MAX_A_PLUS_MODULE_COUNT} 张`
-                              : '添加同尺寸模块'
-                          }
-                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${!isPlanning && aPlusSpecs.length < MAX_A_PLUS_MODULE_COUNT ? 'border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200 dark:hover:bg-blue-400/20' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                          onClick={() => stepVisiblePlan(-1)}
+                          disabled={!canGoPrev}
+                          className={`inline-flex h-9 items-center gap-1 rounded-lg border px-2.5 text-xs font-medium transition ${canGoPrev ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
                         >
-                          <PlusIcon className="h-3.5 w-3.5" />
+                          <ChevronLeftIcon className="h-3.5 w-3.5" />
+                          上一张
                         </button>
                         <button
                           type="button"
-                          onClick={() => removeAPlusModuleAt(index)}
-                          disabled={isPlanning || aPlusSpecs.length <= MIN_A_PLUS_MODULE_COUNT}
-                          aria-label={`删除 ${spec.slot} A+ 模块`}
-                          title={
-                            aPlusSpecs.length <= MIN_A_PLUS_MODULE_COUNT
-                              ? `至少保留 ${MIN_A_PLUS_MODULE_COUNT} 张`
-                              : '删除模块'
-                          }
-                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${!isPlanning && aPlusSpecs.length > MIN_A_PLUS_MODULE_COUNT ? 'border-red-100 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200 dark:hover:bg-red-400/20' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
+                          onClick={() => stepVisiblePlan(1)}
+                          disabled={!canGoNext}
+                          className={`inline-flex h-9 items-center gap-1 rounded-lg border px-2.5 text-xs font-medium transition ${currentActionSubmitted && canGoNext ? 'border-blue-600 bg-blue-600 text-white shadow-sm hover:bg-blue-500' : canGoNext ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
                         >
-                          <TrashIcon className="h-3.5 w-3.5" />
+                          下一张
+                          <ChevronRightIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
+
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-xs font-medium ${currentActionSubmitted ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200' : currentActionFilled ? 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200' : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200'}`}
+                    >
+                      {actionGuidance}
+                      {mainStyleGuidance && (
+                        <span className="mt-1 block text-[11px] font-normal opacity-80">{mainStyleGuidance}</span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      {actionProgressSteps.map((step) => (
+                        <div
+                          key={step.label}
+                          className={`rounded-lg border px-2 py-1.5 ${getActionStepClass(step.status)}`}
+                        >
+                          <div className="truncate text-[10px] font-bold">{step.label}</div>
+                          <div className="mt-0.5 truncate text-[10px] opacity-80">{step.detail}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={openPromptEditor}
+                        disabled={actionDisabled}
+                        className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${actionDisabled ? 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+                      >
+                        <EyeIcon className="h-3.5 w-3.5" />
+                        提示词
+                      </button>
+                      <button
+                        type="button"
+                        onClick={copyPrompt}
+                        disabled={actionDisabled}
+                        className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${actionDisabled ? 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+                      >
+                        <CopyIcon className="h-3.5 w-3.5" />
+                        复制
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyPrompt()}
+                        disabled={actionDisabled}
+                        className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition ${actionDisabled ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : currentActionFilled ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200'}`}
+                      >
+                        {currentActionFilled ? (
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <PhotoIcon className="h-3.5 w-3.5" />
+                        )}
+                        {currentActionFilled ? '已准备' : '准备'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={applyAndSubmit}
+                        disabled={submitDisabled}
+                        className={`inline-flex h-9 items-center justify-center rounded-lg px-2 text-xs font-semibold transition ${submitDisabled ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-white/[0.06] dark:text-gray-600' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
+                      >
+                        {isSubmitting || currentSlotRunning
+                          ? '生成中…'
+                          : currentActionSubmitted
+                            ? '生成新版本'
+                            : '提交生成'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+            {hasPlanOptions && (
+              <button type="button" className="planner-secondary-link" onClick={() => setStage('style')}>
+                {selectedStyleCandidate ? '当前风格：' + selectedStyleCandidate.label + ' · 更换' : '前往选择风格板'}
+              </button>
+            )}
+            <details className="planner-disclosure mt-3">
+              <summary>生成检查与规格</summary>
+              <div className="grid grid-cols-2 gap-2">
+                {checks.map((check) => (
+                  <div
+                    key={check.label}
+                    className={`rounded-xl border px-3 py-2 ${check.status === 'ready' ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200' : check.status === 'missing' ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200'}`}
+                  >
+                    <div className="text-xs font-semibold">{check.label}</div>
+                    <div className="mt-0.5 text-[11px] opacity-80">{check.detail}</div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            {checks.map((check) => (
-              <div
-                key={check.label}
-                className={`rounded-xl border px-3 py-2 ${check.status === 'ready' ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200' : check.status === 'missing' ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200'}`}
-              >
-                <div className="text-xs font-semibold">{check.label}</div>
-                <div className="mt-0.5 text-[11px] opacity-80">{check.detail}</div>
-              </div>
-            ))}
+            </details>
           </div>
-          {plannerMode === 'aplus' && selectedAPlusPlan && (
-            <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-white/[0.08] dark:bg-gray-950">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                  A+ 文案 · {selectedAPlusPlan.slot}
-                </span>
-                <button
-                  type="button"
-                  onClick={copyAPlusText}
-                  disabled={!selectedAPlusText.trim()}
-                  className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${selectedAPlusText.trim() ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]' : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'}`}
-                >
-                  <CopyIcon className="h-3.5 w-3.5" />
-                  复制文案
-                </button>
-              </div>
-              <textarea
-                value={
-                  selectedAPlusText ||
-                  (isAPlusTextModule(selectedAPlusPlan)
-                    ? '该模块暂未生成标题/正文文案。'
-                    : '当前模块通常不需要外部标题/正文文案。')
-                }
-                className="h-28 w-full resize-none rounded-lg border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200"
-                spellCheck={false}
-                readOnly
-              />
-              <div className="mt-2 text-[11px] text-gray-400">
-                外部 A+ 文案用于亚马逊模块文本区，不会写入图片生成 Prompt。
-              </div>
-            </div>
+          <details className="planner-disclosure mt-3" open={stage === 'results' ? true : undefined}>
+            <summary>
+              通用生图输入栏 <span>提示词、模型与高级参数</span>
+            </summary>
+            {generationPanel}
+          </details>
+          {stage === 'production' && (
+            <button type="button" className="planner-secondary-link" onClick={() => setStage('results')}>
+              查看生成记录与导出 →
+            </button>
           )}
-        </div>
+        </aside>
       </div>
       {promptEditor && (
         <div

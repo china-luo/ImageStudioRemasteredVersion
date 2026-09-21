@@ -1,4 +1,5 @@
-import type { AgentConversation, AmazonPlannerSession, InputImage, TaskRecord } from '../types'
+import type { AgentConversation, AmazonPlannerSession, GenerationProject, InputImage, TaskRecord } from '../types'
+import { collectProjectImageIds } from './generationProjects'
 import type { SopWorkspaceDraft } from './workspaceDrafts'
 
 export function collectTaskImageIds(
@@ -45,9 +46,12 @@ export function collectReferencedImageIds(options: {
   agentConversations?: AgentConversation[]
   agentInputDrafts?: Array<{ inputImages: InputImage[] }>
   plannerSessions?: AmazonPlannerSession[]
+  generationProjects?: GenerationProject[]
   collectPlannerSessionImageIds?: (session: AmazonPlannerSession) => string[]
 }): Set<string> {
   const referenced = new Set<string>()
+  for (const project of options.generationProjects ?? [])
+    for (const id of collectProjectImageIds(project)) referenced.add(id)
   for (const image of options.inputImages ?? []) referenced.add(image.id)
   for (const image of options.galleryInputDraft?.inputImages ?? []) referenced.add(image.id)
   for (const id of options.sopDraftImageIds ?? []) referenced.add(id)
@@ -73,6 +77,7 @@ export function collectReferencedImageIdsFromState(options: {
   agentConversations: AgentConversation[]
   agentInputDrafts: Array<{ inputImages: InputImage[] }>
   plannerSessions?: AmazonPlannerSession[]
+  generationProjects?: GenerationProject[]
   collectPlannerSessionImageIds?: (session: AmazonPlannerSession) => string[]
 }): Set<string> {
   return collectReferencedImageIds(options)
