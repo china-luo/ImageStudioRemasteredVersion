@@ -16,6 +16,8 @@ export interface DevProxyRequestTarget {
 
 const DEFAULT_PROXY_PREFIX = '/api-proxy'
 export const LOCAL_DYNAMIC_PROXY_TARGET = 'http://127.0.0.1/__dynamic-api-proxy__/v1'
+export const LOCAL_PROXY_CONFIG_PATH = '/__amazon-image-studio/proxy-config'
+let runtimeProxyConfig: DevProxyConfig | null = null
 interface BuildApiUrlOptions {
   prefixV1?: boolean
 }
@@ -151,10 +153,30 @@ export function resolveDevProxyConfig(input: unknown, isDev: boolean): DevProxyC
 }
 
 export function readClientDevProxyConfig(): DevProxyConfig | null {
-  return resolveDevProxyConfig(
-    typeof __DEV_PROXY_CONFIG__ === 'undefined' ? null : __DEV_PROXY_CONFIG__,
-    import.meta.env.DEV,
+  return (
+    runtimeProxyConfig ??
+    resolveDevProxyConfig(
+      typeof __DEV_PROXY_CONFIG__ === 'undefined' ? null : __DEV_PROXY_CONFIG__,
+      import.meta.env.DEV,
+    )
   )
+}
+
+// A production bundle may run under local Vite preview or a static host.
+// Discover the running server's capability instead of baking it into the build.
+export async function initializeLocalProxyConfig(): Promise<void> {
+  runtimeProxyConfig = null
+  if (typeof window === 'undefined' || window.imageStudioDesktop?.isDesktop || import.meta.env.DEV) return
+  const { hostname, protocol } = window.location
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname) || !['http:', 'https:'].includes(protocol)) return
+  try {
+    const response = await fetch(LOCAL_PROXY_CONFIG_PATH, { cache: 'no-store', signal: AbortSignal.timeout(3000) })
+    if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+      runtimeProxyConfig = normalizeDevProxyConfig(await response.json())
+    }
+  } catch {
+    // Static hosting remains usable without a local proxy service.
+  }
 }
 
 export function isApiProxyAvailable(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
@@ -162,7 +184,17 @@ export function isApiProxyAvailable(proxyConfig: DevProxyConfig | null = readCli
 }
 
 export function isApiProxyLocked(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return readRuntimeEnv(import.meta.env.VITE_API_PROXY_LOCKED) === 'true' && isApiProxyAvailable(proxyConfig)
+  return (
+    (Boolean(proxyConfig?.enabled) && proxyConfig?.target === LOCAL_DYNAMIC_PROXY_TARGET) ||
+    (readRuntimeEnv(import.meta.env.VITE_API_PROXY_LOCKED) === 'true' && isApiProxyAvailable(proxyConfig))
+  )
+}
+
+export function getApiConnectionHint(): string {
+  if (typeof window !== 'undefined' && window.imageStudioDesktop?.isDesktop)
+    return '桌面版通过内置网络通道连接接口，无需开启浏览器 API 代理。请检查 API URL、网络和接口服务状态。'
+  if (isApiProxyAvailable()) return '请检查 API URL、网络和代理服务；在设置 → API 配置 → AI策划中查看 API 代理状态。'
+  return '当前页面未提供 API 代理。请使用本地启动方式（npm run dev 或 npm run preview）或桌面版，或使用允许浏览器跨域的接口。'
 }
 
 export function shouldUseApiProxy(

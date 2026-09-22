@@ -1,5 +1,81 @@
-import { describe, expect, it } from 'vitest'
-import { buildApiUrl, LOCAL_DYNAMIC_PROXY_TARGET, resolveDevProxyRequestTarget, shouldUseApiProxy } from './devProxy'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  buildApiUrl,
+  LOCAL_DYNAMIC_PROXY_TARGET,
+  resolveDevProxyRequestTarget,
+  shouldUseApiProxy,
+  initializeLocalProxyConfig,
+  readClientDevProxyConfig,
+  isApiProxyLocked,
+  getApiConnectionHint,
+} from './devProxy'
+
+describe('local preview proxy discovery', () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    await initializeLocalProxyConfig()
+  })
+
+  it('uses the running preview proxy in a production browser build', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubGlobal('window', { location: { hostname: '127.0.0.1', protocol: 'http:' } })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ enabled: true, target: LOCAL_DYNAMIC_PROXY_TARGET, prefix: '/api-proxy', secure: true }),
+            { headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    )
+    await initializeLocalProxyConfig()
+    const config = readClientDevProxyConfig()
+    expect(config?.enabled).toBe(true)
+    expect(isApiProxyLocked(config)).toBe(true)
+    expect(
+      buildApiUrl(
+        'https://planner.example/v1',
+        'responses',
+        config,
+        shouldUseApiProxy(false, config, 'https://planner.example/v1'),
+      ),
+    ).toBe('/api-proxy/https%3A%2F%2Fplanner.example%2Fv1/responses')
+    expect(getApiConnectionHint()).toContain('AI策划中查看 API 代理状态')
+  })
+
+  it('does not mistake a static host HTML fallback for a proxy', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubGlobal('window', { location: { hostname: 'localhost', protocol: 'http:' } })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<html>App</html>', { headers: { 'content-type': 'text/html' } })),
+    )
+    await initializeLocalProxyConfig()
+    expect(readClientDevProxyConfig()).toBeNull()
+    expect(getApiConnectionHint()).toContain('当前页面未提供 API 代理')
+  })
+
+  it('keeps desktop requests on the native transport', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubGlobal('window', { imageStudioDesktop: { isDesktop: true } })
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    await initializeLocalProxyConfig()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(getApiConnectionHint()).toContain('内置网络通道')
+  })
+
+  it('does not probe remote deployments for a local proxy', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubGlobal('window', { location: { hostname: 'studio.example.com', protocol: 'https:' } })
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    await initializeLocalProxyConfig()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
 
 describe('buildApiUrl', () => {
   it('uses the same-origin proxy prefix when API proxy is enabled', () => {

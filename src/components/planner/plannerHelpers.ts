@@ -1,6 +1,7 @@
 import { canApiProfileGenerateImages } from '../../lib/apiProfiles'
 import { DEFAULT_AMAZON_PROMPT_DRAFT, type AmazonPromptDraft } from '../../lib/amazonPrompt'
 import { summarizeGenerationError } from '../../lib/generationError'
+import { getApiConnectionHint } from '../../lib/devProxy'
 import {
   A_PLUS_CONTENT_TYPES,
   areAPlusModuleSpecsEquivalent,
@@ -260,7 +261,7 @@ export function getPlannerFailureDetail(err: unknown): string {
     hints.push('上游网关等待策划模型返回时超时；应用会在 Responses API 超时时自动改用 Chat Completions 重试一次。')
   }
   if (/failed to fetch|network|cors|load failed|连接|网络|跨域/.test(lower)) {
-    hints.push('浏览器未能连接到策划接口；请检查网络、跨域设置，或开启应用里的 API 代理。')
+    hints.push(getApiConnectionHint())
   }
 
   return [message, ...hints].join('\n\n')

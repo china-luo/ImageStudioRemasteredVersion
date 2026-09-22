@@ -207,7 +207,7 @@ test('generation versions remain associated with a renamed project and export on
 }) => {
   const project = await seedProject(page)
   let requestCount = 0
-  await page.route('https://image-api.test/**', async (route) => {
+  await page.route(/(?:https:\/\/image-api\.test\/|\/api-proxy\/https%3A%2F%2Fimage-api\.test)/, async (route) => {
     requestCount++
     await route.fulfill({
       contentType: 'application/json',
@@ -232,6 +232,13 @@ test('generation versions remain associated with a renamed project and export on
   await page.reload()
   await stage(page, '筛选与导出')
   await expect(results.getByText('已完成', { exact: true })).toHaveCount(2)
+  const overviewGrid = results.locator('.project-version-grid--overview')
+  await expect(overviewGrid).toBeVisible()
+  await expect(overviewGrid.locator('.project-version-context')).toHaveCount(2)
+  const overviewCardRows = await overviewGrid.locator('[data-project-task-id]').evaluateAll((items) =>
+    items.map((item) => Math.round(item.getBoundingClientRect().y)),
+  )
+  expect(new Set(overviewCardRows).size).toBe(1)
   const downloadEvent = page.waitForEvent('download')
   await results.getByRole('button', { name: '导出定稿（1）', exact: true }).click()
   const download = await downloadEvent
@@ -247,7 +254,42 @@ test('generation versions remain associated with a renamed project and export on
   expect(manifest.images[0].taskId).toBe(taskIds[1])
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.evaluate(() => window.scrollTo(0, 0))
+  const [navigationBox, resultsStageBox, settingsBox, versionGridBox] = await Promise.all([
+    page.getByRole('navigation', { name: '功能导航' }).boundingBox(),
+    page.getByRole('region', { name: '生成记录与导出' }).boundingBox(),
+    page.getByRole('complementary', { name: '生成操作与设置' }).boundingBox(),
+    results.locator('.project-version-grid').boundingBox(),
+  ])
+  const versionBoxes = await results.locator('[data-project-task-id]').evaluateAll((items) =>
+    items.map((item) => {
+      const box = item.getBoundingClientRect()
+      return { x: box.x, width: box.width }
+    }),
+  )
+  expect(navigationBox!.width).toBeGreaterThanOrEqual(224)
+  expect(Math.abs(resultsStageBox!.x - settingsBox!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(resultsStageBox!.width - settingsBox!.width)).toBeLessThanOrEqual(1)
+  expect(versionBoxes[0]!.width).toBeGreaterThanOrEqual(280)
+  const leftGap = versionBoxes[0]!.x - versionGridBox!.x
+  const rightGap = versionGridBox!.x + versionGridBox!.width - (versionBoxes.at(-1)!.x + versionBoxes.at(-1)!.width)
+  expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(2)
   await page.screenshot({ path: 'output/playwright/ui-phase2-results.png', fullPage: true })
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  const wideGridBox = await results.locator('.project-version-grid').boundingBox()
+  const wideVersionBoxes = await results.locator('[data-project-task-id]').evaluateAll((items) =>
+    items.map((item) => {
+      const box = item.getBoundingClientRect()
+      return { x: box.x, width: box.width }
+    }),
+  )
+  const wideLeftGap = wideVersionBoxes[0]!.x - wideGridBox!.x
+  const wideRightGap =
+    wideGridBox!.x + wideGridBox!.width - (wideVersionBoxes.at(-1)!.x + wideVersionBoxes.at(-1)!.width)
+  expect(Math.abs(wideLeftGap - wideRightGap)).toBeLessThanOrEqual(2)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1920)
+  await page.screenshot({ path: 'output/playwright/layout-balance-1920.png', fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.screenshot({ path: 'output/playwright/ui-phase2-dark.png', fullPage: true, animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })

@@ -29,6 +29,7 @@ import { deleteUnreferencedImageIds, useStore } from '../store'
 import { getAllGenerationProjects, putGenerationProject, clearGenerationProjects } from './db'
 import { rememberActiveProject, PROJECT_DATA_EVENT, PROJECT_JOURNAL_KEY } from './generationProjects'
 import { PLANNER_WORKSPACE_KEY } from '../components/planner/plannerWorkspaceDraft'
+import { resetSiteBackground } from './siteBackground'
 
 export interface ClearOptions {
   clearConfig?: boolean
@@ -74,6 +75,7 @@ export async function clearData(options: ClearOptions = { clearConfig: true, cle
     useStore.setState({ dismissedCodexCliPrompts: [] })
     setSettings({ ...DEFAULT_SETTINGS })
     setParams({ ...DEFAULT_PARAMS })
+    resetSiteBackground()
   }
 
   showToast('所选数据已清空', 'success')

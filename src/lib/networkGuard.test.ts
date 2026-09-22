@@ -29,6 +29,8 @@ describe('networkGuard', () => {
 
   it('allows known API paths and fal queue paths', () => {
     expect(isAllowedProxyApiPath('/v1/chat/completions')).toBe(true)
+    expect(isAllowedProxyApiPath('/v1/models')).toBe(true)
+    expect(isAllowedProxyApiPath('/models')).toBe(true)
     expect(isAllowedProxyApiPath('/v1/images/generations')).toBe(true)
     expect(isAllowedProxyApiPath('/admin')).toBe(false)
     expect(isAllowedProxyApiPath('/openai/gpt-image-2/requests/abc/status', 'queue.fal.run')).toBe(true)

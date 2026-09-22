@@ -25,6 +25,7 @@ const FAL_ALLOWED_HOSTS = ['fal.run', 'fal.ai', 'queue.fal.run', 'rest.fal.ai']
 const ALLOWED_API_PATH_PATTERNS = [
   /^\/v1\/responses\/?$/,
   /^\/v1\/chat\/completions\/?$/,
+  /^\/v1\/models\/?$/,
   /^\/v1\/images\/(generations|edits|tasks\/[^/]+)\/?$/,
   /^\/v1\/api\/(RtTask01|RtQry01)\/?$/,
   /^\/api\/v1(\/|$)/,
@@ -32,6 +33,7 @@ const ALLOWED_API_PATH_PATTERNS = [
   /^\/images\/(generations|edits|tasks\/[^/]+)\/?$/,
   /^\/chat\/completions\/?$/,
   /^\/responses\/?$/,
+  /^\/models\/?$/,
   /^\/openai\//,
   /^\/fal-ai\//,
 ]

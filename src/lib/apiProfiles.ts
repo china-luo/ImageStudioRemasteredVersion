@@ -567,6 +567,16 @@ function normalizeProviderDrafts(input: unknown, customProviderIds: Set<string>)
   return entries.length ? Object.fromEntries(entries) : undefined
 }
 
+function normalizeAvailableModels(input: unknown): string[] | undefined {
+  if (!Array.isArray(input)) return undefined
+  const models = input
+    .filter((model): model is string => typeof model === 'string')
+    .map((model) => model.trim())
+    .filter(Boolean)
+  const unique = [...new Set(models)]
+  return unique.length ? unique : undefined
+}
+
 export function isAmazonPlannerProfile(profile: Pick<ApiProfile, 'provider' | 'apiMode'>): boolean {
   return profile.provider === 'openai' && (profile.apiMode === 'responses' || profile.apiMode === 'chat')
 }
@@ -741,6 +751,7 @@ export function normalizeApiProfile(
     model: isAliyunQwenImageProfile({ provider, baseUrl: normalizedBaseUrl, apiMode })
       ? getAliyunQwenImageModel(rawModel)
       : rawModel,
+    availableModels: normalizeAvailableModels(record.availableModels),
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : defaults.timeout,
     apiMode,
     codexCli: Boolean(record.codexCli),

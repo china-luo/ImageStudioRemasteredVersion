@@ -1,4 +1,4 @@
-import type { Plugin, ViteDevServer } from 'vite'
+import type { Plugin, ViteDevServer, PreviewServer } from 'vite'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
@@ -7,6 +7,7 @@ import https from 'node:https'
 import {
   type DevProxyConfig,
   LOCAL_DYNAMIC_PROXY_TARGET,
+  LOCAL_PROXY_CONFIG_PATH,
   normalizeDevProxyConfig,
   resolveDevProxyRequestTarget,
 } from './src/lib/devProxy'
@@ -98,62 +99,82 @@ function readExtraAllowedHosts(req: http.IncomingMessage, configured: string[] =
 }
 
 export function dynamicApiProxyPlugin(proxyConfig: DevProxyConfig): Plugin {
-  return {
-    name: 'amazon-image-studio-dynamic-api-proxy',
-    configureServer(viteServer) {
-      viteServer.middlewares.use((req, res, next) => {
-        const target = resolveDevProxyRequestTarget(req.url ?? '/', proxyConfig)
-        if (!target) {
-          next()
-          return
-        }
+  const configureServer = (viteServer: ViteDevServer | PreviewServer) => {
+    viteServer.middlewares.use((req, res, next) => {
+      if (req.url?.split('?')[0] === LOCAL_PROXY_CONFIG_PATH) {
         if (!isLocalRequest(req.socket.remoteAddress)) {
           writeProxyError(res, 403, 'Local API proxy requests only')
           return
         }
-        const guard = evaluateProxyRequest({
-          origin: typeof req.headers.origin === 'string' ? req.headers.origin : null,
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-store')
+        res.end(JSON.stringify(proxyConfig))
+        return
+      }
+      const target = resolveDevProxyRequestTarget(req.url ?? '/', proxyConfig)
+      if (!target) {
+        next()
+        return
+      }
+      if (!isLocalRequest(req.socket.remoteAddress)) {
+        writeProxyError(res, 403, 'Local API proxy requests only')
+        return
+      }
+      const guard = evaluateProxyRequest({
+        // Browsers omit Origin on same-origin GET requests. The local-only
+        // listener and host-derived origin keep this compatible without
+        // weakening cross-origin requests.
+        origin:
+          typeof req.headers.origin === 'string'
+            ? req.headers.origin
+            : typeof req.headers.host === 'string'
+              ? `http://${req.headers.host}`
+              : null,
+        method: req.method,
+        hostname: target.url.hostname,
+        pathname: target.url.pathname,
+        protocol: target.url.protocol,
+        extraAllowedHosts: readExtraAllowedHosts(req, proxyConfig.allowedHosts),
+      })
+      if (!guard.ok) {
+        writeProxyError(res, guard.status ?? 403, guard.error ?? 'Forbidden proxy request')
+        return
+      }
+
+      const headers = { ...req.headers }
+      if (proxyConfig.changeOrigin) headers.host = target.url.host
+
+      const transport = target.url.protocol === 'https:' ? https : http
+      const proxyRequest = transport.request(
+        target.url,
+        {
           method: req.method,
-          hostname: target.url.hostname,
-          pathname: target.url.pathname,
-          protocol: target.url.protocol,
-          extraAllowedHosts: readExtraAllowedHosts(req, proxyConfig.allowedHosts),
-        })
-        if (!guard.ok) {
-          writeProxyError(res, guard.status ?? 403, guard.error ?? 'Forbidden proxy request')
+          headers,
+          ...(target.url.protocol === 'https:' ? { rejectUnauthorized: proxyConfig.secure } : {}),
+        },
+        (proxyResponse) => {
+          res.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers)
+          proxyResponse.pipe(res)
+        },
+      )
+
+      proxyRequest.on('error', (error) => {
+        if (res.headersSent) {
+          res.destroy(error)
           return
         }
-
-        const headers = { ...req.headers }
-        if (proxyConfig.changeOrigin) headers.host = target.url.host
-
-        const transport = target.url.protocol === 'https:' ? https : http
-        const proxyRequest = transport.request(
-          target.url,
-          {
-            method: req.method,
-            headers,
-            ...(target.url.protocol === 'https:' ? { rejectUnauthorized: proxyConfig.secure } : {}),
-          },
-          (proxyResponse) => {
-            res.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers)
-            proxyResponse.pipe(res)
-          },
-        )
-
-        proxyRequest.on('error', (error) => {
-          if (res.headersSent) {
-            res.destroy(error)
-            return
-          }
-          res.statusCode = 502
-          res.setHeader('Content-Type', 'application/json; charset=utf-8')
-          res.end(JSON.stringify({ error: { message: `API proxy request failed: ${error.message}` } }))
-        })
-        req.on('aborted', () => proxyRequest.destroy())
-        req.pipe(proxyRequest)
+        res.statusCode = 502
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.end(JSON.stringify({ error: { message: `API proxy request failed: ${error.message}` } }))
       })
-    },
+      req.on('aborted', () => proxyRequest.destroy())
+      req.pipe(proxyRequest)
+    })
+  }
+  return {
+    name: 'amazon-image-studio-dynamic-api-proxy',
+    configureServer,
+    configurePreviewServer: configureServer,
   }
 }
 

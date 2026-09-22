@@ -63,6 +63,66 @@ export default function ProjectResults({
         (task) => task.id === final.taskId && task.status === 'done' && task.outputImages.includes(final.imageId),
       ),
   )
+  const renderTaskCard = (key: string, task: (typeof tasks)[number], index: number, showContext: boolean) => (
+    <article key={task.id} data-project-task-id={task.id} className="project-version">
+      {showContext && (
+        <div className="project-version-context">
+          {task.category?.amazonSlot} · {getWorkflowLabel(task.category?.workflow ?? 'unknown')}
+          {task.category?.aPlusType ? ` · ${getAPlusContentTypeLabel(task.category.aPlusType)}` : ''}
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <strong>版本 {index + 1}</strong>
+        <span>{task.status === 'running' ? '生成中' : task.status === 'error' ? '生成失败' : '已完成'}</span>
+      </div>
+      <time className="text-[11px] text-gray-500">{new Date(task.createdAt).toLocaleString()}</time>
+      {task.error && <p className="my-2 break-words text-xs text-red-600">{task.error}</p>}
+      {task.status === 'error' && (
+        <button
+          type="button"
+          disabled={Boolean(retrying)}
+          onClick={async () => {
+            setRetrying(task.id)
+            try {
+              await retryTask(task)
+            } catch (error) {
+              showToast(String(error), 'error')
+            } finally {
+              setRetrying(null)
+            }
+          }}
+        >
+          {retrying === task.id ? '正在提交…' : '重试生成'}
+        </button>
+      )}
+      {task.outputImages.map((imageId, imageIndex) => {
+        const selected = project.finals[key]?.taskId === task.id && project.finals[key]?.imageId === imageId
+        return (
+          <div key={`${imageId}-${imageIndex}`} className="mt-3">
+            <button
+              className="project-image"
+              type="button"
+              aria-label={`查看版本 ${index + 1} 图片 ${imageIndex + 1}`}
+              onClick={() => useStore.getState().setLightboxImageId(imageId, task.outputImages)}
+            >
+              <ResultImage imageId={imageId} label={`版本 ${index + 1} 图片 ${imageIndex + 1}`} />
+            </button>
+            <button
+              type="button"
+              aria-pressed={selected}
+              disabled={task.status !== 'done'}
+              onClick={() => onFinalChange(key, selected ? null : task.id, imageId)}
+            >
+              {selected ? '已定稿 · 取消' : '选为定稿'}
+            </button>
+          </div>
+        )
+      })}
+      <button type="button" className="mt-2 text-xs" onClick={() => useStore.getState().setDetailTaskId(task.id)}>
+        查看任务详情
+      </button>
+    </article>
+  )
   const runExport = async () => {
     setExporting(true)
     try {
@@ -75,7 +135,11 @@ export default function ProjectResults({
     }
   }
   return (
-    <section aria-label={slotId ? '当前图片位版本' : '当前项目结果'} className="project-results" data-no-drag-select>
+    <section
+      aria-label={slotId ? '当前图片位版本' : '当前项目结果'}
+      className={`project-results ${slotId ? 'project-results--slot' : 'project-results--project'}`}
+      data-no-drag-select
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-semibold">{slotId ? '图片版本' : '当前项目结果'}</h3>
         {!slotId && (
@@ -105,80 +169,23 @@ export default function ProjectResults({
           定稿记录已删除，请取消此定稿后重新选择。<button onClick={() => onFinalChange(key, null)}>取消失效定稿</button>
         </div>
       ))}
-      {groups.map(([key, versions]) => (
-        <section
-          key={key}
-          className="project-slot-results"
-          aria-label={`图片位 ${versions[0].category?.amazonSlot ?? ''} 的版本`}
-        >
-          {!slotId && (
-            <h4 className="mb-3 text-sm font-medium">
-              {versions[0].category?.amazonSlot} · {getWorkflowLabel(versions[0].category?.workflow ?? 'unknown')}
-              {versions[0].category?.aPlusType ? ` · ${getAPlusContentTypeLabel(versions[0].category.aPlusType)}` : ''}
-            </h4>
-          )}
-          <div className="project-version-grid">
-            {versions.map((task, index) => (
-              <article key={task.id} data-project-task-id={task.id} className="project-version">
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <strong>版本 {index + 1}</strong>
-                  <span>{task.status === 'running' ? '生成中' : task.status === 'error' ? '生成失败' : '已完成'}</span>
-                </div>
-                <time className="text-[11px] text-gray-500">{new Date(task.createdAt).toLocaleString()}</time>
-                {task.error && <p className="my-2 break-words text-xs text-red-600">{task.error}</p>}
-                {task.status === 'error' && (
-                  <button
-                    type="button"
-                    disabled={Boolean(retrying)}
-                    onClick={async () => {
-                      setRetrying(task.id)
-                      try {
-                        await retryTask(task)
-                      } catch (error) {
-                        showToast(String(error), 'error')
-                      } finally {
-                        setRetrying(null)
-                      }
-                    }}
-                  >
-                    {retrying === task.id ? '正在提交…' : '重试生成'}
-                  </button>
-                )}
-                {task.outputImages.map((imageId, imageIndex) => {
-                  const selected = project.finals[key]?.taskId === task.id && project.finals[key]?.imageId === imageId
-                  return (
-                    <div key={`${imageId}-${imageIndex}`} className="mt-3">
-                      <button
-                        className="project-image"
-                        type="button"
-                        aria-label={`查看版本 ${index + 1} 图片 ${imageIndex + 1}`}
-                        onClick={() => useStore.getState().setLightboxImageId(imageId, task.outputImages)}
-                      >
-                        <ResultImage imageId={imageId} label={`版本 ${index + 1} 图片 ${imageIndex + 1}`} />
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={selected}
-                        disabled={task.status !== 'done'}
-                        onClick={() => onFinalChange(key, selected ? null : task.id, imageId)}
-                      >
-                        {selected ? '已定稿 · 取消' : '选为定稿'}
-                      </button>
-                    </div>
-                  )
-                })}
-                <button
-                  type="button"
-                  className="mt-2 text-xs"
-                  onClick={() => useStore.getState().setDetailTaskId(task.id)}
-                >
-                  查看任务详情
-                </button>
-              </article>
-            ))}
-          </div>
-        </section>
-      ))}
+      {slotId ? (
+        groups.map(([key, versions]) => (
+          <section
+            key={key}
+            className="project-slot-results"
+            aria-label={`图片位 ${versions[0].category?.amazonSlot ?? ''} 的版本`}
+          >
+            <div className="project-version-grid">
+              {versions.map((task, index) => renderTaskCard(key, task, index, false))}
+            </div>
+          </section>
+        ))
+      ) : (
+        <div className="project-version-grid project-version-grid--overview" aria-label="全部成品图片">
+          {groups.flatMap(([key, versions]) => versions.map((task, index) => renderTaskCard(key, task, index, true)))}
+        </div>
+      )}
     </section>
   )
 }

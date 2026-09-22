@@ -91,6 +91,8 @@ export interface ApiProfile {
   baseUrl: string
   apiKey: string
   model: string
+  /** Models discovered from the profile's OpenAI-compatible /models endpoint. */
+  availableModels?: string[]
   timeout: number
   apiMode: ApiMode
   codexCli: boolean

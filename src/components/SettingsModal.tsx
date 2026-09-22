@@ -45,6 +45,7 @@ import {
   type CustomProviderForm,
 } from '../lib/customProviderForm'
 import { CUSTOM_PROVIDER_LLM_PROMPT } from '../lib/customProviderLlmPrompt'
+import { fetchUpstreamModels } from '../lib/modelCatalog'
 import SettingsGeneralTab from './settings/SettingsGeneralTab'
 import SettingsAboutTab from './settings/SettingsAboutTab'
 import SettingsDataTab from './settings/SettingsDataTab'
@@ -149,6 +150,11 @@ export default function SettingsModal() {
   const profileTouchDragRef = useRef<{ id: string; startX: number; startY: number; moved: boolean } | null>(null)
   const [copyImportUrlProfile, setCopyImportUrlProfile] = useState<ApiProfile | null>(null)
   const [copyImportUrlOptions, setCopyImportUrlOptions] = useState<CopyImportUrlOptions>(readCopyImportUrlOptions)
+  const [modelFetchState, setModelFetchState] = useState<{
+    profileId: string
+    status: 'idle' | 'loading' | 'success' | 'error'
+    message?: string
+  }>({ profileId: '', status: 'idle' })
 
   const apiProxyConfig = readClientDevProxyConfig()
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
@@ -217,14 +223,17 @@ export default function SettingsModal() {
       }))
     : [{ label: '暂无 Chat/Responses 策划配置', value: '' }]
   const amazonPlannerModelOptions = [
+    ...(amazonPlannerProfile?.availableModels ?? []).map((model) => ({ label: model, value: model })),
     ...(amazonPlannerProfile?.model &&
-    !OPENAI_PLANNER_MODELS.includes(amazonPlannerProfile.model as (typeof OPENAI_PLANNER_MODELS)[number])
+    ![...(amazonPlannerProfile?.availableModels ?? []), ...OPENAI_PLANNER_MODELS].includes(amazonPlannerProfile.model)
       ? [{ label: `${amazonPlannerProfile.model}（当前自定义）`, value: amazonPlannerProfile.model }]
       : []),
-    ...OPENAI_PLANNER_MODELS.map((model) => ({
-      label: model === DEFAULT_RESPONSES_MODEL ? `${model}（默认）` : model,
-      value: model,
-    })),
+    ...OPENAI_PLANNER_MODELS.filter((model) => !(amazonPlannerProfile?.availableModels ?? []).includes(model)).map(
+      (model) => ({
+        label: model === DEFAULT_RESPONSES_MODEL ? `${model}（默认）` : model,
+        value: model,
+      }),
+    ),
   ]
   const sopReverseProfileOptions = amazonPlannerProfiles.length
     ? amazonPlannerProfiles.map((profile) => ({
@@ -261,7 +270,7 @@ export default function SettingsModal() {
       profiles: displaySettings.profiles.map((profile) => ({
         ...profile,
         apiProxy:
-          (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable
+          profile.provider === 'openai' || profile.provider === 'volcengine'
             ? apiProxyLocked || profile.apiProxy
             : false,
       })),
@@ -368,7 +377,7 @@ export default function SettingsModal() {
         model: profile.model.trim() || defaultModel,
         timeout: Number(profile.timeout) || DEFAULT_SETTINGS.timeout,
         apiProxy:
-          (profile.provider === 'openai' || profile.provider === 'volcengine') && apiProxyAvailable
+          profile.provider === 'openai' || profile.provider === 'volcengine'
             ? apiProxyLocked || profile.apiProxy
             : false,
         codexCli: profile.provider === 'openai' ? profile.codexCli : false,
@@ -506,6 +515,39 @@ export default function SettingsModal() {
   const commitActiveProfilePatch = (patch: Partial<ApiProfile>) => {
     const nextDraft = getDraftWithActiveProfilePatch(patch)
     commitSettings(nextDraft)
+  }
+
+  const addActiveProfileModel = () => {
+    const model = activeProfile.model.trim()
+    if (!model) {
+      showToast('请先填写模型 ID', 'error')
+      return
+    }
+    const availableModels = [...new Set([...(activeProfile.availableModels ?? []), model])]
+    commitActiveProfilePatch({ availableModels })
+    showToast('模型已添加到列表', 'success')
+  }
+
+  const fetchActiveProfileModels = async () => {
+    const profileId = activeProfile.id
+    setModelFetchState({ profileId, status: 'loading' })
+    try {
+      const fetchedModels = await fetchUpstreamModels(activeProfile)
+      const availableModels = [...new Set([...(activeProfile.availableModels ?? []), ...fetchedModels])]
+      const nextDraft = {
+        ...draft,
+        profiles: draft.profiles.map((profile) =>
+          profile.id === profileId ? { ...profile, availableModels } : profile,
+        ),
+      }
+      commitSettings(nextDraft)
+      setModelFetchState({ profileId, status: 'success', message: `已获取 ${availableModels.length} 个模型` })
+      showToast(`已获取 ${availableModels.length} 个模型`, 'success')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setModelFetchState({ profileId, status: 'error', message })
+      showToast(`获取模型列表失败：${message}`, 'error')
+    }
   }
 
   const handleClose = () => {
@@ -1107,7 +1149,6 @@ export default function SettingsModal() {
                     activeProviderSupportsApiProxy,
                     apiProxyAvailable,
                     apiProxyLocked,
-                    apiProxyChecked,
                     apiProxyEnabled,
                     apiProxyUrlLocked,
                     apiProxyUsesDynamicTarget,
@@ -1139,6 +1180,12 @@ export default function SettingsModal() {
                     isDefaultModelForModeSwitch,
                     commitTimeout,
                     saveApiSettings,
+                    modelFetchState:
+                      modelFetchState.profileId === activeProfile.id
+                        ? modelFetchState
+                        : { profileId: activeProfile.id, status: 'idle' },
+                    fetchModels: fetchActiveProfileModels,
+                    addModelToCatalog: addActiveProfileModel,
                   }}
                 />
               )}

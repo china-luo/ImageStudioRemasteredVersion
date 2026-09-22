@@ -436,14 +436,17 @@ export default function AmazonPlanner({
     : '未选择支持 Chat Completions 或 Responses API 的 AI 策划配置'
   const plannerApiLabel = plannerProfile ? getApiModeLabel(plannerProfile.apiMode) : 'Responses API'
   const plannerModelOptions = [
+    ...(plannerProfile?.availableModels ?? []).map((model) => ({ label: model, value: model })),
     ...(plannerProfile?.model &&
-    !OPENAI_PLANNER_MODELS.includes(plannerProfile.model as (typeof OPENAI_PLANNER_MODELS)[number])
+    ![...(plannerProfile?.availableModels ?? []), ...OPENAI_PLANNER_MODELS].includes(plannerProfile.model)
       ? [{ label: `${plannerProfile.model}（当前自定义）`, value: plannerProfile.model }]
       : []),
-    ...OPENAI_PLANNER_MODELS.map((model) => ({
-      label: model === DEFAULT_RESPONSES_MODEL ? `${model}（默认）` : model,
-      value: model,
-    })),
+    ...OPENAI_PLANNER_MODELS.filter((model) => !(plannerProfile?.availableModels ?? []).includes(model)).map(
+      (model) => ({
+        label: model === DEFAULT_RESPONSES_MODEL ? `${model}（默认）` : model,
+        value: model,
+      }),
+    ),
   ]
   const imageGenerationProfile = getImageGenerationProfile(settings)
   const imageGenerationProfileValidation = imageGenerationProfile

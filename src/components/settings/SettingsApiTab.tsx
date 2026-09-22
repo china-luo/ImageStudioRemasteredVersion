@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Dispatch, DragEvent, MutableRefObject, RefObject, SetStateAction, TouchEvent } from 'react'
 import {
   DEFAULT_CHAT_MODEL,
@@ -49,6 +50,9 @@ export type SettingsApiTabProps = {
   amazonPlannerProfile?: ApiProfile
   amazonPlannerProfileOptions: SelectOption[]
   amazonPlannerModelOptions: SelectOption[]
+  modelFetchState: { profileId: string; status: 'idle' | 'loading' | 'success' | 'error'; message?: string }
+  fetchModels: () => void | Promise<void>
+  addModelToCatalog: () => void
   sopReverseProfileOptions: SelectOption[]
   vocProfileOptions: SelectOption[]
   activeProviderUsesApiUrl: boolean
@@ -56,7 +60,6 @@ export type SettingsApiTabProps = {
   activeProviderSupportsApiProxy: boolean
   apiProxyAvailable: boolean
   apiProxyLocked: boolean
-  apiProxyChecked: boolean
   apiProxyEnabled: boolean
   apiProxyUrlLocked: boolean
   apiProxyUsesDynamicTarget: boolean
@@ -122,6 +125,9 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
     amazonPlannerProfile,
     amazonPlannerProfileOptions,
     amazonPlannerModelOptions,
+    modelFetchState,
+    fetchModels,
+    addModelToCatalog,
     sopReverseProfileOptions,
     vocProfileOptions,
     activeProviderUsesApiUrl,
@@ -129,7 +135,6 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
     activeProviderSupportsApiProxy,
     apiProxyAvailable,
     apiProxyLocked,
-    apiProxyChecked,
     apiProxyEnabled,
     apiProxyUrlLocked,
     apiProxyUsesDynamicTarget,
@@ -162,6 +167,13 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
     commitTimeout,
     saveApiSettings,
   } = props
+  const [modelCatalogOpen, setModelCatalogOpen] = useState(false)
+  const modelOptions = [
+    ...(activeProfile.availableModels ?? []).map((model) => ({ label: model, value: model })),
+    ...(activeProfile.model && !(activeProfile.availableModels ?? []).includes(activeProfile.model)
+      ? [{ label: `${activeProfile.model}（当前自定义）`, value: activeProfile.model }]
+      : []),
+  ]
 
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
@@ -412,9 +424,53 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
             />
           </div>
           <div data-selectable-text className="mt-2 text-xs leading-relaxed text-blue-800 dark:text-blue-200">
-            只用于首页 Amazon 面板的 AI 策划；普通生图只接受当前配置为 Images API。生图默认使用 gpt-image-2；AI
-            策划可选择 gpt-5.5 或 gpt-5.6-sol。
+            只用于首页 Amazon 面板的 AI 策划；普通生图只接受当前配置为 Images
+            API。可从上游模型列表选择，也可手动填写模型 ID。
           </div>
+          {amazonPlannerProfile &&
+            (amazonPlannerProfile.provider === 'openai' || amazonPlannerProfile.provider === 'volcengine') && (
+              <div className="mt-3 border-t border-blue-200/70 pt-3 dark:border-blue-400/20">
+                <p className="mb-2 break-all text-xs text-gray-500">策划接口：{amazonPlannerProfile.baseUrl}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-gray-600 dark:text-gray-300">API 代理</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label="AI 策划 API 代理"
+                    aria-checked={apiProxyAvailable && (apiProxyLocked || amazonPlannerProfile.apiProxy)}
+                    disabled={!apiProxyAvailable || apiProxyLocked}
+                    className="rounded-lg border border-blue-200 px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-70 dark:border-blue-400/20"
+                    onClick={() =>
+                      commitSettings({
+                        ...draft,
+                        profiles: draft.profiles.map((profile) =>
+                          profile.id === amazonPlannerProfile.id
+                            ? { ...profile, apiProxy: !profile.apiProxy }
+                            : profile,
+                        ),
+                      })
+                    }
+                  >
+                    {apiProxyAvailable
+                      ? apiProxyLocked
+                        ? '已自动开启'
+                        : amazonPlannerProfile.apiProxy
+                          ? '已开启'
+                          : '未开启'
+                      : '无需开启 / 未提供'}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  {!apiProxyAvailable
+                    ? window.imageStudioDesktop?.isDesktop
+                      ? '桌面版已使用内置网络通道，无需开启浏览器 API 代理。'
+                      : '当前页面未提供代理服务。请使用本地启动方式（npm run dev 或 npm run preview）或桌面版。'
+                    : apiProxyLocked
+                      ? '当前服务已自动开启代理，AI 策划请求会通过代理转发。'
+                      : '控制所选 AI 策划配置的代理连接，不切换当前图片生成配置。'}
+                </p>
+              </div>
+            )}
         </div>
 
         <div
@@ -544,34 +600,39 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
           )}
 
           {/* 4. API 代理（紧跟 URL） */}
-          {apiProxyAvailable && activeProviderSupportsApiProxy && (
+          {activeProviderSupportsApiProxy && (
             <div className="block">
               <div className="mb-1.5 flex items-center justify-between">
                 <span className="block text-sm text-gray-600 dark:text-gray-300">API 代理</span>
                 <button
                   type="button"
                   onClick={() => {
-                    if (!apiProxyLocked) updateActiveProfile({ apiProxy: !activeProfile.apiProxy }, true)
+                    if (apiProxyAvailable && !apiProxyLocked)
+                      updateActiveProfile({ apiProxy: !activeProfile.apiProxy }, true)
                   }}
-                  disabled={apiProxyLocked}
-                  className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${apiProxyChecked ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'} ${apiProxyLocked ? 'cursor-not-allowed opacity-70' : ''}`}
+                  disabled={!apiProxyAvailable || apiProxyLocked}
+                  className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${apiProxyEnabled ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'} ${!apiProxyAvailable || apiProxyLocked ? 'cursor-not-allowed opacity-70' : ''}`}
                   role="switch"
-                  aria-checked={apiProxyChecked}
+                  aria-checked={apiProxyEnabled}
                   aria-label="API 代理"
                 >
                   <span
-                    className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${apiProxyChecked ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
+                    className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${apiProxyEnabled ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
                   />
                 </button>
               </div>
               <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                {apiProxyUsesDynamicTarget
-                  ? apiProxyLocked
-                    ? '当前部署已锁定 API 代理为开启；API URL 仍可修改，代理会按该地址转发。'
-                    : '开启后通过同源代理访问上方 API URL，用于解决浏览器跨域限制。'
-                  : apiProxyLocked
-                    ? '当前部署已锁定 API 代理为开启，API URL 设置会被忽略。'
-                    : '当前部署提供同源代理时默认开启，可手动关闭。开启后用于解决浏览器跨域限制，API URL 设置会被忽略。'}
+                {!apiProxyAvailable
+                  ? window.imageStudioDesktop?.isDesktop
+                    ? '桌面版已使用内置网络通道，无需开启浏览器 API 代理。'
+                    : '当前页面未提供代理服务。请使用本地启动方式（npm run dev 或 npm run preview）或桌面版；已保存的代理偏好会保留。'
+                  : apiProxyUsesDynamicTarget
+                    ? apiProxyLocked
+                      ? '当前部署已锁定 API 代理为开启；API URL 仍可修改，代理会按该地址转发。'
+                      : '开启后通过同源代理访问上方 API URL，用于解决浏览器跨域限制。'
+                    : apiProxyLocked
+                      ? '当前部署已锁定 API 代理为开启，API URL 设置会被忽略。'
+                      : '当前部署提供同源代理时默认开启，可手动关闭。开启后用于解决浏览器跨域限制，API URL 设置会被忽略。'}
               </div>
             </div>
           )}
@@ -662,19 +723,81 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
 
           {/* 7. 模型 ID（紧跟接口选择） */}
           <label className="block">
-            <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">模型 ID</span>
-            <input
-              value={activeProfile.model}
-              onChange={(e) => updateActiveProfile({ model: e.target.value })}
-              onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
-              type="text"
-              placeholder={
-                activeProfile.provider === 'fal'
-                  ? DEFAULT_FAL_MODEL
-                  : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)
-              }
-              className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-            />
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="block text-sm text-gray-600 dark:text-gray-300">模型 ID</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void fetchModels()}
+                  disabled={modelFetchState.status === 'loading' || !activeProfile.baseUrl.trim()}
+                  className="rounded-lg border border-blue-200/70 px-2 py-1 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-400/20 dark:text-blue-200 dark:hover:bg-blue-400/10"
+                >
+                  {modelFetchState.status === 'loading' ? '获取中…' : '获取模型列表'}
+                </button>
+                <button
+                  type="button"
+                  onClick={addModelToCatalog}
+                  disabled={!activeProfile.model.trim()}
+                  className="rounded-lg border border-gray-200/80 px-2 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.1] dark:text-gray-300 dark:hover:bg-white/[0.06]"
+                >
+                  添加模型
+                </button>
+              </div>
+            </div>
+            <div className="relative">
+              <input
+                value={activeProfile.model}
+                onChange={(e) => updateActiveProfile({ model: e.target.value })}
+                onFocus={() => setModelCatalogOpen(modelOptions.length > 0)}
+                onBlur={(e) => {
+                  commitActiveProfilePatch({ model: e.target.value })
+                  window.setTimeout(() => setModelCatalogOpen(false), 120)
+                }}
+                type="text"
+                placeholder={
+                  activeProfile.provider === 'fal'
+                    ? DEFAULT_FAL_MODEL
+                    : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)
+                }
+                className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+              />
+              {modelOptions.length > 0 && (
+                <button
+                  type="button"
+                  aria-label="打开模型列表"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setModelCatalogOpen((open) => !open)}
+                  className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-gray-400 transition hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+                >
+                  <ChevronDownIcon className={`h-4 w-4 transition-transform ${modelCatalogOpen ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+              {modelCatalogOpen && modelOptions.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-xl border border-gray-200/80 bg-white p-1 shadow-lg dark:border-white/[0.1] dark:bg-gray-900">
+                  {modelOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        updateActiveProfile({ model: option.value }, true)
+                        setModelCatalogOpen(false)
+                      }}
+                      className={`block w-full truncate rounded-lg px-3 py-2 text-left text-sm transition hover:bg-blue-50 dark:hover:bg-blue-400/10 ${option.value === activeProfile.model ? 'bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-200' : 'text-gray-700 dark:text-gray-200'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {modelFetchState.message && (
+              <div
+                className={`mt-1.5 text-xs ${modelFetchState.status === 'error' ? 'text-red-500' : 'text-gray-500'}`}
+              >
+                {modelFetchState.message}
+              </div>
+            )}
             <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
               {activeProfile.provider === 'fal' ? (
                 <>
