@@ -12,6 +12,7 @@ import {
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_RESPONSES_MODEL,
   DEFAULT_SETTINGS,
+  canApiProfileGenerateImages,
   findEquivalentApiProfile,
   getApiProviderLabel,
   getActiveApiProfile,
@@ -21,7 +22,6 @@ import {
   mergeImportedSettings,
   normalizeCustomProviderDefinition,
   normalizeSettings,
-  OPENAI_PLANNER_MODELS,
   switchApiProfileProvider,
 } from '../lib/apiProfiles'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
@@ -126,6 +126,9 @@ export default function SettingsModal() {
   const [aboutDescriptionExpanded, setAboutDescriptionExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('api')
   const [apiConfigView, setApiConfigView] = useState<'generation' | 'analysis'>('generation')
+  // The settings editor can inspect either purpose profile without changing the
+  // application's actual image-generation default profile.
+  const [apiEditorProfileId, setApiEditorProfileId] = useState<string | null>(null)
   const [exportConfig, setExportConfig] = useState(true)
   const [exportTasks, setExportTasks] = useState(true)
   const [importConfig, setImportConfig] = useState(true)
@@ -164,14 +167,6 @@ export default function SettingsModal() {
     draft.profiles.find((profile) => profile.id === draft.activeProfileId) ??
     draft.profiles[0] ??
     getActiveApiProfile(draft)
-  const activeProviderSupportsApiProxy = activeProfile.provider === 'openai' || activeProfile.provider === 'volcengine'
-  const apiProxyChecked = activeProviderSupportsApiProxy && (apiProxyLocked || activeProfile.apiProxy)
-  const apiProxyEnabled = apiProxyAvailable && activeProviderSupportsApiProxy && apiProxyChecked
-  const apiProxyUrlLocked = apiProxyEnabled && !apiProxyUsesDynamicTarget
-  const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, activeProfile.provider)
-  const activeProviderUsesApiUrl =
-    activeProviderIsOpenAICompatible || activeProfile.provider === 'fal' || activeProfile.provider === 'volcengine'
-  const activeCustomProvider = draft.customProviders.find((provider) => provider.id === activeProfile.provider)
   const defaultProviderOrder = ['openai', 'fal', 'volcengine', ...draft.customProviders.map((p) => p.id)]
   const providerOrder = draft.providerOrder || defaultProviderOrder
 
@@ -216,25 +211,9 @@ export default function SettingsModal() {
     apiMode === 'responses' ? 'Responses API' : apiMode === 'chat' ? 'Chat Completions' : 'Images API'
   const amazonPlannerProfiles = draft.profiles.filter(isAmazonPlannerProfile)
   const amazonPlannerProfile = amazonPlannerProfiles.find((profile) => profile.id === draft.amazonPlannerProfileId)
-  const amazonPlannerProfileOptions = amazonPlannerProfiles.length
-    ? amazonPlannerProfiles.map((profile) => ({
-        label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
-        value: profile.id,
-      }))
-    : [{ label: '暂无 Chat/Responses 策划配置', value: '' }]
-  const amazonPlannerModelOptions = [
-    ...(amazonPlannerProfile?.availableModels ?? []).map((model) => ({ label: model, value: model })),
-    ...(amazonPlannerProfile?.model &&
-    ![...(amazonPlannerProfile?.availableModels ?? []), ...OPENAI_PLANNER_MODELS].includes(amazonPlannerProfile.model)
-      ? [{ label: `${amazonPlannerProfile.model}（当前自定义）`, value: amazonPlannerProfile.model }]
-      : []),
-    ...OPENAI_PLANNER_MODELS.filter((model) => !(amazonPlannerProfile?.availableModels ?? []).includes(model)).map(
-      (model) => ({
-        label: model === DEFAULT_RESPONSES_MODEL ? `${model}（默认）` : model,
-        value: model,
-      }),
-    ),
-  ]
+  const imageGenerationProfiles = draft.profiles.filter(canApiProfileGenerateImages)
+  const imageGenerationProfile =
+    imageGenerationProfiles.find((profile) => profile.id === draft.activeProfileId) ?? imageGenerationProfiles[0]
   const sopReverseProfileOptions = amazonPlannerProfiles.length
     ? amazonPlannerProfiles.map((profile) => ({
         label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
@@ -247,6 +226,41 @@ export default function SettingsModal() {
         value: profile.id,
       }))
     : [{ label: '暂无 Chat/Responses VOC 配置', value: '' }]
+
+  const editorProfileCandidates = apiConfigView === 'analysis' ? amazonPlannerProfiles : imageGenerationProfiles
+  const preferredEditorProfile = apiConfigView === 'analysis' ? amazonPlannerProfile : imageGenerationProfile
+  const editorProviderOptions =
+    apiConfigView === 'analysis'
+      ? providerOptions.filter((option) => !['fal', 'volcengine'].includes(String(option.value)))
+      : providerOptions
+  const editorProfile =
+    editorProfileCandidates.find((profile) => profile.id === apiEditorProfileId) ??
+    preferredEditorProfile ??
+    editorProfileCandidates[0] ??
+    activeProfile
+  const hasEditorProfile = editorProfileCandidates.length > 0
+  const activeProviderSupportsApiProxy = editorProfile.provider === 'openai' || editorProfile.provider === 'volcengine'
+  const apiProxyChecked = activeProviderSupportsApiProxy && (apiProxyLocked || editorProfile.apiProxy)
+  const apiProxyEnabled = apiProxyAvailable && activeProviderSupportsApiProxy && apiProxyChecked
+  const apiProxyUrlLocked = apiProxyEnabled && !apiProxyUsesDynamicTarget
+  const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, editorProfile.provider)
+  const activeProviderUsesApiUrl =
+    activeProviderIsOpenAICompatible || editorProfile.provider === 'fal' || editorProfile.provider === 'volcengine'
+  const activeCustomProvider = draft.customProviders.find((provider) => provider.id === editorProfile.provider)
+  const getEditorProfileForDraft = (nextDraft: AppSettings, preferredId = apiEditorProfileId) => {
+    const candidates =
+      apiConfigView === 'analysis'
+        ? nextDraft.profiles.filter(isAmazonPlannerProfile)
+        : nextDraft.profiles.filter(canApiProfileGenerateImages)
+    const preferredIdForView =
+      apiConfigView === 'analysis' ? nextDraft.amazonPlannerProfileId : nextDraft.activeProfileId
+    return (
+      candidates.find((profile) => profile.id === preferredId) ??
+      candidates.find((profile) => profile.id === preferredIdForView) ??
+      candidates[0] ??
+      editorProfile
+    )
+  }
 
   const wasSettingsOpenRef = useRef(false)
 
@@ -276,12 +290,42 @@ export default function SettingsModal() {
       })),
     })
     setDraft(nextDraft)
-    setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-  }, [apiProxyAvailable, apiProxyLocked, showSettings, settings, reusedTaskApiProfileId])
+    const candidates =
+      apiConfigView === 'analysis'
+        ? nextDraft.profiles.filter(isAmazonPlannerProfile)
+        : nextDraft.profiles.filter(canApiProfileGenerateImages)
+    const preferredId = apiConfigView === 'analysis' ? nextDraft.amazonPlannerProfileId : nextDraft.activeProfileId
+    const initialEditorProfile = candidates.find((profile) => profile.id === preferredId) ?? candidates[0]
+    setApiEditorProfileId(initialEditorProfile?.id ?? null)
+    setTimeoutInput(String(initialEditorProfile?.timeout ?? DEFAULT_SETTINGS.timeout))
+  }, [apiConfigView, apiProxyAvailable, apiProxyLocked, showSettings, settings, reusedTaskApiProfileId])
 
   useEffect(() => {
-    setTimeoutInput(String(activeProfile.timeout))
-  }, [activeProfile.id, activeProfile.timeout])
+    if (apiEditorProfileId && editorProfileCandidates.some((profile) => profile.id === apiEditorProfileId)) return
+    setApiEditorProfileId(preferredEditorProfile?.id ?? editorProfileCandidates[0]?.id ?? null)
+  }, [
+    apiConfigView,
+    apiEditorProfileId,
+    editorProfileCandidates,
+    amazonPlannerProfiles,
+    imageGenerationProfiles,
+    draft.activeProfileId,
+    draft.amazonPlannerProfileId,
+    draft.profiles,
+    preferredEditorProfile,
+  ])
+
+  const handleApiConfigViewChange = (view: 'generation' | 'analysis') => {
+    setApiConfigView(view)
+    const candidates = view === 'analysis' ? amazonPlannerProfiles : imageGenerationProfiles
+    const preferredId = view === 'analysis' ? draft.amazonPlannerProfileId : draft.activeProfileId
+    setApiEditorProfileId(candidates.find((profile) => profile.id === preferredId)?.id ?? candidates[0]?.id ?? null)
+    setShowProfileMenu(false)
+  }
+
+  useEffect(() => {
+    setTimeoutInput(String(editorProfile.timeout))
+  }, [editorProfile.id, editorProfile.timeout])
 
   useEffect(() => {
     if (!showSettings || !settingsTabRequest) return
@@ -407,17 +451,7 @@ export default function SettingsModal() {
     setSettings(normalizedDraft)
   }
 
-  const updateAmazonPlannerModel = (model: string) => {
-    if (!amazonPlannerProfile) return
-    const nextDraft = {
-      ...draft,
-      profiles: draft.profiles.map((profile) =>
-        profile.id === amazonPlannerProfile.id ? { ...profile, model } : profile,
-      ),
-    }
-    setDraft(nextDraft)
-    commitSettings(nextDraft)
-  }
+  const shouldUsePlannerPointer = (_profile: ApiProfile, scope = apiConfigView) => scope === 'analysis'
 
   const updateCopyImportUrlOptions = (patch: Partial<CopyImportUrlOptions>) => {
     setCopyImportUrlOptions((previous) => {
@@ -501,39 +535,39 @@ export default function SettingsModal() {
     setCopyImportUrlOptions(readCopyImportUrlOptions())
   }
 
-  const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>) => ({
+  const getDraftWithEditorProfilePatch = (patch: Partial<ApiProfile>) => ({
     ...draft,
-    profiles: draft.profiles.map((profile) => (profile.id === activeProfile.id ? { ...profile, ...patch } : profile)),
+    profiles: draft.profiles.map((profile) => (profile.id === editorProfile.id ? { ...profile, ...patch } : profile)),
   })
 
   const updateActiveProfile = (patch: Partial<ApiProfile>, commit = false) => {
-    const nextDraft = getDraftWithActiveProfilePatch(patch)
+    const nextDraft = getDraftWithEditorProfilePatch(patch)
     setDraft(nextDraft)
     if (commit) commitSettings(nextDraft)
   }
 
   const commitActiveProfilePatch = (patch: Partial<ApiProfile>) => {
-    const nextDraft = getDraftWithActiveProfilePatch(patch)
+    const nextDraft = getDraftWithEditorProfilePatch(patch)
     commitSettings(nextDraft)
   }
 
   const addActiveProfileModel = () => {
-    const model = activeProfile.model.trim()
+    const model = editorProfile.model.trim()
     if (!model) {
       showToast('请先填写模型 ID', 'error')
       return
     }
-    const availableModels = [...new Set([...(activeProfile.availableModels ?? []), model])]
+    const availableModels = [...new Set([...(editorProfile.availableModels ?? []), model])]
     commitActiveProfilePatch({ availableModels })
     showToast('模型已添加到列表', 'success')
   }
 
   const fetchActiveProfileModels = async () => {
-    const profileId = activeProfile.id
+    const profileId = editorProfile.id
     setModelFetchState({ profileId, status: 'loading' })
     try {
-      const fetchedModels = await fetchUpstreamModels(activeProfile)
-      const availableModels = [...new Set([...(activeProfile.availableModels ?? []), ...fetchedModels])]
+      const fetchedModels = await fetchUpstreamModels(editorProfile)
+      const availableModels = [...new Set([...(editorProfile.availableModels ?? []), ...fetchedModels])]
       const nextDraft = {
         ...draft,
         profiles: draft.profiles.map((profile) =>
@@ -556,39 +590,41 @@ export default function SettingsModal() {
       timeoutInput.trim() === '' || Number.isNaN(nextTimeout) ? DEFAULT_SETTINGS.timeout : nextTimeout
     const nextDraft = {
       ...draft,
-      profiles: activeProviderIsOpenAICompatible
-        ? draft.profiles.map((profile) =>
-            profile.id === activeProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
-          )
-        : draft.profiles,
+      profiles:
+        hasEditorProfile && activeProviderIsOpenAICompatible
+          ? draft.profiles.map((profile) =>
+              profile.id === editorProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
+            )
+          : draft.profiles,
     }
     commitSettings(nextDraft)
     setShowSettings(false)
   }
 
   const commitTimeout = useCallback(() => {
-    if (!isOpenAICompatibleProvider(draft, activeProfile.provider)) return
+    if (!hasEditorProfile || !isOpenAICompatibleProvider(draft, editorProfile.provider)) return
     const nextTimeout = Number(timeoutInput)
     const normalizedTimeout =
       timeoutInput.trim() === ''
         ? DEFAULT_SETTINGS.timeout
         : Number.isNaN(nextTimeout)
-          ? activeProfile.timeout
+          ? editorProfile.timeout
           : nextTimeout
     setTimeoutInput(String(normalizedTimeout))
     updateActiveProfile({ timeout: normalizedTimeout }, true)
-  }, [draft, activeProfile.id, activeProfile.provider, activeProfile.timeout, timeoutInput])
+  }, [draft, editorProfile.id, editorProfile.provider, editorProfile.timeout, hasEditorProfile, timeoutInput])
 
   const saveApiSettings = () => {
+    if (!hasEditorProfile) return
     const nextTimeout = Number(timeoutInput)
     const normalizedTimeout =
       timeoutInput.trim() === '' || Number.isNaN(nextTimeout)
-        ? activeProfile.timeout || DEFAULT_SETTINGS.timeout
+        ? editorProfile.timeout || DEFAULT_SETTINGS.timeout
         : nextTimeout
     const nextDraft = {
       ...draft,
       profiles: draft.profiles.map((profile) =>
-        profile.id === activeProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
+        profile.id === editorProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
       ),
     }
     setTimeoutInput(String(normalizedTimeout))
@@ -613,7 +649,7 @@ export default function SettingsModal() {
         if (imported) {
           const nextDraft = normalizeDraftSettings(useStore.getState().settings)
           setDraft(nextDraft)
-          setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+          setTimeoutInput(String(getEditorProfileForDraft(nextDraft).timeout))
           setShowProfileMenu(false)
         }
       } finally {
@@ -627,18 +663,24 @@ export default function SettingsModal() {
     await clearData({ clearConfig, clearTasks })
     const nextDraft = normalizeDraftSettings(useStore.getState().settings)
     setDraft(nextDraft)
-    setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+    setTimeoutInput(String(getEditorProfileForDraft(nextDraft).timeout))
     setShowProfileMenu(false)
   }
 
   const createNewProfile = () => {
     setReusedTaskApiProfile(null)
-    const profile = createDefaultOpenAIProfile({ id: newId('openai'), name: '新配置' })
+    const plannerProfile = apiConfigView === 'analysis'
+    const profile = createDefaultOpenAIProfile({
+      id: newId('openai'),
+      name: plannerProfile ? '新策划配置' : '新配置',
+      ...(plannerProfile ? { apiMode: 'responses', model: DEFAULT_RESPONSES_MODEL } : {}),
+    })
     const nextDraft = normalizeDraftSettings({
       ...draft,
       profiles: [...draft.profiles, profile],
-      activeProfileId: profile.id,
+      ...(plannerProfile ? { amazonPlannerProfileId: profile.id } : { activeProfileId: profile.id }),
     })
+    setApiEditorProfileId(profile.id)
     commitSettings(nextDraft)
     setShowProfileMenu(false)
   }
@@ -647,22 +689,28 @@ export default function SettingsModal() {
     setReusedTaskApiProfile(null)
     setDuplicateProfileTooltipVisible(false)
     const profile: ApiProfile = {
-      ...activeProfile,
-      id: newId(activeProfile.provider === 'openai' ? 'openai' : 'profile'),
-      name: `${activeProfile.name}（复制）`,
+      ...editorProfile,
+      id: newId(editorProfile.provider === 'openai' ? 'openai' : 'profile'),
+      name: `${editorProfile.name}（复制）`,
     }
+    const plannerProfile = apiConfigView === 'analysis'
     const nextDraft = normalizeDraftSettings({
       ...draft,
       profiles: [...draft.profiles, profile],
-      activeProfileId: profile.id,
+      ...(plannerProfile ? { amazonPlannerProfileId: profile.id } : { activeProfileId: profile.id }),
     })
+    setApiEditorProfileId(profile.id)
     commitSettings(nextDraft)
     setShowProfileMenu(false)
   }
 
   const switchProfile = (id: string) => {
+    const profile = draft.profiles.find((item) => item.id === id)
+    if (!profile || !editorProfileCandidates.some((item) => item.id === id)) return
     setReusedTaskApiProfile(null)
-    const nextDraft = normalizeDraftSettings({ ...draft, activeProfileId: id })
+    setApiEditorProfileId(id)
+    const pointerPatch = shouldUsePlannerPointer(profile) ? { amazonPlannerProfileId: id } : { activeProfileId: id }
+    const nextDraft = normalizeDraftSettings({ ...draft, ...pointerPatch })
     commitSettings(nextDraft)
     setShowProfileMenu(false)
   }
@@ -806,13 +854,32 @@ export default function SettingsModal() {
 
   const deleteProfile = (id: string) => {
     if (draft.profiles.length <= 1) return
+    const profileToDelete = draft.profiles.find((profile) => profile.id === id)
+    if (!profileToDelete) return
+    if (canApiProfileGenerateImages(profileToDelete) && imageGenerationProfiles.length <= 1) return
     if (id === reusedTaskApiProfileId) setReusedTaskApiProfile(null)
     const nextProfiles = draft.profiles.filter((item) => item.id !== id)
+    const nextImageProfileId =
+      nextProfiles.find((profile) => canApiProfileGenerateImages(profile))?.id ?? nextProfiles[0]?.id ?? ''
+    const nextPlannerProfileId = nextProfiles.find((profile) => isAmazonPlannerProfile(profile))?.id ?? ''
     const nextDraft = normalizeDraftSettings({
       ...draft,
       profiles: nextProfiles,
-      activeProfileId: draft.activeProfileId === id ? nextProfiles[0].id : draft.activeProfileId,
+      activeProfileId: draft.activeProfileId === id ? nextImageProfileId : draft.activeProfileId,
+      amazonPlannerProfileId: draft.amazonPlannerProfileId === id ? nextPlannerProfileId : draft.amazonPlannerProfileId,
     })
+    const nextEditorCandidates =
+      apiConfigView === 'analysis'
+        ? nextDraft.profiles.filter(isAmazonPlannerProfile)
+        : nextDraft.profiles.filter(canApiProfileGenerateImages)
+    const nextPreferredId = apiConfigView === 'analysis' ? nextDraft.amazonPlannerProfileId : nextDraft.activeProfileId
+    const nextEditorId =
+      apiEditorProfileId !== id && nextEditorCandidates.some((profile) => profile.id === apiEditorProfileId)
+        ? apiEditorProfileId
+        : (nextEditorCandidates.find((profile) => profile.id === nextPreferredId)?.id ??
+          nextEditorCandidates[0]?.id ??
+          null)
+    setApiEditorProfileId(nextEditorId)
     commitSettings(nextDraft)
   }
 
@@ -855,7 +922,7 @@ export default function SettingsModal() {
 
     const provider = String(value) as ApiProfile['provider']
     const customProvider = draft.customProviders.find((item) => item.id === provider)
-    updateActiveProfile(switchApiProfileProvider(activeProfile, provider, customProvider), true)
+    updateActiveProfile(switchApiProfileProvider(editorProfile, provider, customProvider), true)
   }
 
   const updateCustomProviderForm = (patch: Partial<CustomProviderForm>) => {
@@ -901,11 +968,11 @@ export default function SettingsModal() {
         return
       }
 
-      const nextProfile = switchApiProfileProvider(activeProfile, customProvider.id, customProvider)
+      const nextProfile = switchApiProfileProvider(editorProfile, customProvider.id, customProvider)
       const nextDraft = normalizeDraftSettings({
         ...draft,
         customProviders: [...draft.customProviders, customProvider],
-        profiles: draft.profiles.map((profile) => (profile.id === activeProfile.id ? nextProfile : profile)),
+        profiles: draft.profiles.map((profile) => (profile.id === editorProfile.id ? nextProfile : profile)),
       })
       commitSettings(nextDraft)
       setShowCustomProviderImport(false)
@@ -959,26 +1026,42 @@ export default function SettingsModal() {
         const mergedDraft = mergeImportedSettings(draft, imported)
         const importedProfile = getImportedProfileFromMergedSettings(mergedDraft, previousProfileIds, imported)
         const importedProfileAlreadyExisted = previousProfileIds.has(importedProfile.id)
+        const importedIsPlanner = isAmazonPlannerProfile(importedProfile)
+        const importedMatchesCurrentView = importedIsPlanner === (apiConfigView === 'analysis')
         const shouldReplaceActiveProfile =
-          !editingCustomProviderId && isPristineNewOpenAIProfile(activeProfile) && !importedProfileAlreadyExisted
+          !editingCustomProviderId &&
+          importedMatchesCurrentView &&
+          isPristineNewOpenAIProfile(editorProfile) &&
+          !importedProfileAlreadyExisted
         const switchedToExistingProfile = !shouldReplaceActiveProfile && importedProfileAlreadyExisted
+        const selectedProfileId = shouldReplaceActiveProfile ? editorProfile.id : importedProfile.id
         const nextDraft = shouldReplaceActiveProfile
           ? normalizeDraftSettings({
               ...mergedDraft,
               profiles: mergedDraft.profiles
-                .filter((profile) => profile.id === activeProfile.id || profile.id !== importedProfile.id)
+                .filter((profile) => profile.id === editorProfile.id || profile.id !== importedProfile.id)
                 .map((profile) =>
-                  profile.id === activeProfile.id ? { ...importedProfile, id: activeProfile.id } : profile,
+                  profile.id === editorProfile.id ? { ...importedProfile, id: editorProfile.id } : profile,
                 ),
-              activeProfileId: activeProfile.id,
+              ...(importedIsPlanner
+                ? { amazonPlannerProfileId: editorProfile.id }
+                : { activeProfileId: editorProfile.id }),
             })
           : normalizeDraftSettings({
               ...mergedDraft,
-              activeProfileId: importedProfile.id,
+              ...(importedIsPlanner
+                ? { amazonPlannerProfileId: importedProfile.id }
+                : { activeProfileId: importedProfile.id }),
             })
+        setApiConfigView(importedIsPlanner ? 'analysis' : 'generation')
+        setApiEditorProfileId(selectedProfileId)
         setDraft(nextDraft)
         setSettings(nextDraft)
-        setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+        setTimeoutInput(
+          String(
+            nextDraft.profiles.find((profile) => profile.id === selectedProfileId)?.timeout ?? DEFAULT_SETTINGS.timeout,
+          ),
+        )
         setShowCustomProviderImport(false)
         setEditingCustomProviderId(null)
         setCustomProviderImportError(null)
@@ -1117,10 +1200,12 @@ export default function SettingsModal() {
                 <SettingsApiTab
                   {...{
                     draft,
-                    activeProfile,
+                    activeProfile: editorProfile,
+                    hasEditorProfile,
                     activeCustomProvider,
+                    editableProfiles: editorProfileCandidates,
                     apiConfigView,
-                    setApiConfigView,
+                    setApiConfigView: handleApiConfigViewChange,
                     showApiKey,
                     setShowApiKey,
                     showProfileMenu,
@@ -1137,11 +1222,8 @@ export default function SettingsModal() {
                     draggedProfileId,
                     dragOverProfileId,
                     dragDropPosition,
-                    providerOptions,
+                    providerOptions: editorProviderOptions,
                     amazonPlannerProfiles,
-                    amazonPlannerProfile,
-                    amazonPlannerProfileOptions,
-                    amazonPlannerModelOptions,
                     sopReverseProfileOptions,
                     vocProfileOptions,
                     activeProviderUsesApiUrl,
@@ -1171,7 +1253,6 @@ export default function SettingsModal() {
                     handleProfileTouchEnd,
                     setConfirmDialog,
                     commitSettings,
-                    updateAmazonPlannerModel,
                     updateActiveProfile,
                     commitActiveProfilePatch,
                     handleProviderTypeChange,
@@ -1181,9 +1262,9 @@ export default function SettingsModal() {
                     commitTimeout,
                     saveApiSettings,
                     modelFetchState:
-                      modelFetchState.profileId === activeProfile.id
+                      modelFetchState.profileId === editorProfile.id
                         ? modelFetchState
-                        : { profileId: activeProfile.id, status: 'idle' },
+                        : { profileId: editorProfile.id, status: 'idle' },
                     fetchModels: fetchActiveProfileModels,
                     addModelToCatalog: addActiveProfileModel,
                   }}

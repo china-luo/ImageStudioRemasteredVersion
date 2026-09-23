@@ -17,6 +17,7 @@ import {
   getVocAnalysisProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
+  isAmazonPlannerProfile,
   isOpenRouterImageGenerationProfile,
   mergeImportedSettings,
   normalizeSettings,
@@ -888,5 +889,26 @@ describe('OpenRouter image generation profiles', () => {
         }),
       ),
     ).toBe(false)
+  })
+
+  it('keeps OpenRouter chat image profiles out of AI planner profiles', () => {
+    expect(
+      isAmazonPlannerProfile(
+        createDefaultOpenAIProfile({
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiMode: 'chat',
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  it('recognizes custom OpenAI-compatible Chat profiles as planner profiles', () => {
+    expect(
+      isAmazonPlannerProfile({
+        provider: 'custom-gateway',
+        baseUrl: 'https://gateway.example/v1',
+        apiMode: 'responses',
+      }),
+    ).toBe(true)
   })
 })

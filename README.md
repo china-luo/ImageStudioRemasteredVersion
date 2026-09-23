@@ -26,12 +26,12 @@
   <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/ci.yml"><img src="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest"><img src="https://img.shields.io/github/v/release/china-luo/ImageStudioRemasteredVersion?display_name=tag" alt="Latest release" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/china-luo/ImageStudioRemasteredVersion" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-2.0.0-2563EB" alt="Version 2.0.0" />
+  <img src="https://img.shields.io/badge/version-2.0.1-2563EB" alt="Version 2.0.1" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" />
 </p>
 
-![跨境Image工作台 v2.0.0 工作台](./docs/images/workbench-overview.png)
+![跨境Image工作台 v2.0.1 工作台](./docs/images/workbench-overview.png)
 
 ## 这是什么
 
@@ -96,7 +96,7 @@
 
 从 [GitHub Releases](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest) 下载最新 x64 安装包。桌面版通过 Electron 主进程使用受控网络通道，更适合日常生产、跨域受限接口和本地文件交付。
 
-当前最新版本：**v2.0.0**
+当前最新版本：**v2.0.1**
 
 ### 静态部署
 

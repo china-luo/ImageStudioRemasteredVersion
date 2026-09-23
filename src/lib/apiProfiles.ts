@@ -577,8 +577,16 @@ function normalizeAvailableModels(input: unknown): string[] | undefined {
   return unique.length ? unique : undefined
 }
 
-export function isAmazonPlannerProfile(profile: Pick<ApiProfile, 'provider' | 'apiMode'>): boolean {
-  return profile.provider === 'openai' && (profile.apiMode === 'responses' || profile.apiMode === 'chat')
+export function isAmazonPlannerProfile(
+  profile: Pick<ApiProfile, 'provider' | 'apiMode'> & Partial<Pick<ApiProfile, 'baseUrl'>>,
+): boolean {
+  if (profile.provider === 'fal' || profile.provider === 'volcengine') return false
+  if (profile.apiMode !== 'responses' && profile.apiMode !== 'chat') return false
+  return !isOpenRouterImageGenerationProfile({
+    provider: profile.provider,
+    apiMode: profile.apiMode,
+    baseUrl: profile.baseUrl ?? '',
+  })
 }
 
 export function isOpenRouterImageGenerationProfile(

@@ -1439,7 +1439,7 @@ async function resolveImageSizeParamsList(
   return images.map((_, index) => (hasActualParams(preferred?.[index]) ? preferred?.[index] : fallback[index]))
 }
 
-/** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并清理孤立图片 */
+/** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并在后台清理孤立图片 */
 export async function initStore() {
   const { tasks, recoveryTaskIds } = await prepareStartupTasks({
     storedTasks: await getAllTasks(),
@@ -1451,33 +1451,10 @@ export async function initStore() {
   for (const taskId of recoveryTaskIds.fal) recoveryManager.scheduleFal(taskId, 0)
   for (const taskId of recoveryTaskIds.custom) recoveryManager.scheduleCustom(taskId, 0)
 
-  // 收集所有任务引用的图片 id
-  const referencedIds = collectReferencedImageIdsFromState({
-    tasks,
-    inputImages: useStore.getState().inputImages,
-    galleryInputDraft: useStore.getState().galleryInputDraft,
-    sopDraftImageIds: collectSopDraftImageIds(useStore.getState().sopDraft),
-    agentConversations: useStore.getState().agentConversations,
-    agentInputDrafts: Object.values(useStore.getState().agentInputDrafts),
-    plannerSessions: await getAllAmazonPlannerSessions(),
-    generationProjects: [
-      ...(await getAllGenerationProjects()),
-      ...[readProjectJournal()].filter((project) => project != null),
-    ],
-    collectPlannerSessionImageIds: collectAmazonPlannerSessionImageIds,
-  })
   const state = useStore.getState()
   const persistedInputImages = state.inputImages
   const galleryInputDraft = state.galleryInputDraft
   const agentInputDrafts = state.agentInputDrafts
-  // 只枚举 key 清理孤立图片，避免启动时把所有 4K 原图读进内存。
-  const referencedImageIds = await pruneUnreferencedImageIds({
-    imageIds: await getAllImageIds(),
-    referencedIds,
-    deleteImage,
-  })
-  scheduleThumbnailBackfill(referencedImageIds)
-
   const restoredInputImages: InputImage[] = []
   for (const img of persistedInputImages) {
     if (img.dataUrl) {
@@ -1608,6 +1585,30 @@ export async function initStore() {
       },
     })
   }
+
+  // 保持首屏响应：孤立图片清理可能扫描并删除大量记录，放到数据恢复后后台执行。
+  void (async () => {
+    const referencedIds = collectReferencedImageIdsFromState({
+      tasks,
+      inputImages: useStore.getState().inputImages,
+      galleryInputDraft: useStore.getState().galleryInputDraft,
+      sopDraftImageIds: collectSopDraftImageIds(useStore.getState().sopDraft),
+      agentConversations: useStore.getState().agentConversations,
+      agentInputDrafts: Object.values(useStore.getState().agentInputDrafts),
+      plannerSessions: await getAllAmazonPlannerSessions(),
+      generationProjects: [
+        ...(await getAllGenerationProjects()),
+        ...[readProjectJournal()].filter((project) => project != null),
+      ],
+      collectPlannerSessionImageIds: collectAmazonPlannerSessionImageIds,
+    })
+    const referencedImageIds = await pruneUnreferencedImageIds({
+      imageIds: await getAllImageIds(),
+      referencedIds,
+      deleteImage,
+    })
+    scheduleThumbnailBackfill(referencedImageIds)
+  })().catch((error) => console.warn('后台图片清理失败:', error))
 }
 
 /** 提交新任务 */

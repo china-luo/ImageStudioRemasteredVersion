@@ -1,6 +1,16 @@
 # 更新日志
 
 <details open>
+<summary><strong>2026-09-23</strong> - V2.0.1 设置隔离与标签页恢复体验修复</summary>
+
+- 生图配置和 AI 策划配置按用途独立管理，模型、连接信息和配置指针互不覆盖。
+- 自定义 OpenAI-compatible Chat / Responses 配置可直接用于 AI 策划；OpenRouter 生图配置不会误判为策划配置。
+- 浏览器标签页重新激活时，首屏先恢复任务和草稿，孤立图片清理与缩略图回填改为后台执行，减少短暂卡顿。
+- 增加设置配置隔离、模型字段独立和持久化恢复的端到端覆盖。
+
+</details>
+
+<details open>
 <summary><strong>2026-09-22</strong> - V2.0.0 UI 布局重构与动态模型配置</summary>
 
 - 重构工作台布局，围绕策划、生成、结果和项目历史组织主要工作流。
