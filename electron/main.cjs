@@ -4,7 +4,7 @@ const dns = require('node:dns')
 const { app, BrowserWindow, dialog, ipcMain, net, safeStorage, shell } = require('electron')
 const { createIpcHandlers } = require('./ipcHandlers.cjs')
 
-const APP_TITLE = '跨境Image工作台'
+const APP_TITLE = '跨境电商图片生成'
 const APP_ID = 'com.chinaluo.imagestudio'
 const APP_ICON_PATH = path.join(__dirname, '..', 'build', 'icon.ico')
 const selectedImageSaveDirectories = new Map()
@@ -79,6 +79,10 @@ function isExternalUrl(url) {
   return /^https?:\/\//i.test(url)
 }
 
+function isMac() {
+  return process.platform === 'darwin'
+}
+
 function createMainWindow() {
   let allowClose = false
   const mainWindow = new BrowserWindow({
@@ -111,7 +115,9 @@ function createMainWindow() {
       type: 'question',
       title: `关闭${APP_TITLE}`,
       message: '请选择关闭后的操作',
-      detail: '退出应用会完全关闭程序；最小化会将窗口收起到任务栏，稍后可以从任务栏恢复。',
+      detail: isMac()
+        ? '退出应用会完全关闭程序；最小化会将窗口收起到 Dock 栏，稍后可以从 Dock 恢复。'
+        : '退出应用会完全关闭程序；最小化会将窗口收起到任务栏，稍后可以从任务栏恢复。',
       buttons: ['退出应用', '最小化', '取消'],
       defaultId: 1,
       cancelId: 2,
@@ -163,5 +169,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  // macOS 也遵循「关窗即退出」，避免关闭窗口后 Dock 图标残留
+  app.quit()
 })

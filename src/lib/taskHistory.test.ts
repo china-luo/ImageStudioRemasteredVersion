@@ -29,6 +29,7 @@ describe('task history categories', () => {
   it('uses explicit Amazon Listing metadata when present', () => {
     const category = getTaskHistoryCategory(
       task({
+        params: { ...DEFAULT_PARAMS, size: '1024x1024' },
         category: {
           productTitle: 'Large Folding Umbrella',
           workflow: 'amazon-listing',

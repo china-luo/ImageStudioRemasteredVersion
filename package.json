@@ -2,7 +2,7 @@
   "name": "amazon-image-studio",
   "private": true,
   "version": "2.0.1",
-  "description": "跨境Image工作台 Windows desktop installer",
+  "description": "跨境电商图片生成 desktop app (Windows / macOS)",
   "author": "JackLuo",
   "type": "module",
   "main": "electron/main.cjs",

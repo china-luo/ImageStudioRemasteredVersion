@@ -5,7 +5,7 @@ SetCompress auto
 
 !include "MUI2.nsh"
 
-!define APP_NAME "跨境Image工作台"
+!define APP_NAME "跨境电商图片生成"
 !define APP_PUBLISHER "JackLuo"
 !define APP_EXE "ImageStudioRemasteredVersion.exe"
 !define APP_REG_KEY "Software\JackLuo\ImageStudioRemasteredVersion"

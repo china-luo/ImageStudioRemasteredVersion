@@ -38,7 +38,7 @@ describe('callImageApi', () => {
       await callImageApi({
         settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', apiMode: 'responses', codexCli },
         prompt: 'prompt',
-        params: { ...DEFAULT_PARAMS },
+        params: { ...DEFAULT_PARAMS, size: 'auto' },
         inputImageDataUrls: [],
       })
 
