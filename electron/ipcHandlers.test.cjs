@@ -65,6 +65,33 @@ test('Electron fetch handler rejects a hostname that resolves to a private addre
   assert.equal(called, false)
 })
 
+test('Electron fetch handler allows private addresses only with explicit opt-in', async () => {
+  let called = false
+  const handlers = createHandlers(os.tmpdir(), {
+    lookupHost: async () => [{ address: '127.0.0.1', family: 4 }],
+    fetchImpl: async (url) => {
+      called = true
+      assert.equal(url, 'http://127.0.0.1:11434/v1/models')
+      return new Response(new Uint8Array([7]), { status: 200, statusText: 'OK' })
+    },
+  })
+  await assert.rejects(
+    handlers.fetch(
+      { sender: { getURL: () => 'file:///app/index.html' } },
+      { url: 'http://127.0.0.1:11434/v1/models', method: 'GET' },
+    ),
+    /Forbidden private address/,
+  )
+  assert.equal(called, false)
+
+  const result = await handlers.fetch(
+    { sender: { getURL: () => 'file:///app/index.html' } },
+    { url: 'http://127.0.0.1:11434/v1/models', method: 'GET', allowPrivateNetwork: true },
+  )
+  assert.equal(called, true)
+  assert.deepEqual(result.body, [7])
+})
+
 test('Electron secrets handlers persist sanitized records', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'image-studio-ipc-'))
   try {

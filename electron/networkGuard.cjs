@@ -151,7 +151,10 @@ function evaluateProxyRequest(input) {
     return { ok: false, status: PROXY_FORBIDDEN_STATUS, error: 'Forbidden protocol' }
   }
   const hostname = input.hostname || ''
-  if (isBlockedHostname(hostname) || isBlockedIpAddress(hostname)) {
+  if (!hostname) {
+    return { ok: false, status: PROXY_FORBIDDEN_STATUS, error: 'Forbidden host' }
+  }
+  if (input.allowPrivateAddress !== true && (isBlockedHostname(hostname) || isBlockedIpAddress(hostname))) {
     return { ok: false, status: PROXY_FORBIDDEN_STATUS, error: 'Forbidden private address' }
   }
   if (input.requireHostAllowlist !== false && !isAllowedProxyHost(hostname, input.extraAllowedHosts)) {

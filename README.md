@@ -96,6 +96,17 @@
 
 从 [GitHub Releases](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest) 下载最新 x64 安装包。桌面版通过 Electron 主进程使用受控网络通道，更适合日常生产、跨域受限接口和本地文件交付。
 
+### macOS 桌面版
+
+在 macOS 上本地构建（详见 [打包文档](./docs/packaging.md)）：
+
+```bash
+npm install
+npm run build:mac
+```
+
+产物为 `release/` 下的 arm64 / x64 的 `.dmg` 与 `.zip`。本机构建的未签名应用首次打开需在访达中右键选择「打开」；对外分发需配置 Apple Developer 签名与公证。
+
 当前最新版本：**v2.0.1**
 
 ### 静态部署

@@ -34,13 +34,22 @@ function headersToRecord(headers: Headers): Record<string, string> {
 }
 
 let extraAllowedHostsProvider: () => string[] = () => []
+let allowPrivateNetworkProvider: () => boolean = () => false
 
 export function setExtraAllowedHostsProvider(provider: () => string[]) {
   extraAllowedHostsProvider = provider
 }
 
+export function setAllowPrivateNetworkProvider(provider: () => boolean) {
+  allowPrivateNetworkProvider = provider
+}
+
 export function getExtraAllowedHosts(): string[] {
   return extraAllowedHostsProvider()
+}
+
+export function getAllowPrivateNetwork(): boolean {
+  return allowPrivateNetworkProvider()
 }
 
 function withAllowedHostsHeader(request: Request, extraHosts: string[]): Request {
@@ -67,6 +76,7 @@ async function fetchViaDesktop(request: Request): Promise<Response> {
     headers: headersToRecord(request.headers),
     body,
     allowedHosts: extraAllowedHostsProvider(),
+    allowPrivateNetwork: allowPrivateNetworkProvider(),
   })
 
   return new Response(new Uint8Array(result.body), {

@@ -17,8 +17,9 @@ function readOriginFromSender(sender) {
 function createIpcHandlers({ app, fs, safeStorage, fetchImpl = fetch, lookupHost }) {
   const getSecretsPath = () => path.join(app.getPath('userData'), 'secrets.bin')
 
-  const assertPublicResolution = async (hostname) => {
+  const assertPublicResolution = async (hostname, { allowPrivateAddress } = {}) => {
     if (!lookupHost) return
+    if (allowPrivateAddress) return
     const resolved = await lookupHost(hostname)
     const addresses = Array.isArray(resolved) ? resolved : [resolved]
     if (!addresses.length || addresses.some((item) => !item || isBlockedIpAddress(item.address))) {
@@ -41,6 +42,8 @@ function createIpcHandlers({ app, fs, safeStorage, fetchImpl = fetch, lookupHost
       const extraAllowedHosts = Array.isArray(payload?.allowedHosts)
         ? payload.allowedHosts.filter((item) => typeof item === 'string')
         : []
+      // 仅在渲染进程显式开启「允许本机/内网 API」时放行私有地址（用户主动选择）
+      const allowPrivateAddress = payload?.allowPrivateNetwork === true
       const guard = evaluateDesktopFetchRequest({
         origin: readOriginFromSender(event.sender),
         method: payload?.method,
@@ -48,6 +51,7 @@ function createIpcHandlers({ app, fs, safeStorage, fetchImpl = fetch, lookupHost
         pathname: parsed.pathname,
         protocol: parsed.protocol,
         extraAllowedHosts,
+        allowPrivateAddress,
       })
       if (!guard.ok) {
         const error = new Error(guard.error || 'Forbidden proxy request')
@@ -55,7 +59,7 @@ function createIpcHandlers({ app, fs, safeStorage, fetchImpl = fetch, lookupHost
         throw error
       }
 
-      await assertPublicResolution(parsed.hostname)
+      await assertPublicResolution(parsed.hostname, { allowPrivateAddress })
 
       const headers = payload?.headers && typeof payload.headers === 'object' ? payload.headers : {}
       const body = Array.isArray(payload?.body) ? Buffer.from(payload.body) : undefined

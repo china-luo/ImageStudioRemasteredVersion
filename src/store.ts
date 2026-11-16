@@ -27,7 +27,7 @@ import {
   getActiveApiProfile,
   normalizeSettings,
 } from './lib/apiProfiles'
-import { setExtraAllowedHostsProvider } from './lib/desktopFetch'
+import { setExtraAllowedHostsProvider, setAllowPrivateNetworkProvider } from './lib/desktopFetch'
 import {
   collectApiHostnamesFromSettings,
   extractSecretsFromSettings,
@@ -1197,6 +1197,7 @@ export const useStore = create<AppState>()(
 )
 
 setExtraAllowedHostsProvider(() => collectApiHostnamesFromSettings(useStore.getState().settings))
+setAllowPrivateNetworkProvider(() => useStore.getState().settings.allowPrivateNetwork === true)
 
 // ===== Actions =====
 

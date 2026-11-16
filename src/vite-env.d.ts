@@ -16,6 +16,7 @@ interface Window {
       headers?: Record<string, string>
       body?: number[]
       allowedHosts?: string[]
+      allowPrivateNetwork?: boolean
     }) => Promise<{
       status: number
       statusText: string

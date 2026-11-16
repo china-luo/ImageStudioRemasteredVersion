@@ -215,6 +215,14 @@ export default function SettingsGeneralTab({ draft, onCommit }: SettingsGeneralT
         checked={draft.alwaysShowRetryButton}
         onToggle={() => onCommit({ ...draft, alwaysShowRetryButton: !draft.alwaysShowRetryButton })}
       />
+      {typeof window !== 'undefined' && window.imageStudioDesktop?.isDesktop && (
+        <SettingsToggle
+          label="允许本机/内网 API 地址"
+          description="默认关闭：桌面版会拦截 127.0.0.1、localhost 和内网 IP 等私有地址，防止误连。配置本机或局域网 OpenAI 兼容服务（如本地网关）时打开此开关。"
+          checked={draft.allowPrivateNetwork === true}
+          onToggle={() => onCommit({ ...draft, allowPrivateNetwork: !draft.allowPrivateNetwork })}
+        />
+      )}
     </div>
   )
 }

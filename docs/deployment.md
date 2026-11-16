@@ -8,6 +8,7 @@
 - API Key：Web 只保存在当前标签的 `sessionStorage`；桌面版使用系统加密存储。
 - 开发跨域：本地 `vite` 的 `/api-proxy` 仅允许 localhost Origin，并拦截内网地址和非白名单 API 路径。
 - 桌面跨域：Electron 主进程受控 `fetch`，不关闭 `webSecurity`。
+- 桌面私有地址：桌面版默认拦截 127.0.0.1、localhost 和内网 IP 等私有地址（防 SSRF）。使用本机或局域网 OpenAI 兼容服务时，在 **设置 → 常规 → 允许本机/内网 API 地址** 显式开启。
 
 ## Cloudflare
 

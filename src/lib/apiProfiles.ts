@@ -858,6 +858,7 @@ export function normalizeSettings(
     vocProfileId,
     vocApiKey: typeof record.vocApiKey === 'string' ? record.vocApiKey : '',
     seedreamEditorProfileId,
+    allowPrivateNetwork: record.allowPrivateNetwork === true,
   }
 }
 
@@ -1269,4 +1270,5 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   vocProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
   vocApiKey: '',
   seedreamEditorProfileId: '',
+  allowPrivateNetwork: false,
 })

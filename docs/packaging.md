@@ -1,4 +1,58 @@
-# Windows 安装包
+# 打包
+
+官方安装包只走这两条链路，互不影响：
+
+- Windows：`npm run build:installer`（PowerShell + NSIS）
+- macOS：`npm run build:mac`（electron-builder，见下文）
+
+## macOS 应用
+
+```text
+npm run build:mac
+```
+
+它会：
+
+1. 执行 `tsc -b && vite build`，产出 `dist/`。
+2. 若 `build/icon.icns` 缺失或比 `build/icon.png` 旧，运行 `scripts/create-mac-icon.sh` 重新生成。
+3. 运行 `electron-builder --mac --config electron-builder.mac.yml`，同时产出 arm64 与 x64 的 dmg 和 zip。
+
+产物位于 `release/`：
+
+| 产物 | 说明 |
+|---|---|
+| `ImageStudioRemasteredVersion-{version}-arm64.dmg` | Apple 芯片安装镜像 |
+| `ImageStudioRemasteredVersion-{version}-x64.dmg` | Intel 芯片安装镜像 |
+| `ImageStudioRemasteredVersion-{version}-{arch}.zip` | 免安装压缩包 |
+
+### 配置来源
+
+| 项 | 来源 |
+|---|---|
+| 版本号 | `package.json` 的 `version` |
+| appId | `electron-builder.mac.yml` 的 `appId`（与 `electron/main.cjs` 的 `APP_ID` 一致） |
+| 图标 | `build/icon.icns`（由 `build/icon.png` 生成） |
+| 打包内容 | `dist/`、`electron/`、`build/`（前端已打包，不含 node_modules） |
+
+### 签名与公证
+
+打包流程通过 `scripts/after-pack-mac.cjs`（`afterPack` 钩子）自动处理签名：
+
+- 本机存在 `Developer ID Application` 证书时，由 electron-builder 正式签名。
+- 没有证书时自动降级为 ad-hoc 签名（`codesign --sign -`）：本机直接运行正常，但如果应用被他人从网上下载，会触发 Gatekeeper，需要右键「打开」或在终端移除 quarantine 属性。注意必须是**先签名再打包** dmg/zip，否则压缩包内的应用无法启动（macOS 会因签名失效直接 SIGKILL）。
+
+对外分发需要在 `electron-builder.mac.yml` 中配置：
+
+```yaml
+mac:
+  identity: "Developer ID Application: Your Name (TEAMID)"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+```
+
+并在构建后通过 `xcrun notarytool` 提交公证。
+
+## Windows 安装包
 
 官方安装包只走这一条链路：
 

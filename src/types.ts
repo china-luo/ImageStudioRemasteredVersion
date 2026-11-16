@@ -133,6 +133,8 @@ export interface AppSettings {
   vocProfileId: string
   vocApiKey: string
   seedreamEditorProfileId?: string
+  /** 桌面版：显式允许请求本机/内网（私有地址）API，默认关闭 */
+  allowPrivateNetwork?: boolean
 }
 
 // ===== 任务参数 =====
