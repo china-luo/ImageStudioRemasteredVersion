@@ -1,0 +1,24 @@
+name: Trigger Vercel Deploy Hook
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel Deploy Hook
+        if: ${{ env.VERCEL_DEPLOY_HOOK != '' }}
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          curl -X POST "$VERCEL_DEPLOY_HOOK"
+          echo "Vercel deploy hook triggered."
+      - name: Skip if Hook URL is missing
+        if: ${{ env.VERCEL_DEPLOY_HOOK == '' }}
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          echo "VERCEL_DEPLOY_HOOK secret is not set. Skipping Vercel deployment."
