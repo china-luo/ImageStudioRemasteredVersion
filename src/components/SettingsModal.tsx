@@ -89,7 +89,7 @@ function getAppVersionLabel() {
 }
 
 const ABOUT_DESCRIPTION =
-  '面向 Amazon 与 TikTok Shop 的跨境电商图片工作台，支持商品图生成、Listing 与 A+ 图片策划、竞品图片拆解反推、VOC 评论分析，以及 CSV/XLSX 评论导入后的 AI 报告生成。适合主图、卖点图、详情图、A+ 模块和多平台视觉素材的本地化创作流程。'
+  '面向 Amazon 与 TikTok Shop 的跨境电商图片工作台，支持商品图生成、Listing 与 A+ 图片策划、竞品图片拆解反推、VOC 评论分析，以及 CSV/XLSX 评论导入和本地报告导出。适合主图、卖点图、详情图、A+ 模块和多平台视觉素材的本地化创作流程。'
 
 export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
@@ -220,12 +220,6 @@ export default function SettingsModal() {
         value: profile.id,
       }))
     : [{ label: '暂无 Chat/Responses 拆图配置', value: '' }]
-  const vocProfileOptions = amazonPlannerProfiles.length
-    ? amazonPlannerProfiles.map((profile) => ({
-        label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
-        value: profile.id,
-      }))
-    : [{ label: '暂无 Chat/Responses VOC 配置', value: '' }]
 
   const editorProfileCandidates = apiConfigView === 'analysis' ? amazonPlannerProfiles : imageGenerationProfiles
   const preferredEditorProfile = apiConfigView === 'analysis' ? amazonPlannerProfile : imageGenerationProfile
@@ -1244,7 +1238,6 @@ export default function SettingsModal() {
                     providerOptions: editorProviderOptions,
                     amazonPlannerProfiles,
                     sopReverseProfileOptions,
-                    vocProfileOptions,
                     activeProviderUsesApiUrl,
                     activeProviderIsOpenAICompatible,
                     activeProviderSupportsApiProxy,

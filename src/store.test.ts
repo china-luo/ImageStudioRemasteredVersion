@@ -333,13 +333,45 @@ describe('support prompt integration', () => {
     })
 
     expect(persisted.settings.apiKey).toBe('')
-    expect(persisted.settings.vocApiKey).toBe('')
+    expect(persisted.settings).not.toHaveProperty('vocApiKey')
+    expect(persisted.settings).not.toHaveProperty('vocProfileId')
     expect(persisted.settings.profiles.every((profile) => profile.apiKey === '')).toBe(true)
 
     const merged = mergePersistedState({ settings }, useStore.getState())
     expect(merged.settings.apiKey).toBe('persist-key')
-    expect(merged.settings.vocApiKey).toBe('voc-persist-key')
+    expect(merged.settings).not.toHaveProperty('vocApiKey')
+    expect(JSON.stringify(getPersistedState(merged))).not.toContain('voc-persist-key')
     expect(getPersistedState(merged).settings.apiKey).toBe('')
+  })
+
+  it('ignores legacy VOC settings during rehydration without deleting general API profiles', () => {
+    const retainedProfile = createDefaultOpenAIProfile({
+      id: 'formerly-voc-profile',
+      name: 'User analysis API',
+      baseUrl: 'https://custom.example/v1',
+      apiMode: 'chat',
+      apiKey: 'retained-general-key',
+    })
+    const legacySettings = {
+      ...DEFAULT_SETTINGS,
+      profiles: [...DEFAULT_SETTINGS.profiles, retainedProfile],
+      vocProfileId: retainedProfile.id,
+      vocApiKey: 'ignored-legacy-voc-key',
+    }
+    const merged = mergePersistedState({ settings: legacySettings }, useStore.getState())
+    expect(merged.settings).not.toHaveProperty('vocApiKey')
+    expect(merged.settings).not.toHaveProperty('vocProfileId')
+    expect(merged.settings.profiles.find((profile) => profile.id === retainedProfile.id)).toEqual(retainedProfile)
+    expect(merged.settings.activeProfileId).toBe(DEFAULT_SETTINGS.activeProfileId)
+    expect(merged.settings.amazonPlannerProfileId).toBe(DEFAULT_SETTINGS.amazonPlannerProfileId)
+    expect(merged.settings.sopReverseProfileId).toBe(DEFAULT_SETTINGS.sopReverseProfileId)
+    const persisted = getPersistedState(merged)
+    expect(JSON.stringify(persisted.settings)).not.toContain('ignored-legacy-voc-key')
+    expect(persisted.settings.profiles.find((profile) => profile.id === retainedProfile.id)).toMatchObject({
+      id: retainedProfile.id,
+      baseUrl: retainedProfile.baseUrl,
+      apiKey: '',
+    })
   })
 
   it('ignores legacy persisted open and permanent-dismissal state', () => {
@@ -1508,7 +1540,8 @@ describe('data export and clearing', () => {
     const unzipped = unzipSync(new Uint8Array(buffer))
     const manifest = JSON.parse(strFromU8(unzipped['manifest.json'])) as ExportData
     expect(manifest.settings?.apiKey).toBe('')
-    expect(manifest.settings?.vocApiKey).toBe('')
+    expect(manifest.settings).not.toHaveProperty('vocApiKey')
+    expect(manifest.settings).not.toHaveProperty('vocProfileId')
     expect(manifest.settings?.profiles?.every((profile) => profile.apiKey === '')).toBe(true)
     expect(JSON.stringify(manifest)).not.toContain('export-key')
     expect(JSON.stringify(manifest)).not.toContain('export-voc-key')

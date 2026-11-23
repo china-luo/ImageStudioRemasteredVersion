@@ -17,7 +17,6 @@ export const DEFAULT_PROXY_ALLOWED_HOSTS = [
   'dashscope-intl.aliyun.com',
   'aliyuncs.com',
   'aliyun.com',
-  'openapi.shulex.com',
 ]
 
 export const ALLOWED_HOSTS_HEADER = 'x-image-studio-allowed-hosts'
@@ -30,7 +29,6 @@ const ALLOWED_API_PATH_PATTERNS = [
   /^\/v1\/chat\/completions\/?$/,
   /^\/v1\/models\/?$/,
   /^\/v1\/images\/(generations|edits|tasks\/[^/]+)\/?$/,
-  /^\/v1\/api\/(RtTask01|RtQry01)\/?$/,
   /^\/api\/v1(\/|$)/,
   /^\/api\/v3(\/|$)/,
   /^\/images\/(generations|edits|tasks\/[^/]+)\/?$/,

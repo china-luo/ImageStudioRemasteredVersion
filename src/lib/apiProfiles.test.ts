@@ -14,7 +14,6 @@ import {
   findEquivalentApiProfile,
   getAmazonPlannerProfile,
   getImageGenerationProfile,
-  getVocAnalysisProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
   isAmazonPlannerProfile,
@@ -814,7 +813,7 @@ describe('amazon planner profile', () => {
     expect(getImageGenerationProfile(settings)?.id).toBe(imageProfile.id)
   })
 
-  it('keeps VOC analysis profile and Shulex key separate from image generation', () => {
+  it('ignores legacy VOC settings without removing the referenced general API profile', () => {
     const imageProfile = createDefaultOpenAIProfile({
       id: 'image-profile',
       name: 'Image Profile',
@@ -847,12 +846,15 @@ describe('amazon planner profile', () => {
 
     expect(settings.activeProfileId).toBe(imageProfile.id)
     expect(settings.amazonPlannerProfileId).toBe(plannerProfile.id)
-    expect(settings.vocProfileId).toBe(vocProfile.id)
-    expect(settings.vocApiKey).toBe('shulex-key')
-    expect(getVocAnalysisProfile(settings)?.id).toBe(vocProfile.id)
+    expect(settings).not.toHaveProperty('vocProfileId')
+    expect(settings).not.toHaveProperty('vocApiKey')
+    expect(settings.profiles).toEqual([imageProfile, plannerProfile, vocProfile])
+    expect(getImageGenerationProfile(settings)?.id).toBe(imageProfile.id)
+    expect(getAmazonPlannerProfile(settings)?.id).toBe(plannerProfile.id)
+    expect(settings.sopReverseProfileId).toBe(plannerProfile.id)
   })
 
-  it('defaults VOC analysis to the planner Chat/Responses profile when unset', () => {
+  it('does not create VOC settings when selecting the default planner profile', () => {
     const settings = normalizeSettings({
       profiles: [
         createDefaultOpenAIProfile({
@@ -870,8 +872,9 @@ describe('amazon planner profile', () => {
       amazonPlannerProfileId: 'planner-profile',
     })
 
-    expect(settings.vocProfileId).toBe('planner-profile')
-    expect(getVocAnalysisProfile(settings)?.id).toBe('planner-profile')
+    expect(settings).not.toHaveProperty('vocProfileId')
+    expect(settings).not.toHaveProperty('vocApiKey')
+    expect(getAmazonPlannerProfile(settings)?.id).toBe('planner-profile')
   })
 })
 

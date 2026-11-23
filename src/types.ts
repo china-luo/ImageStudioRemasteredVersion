@@ -130,8 +130,6 @@ export interface AppSettings {
   activeProfileId: string
   amazonPlannerProfileId: string
   sopReverseProfileId: string
-  vocProfileId: string
-  vocApiKey: string
   seedreamEditorProfileId?: string
 }
 

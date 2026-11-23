@@ -56,7 +56,6 @@ export type SettingsApiTabProps = {
   fetchModels: () => void | Promise<void>
   addModelToCatalog: () => void
   sopReverseProfileOptions: SelectOption[]
-  vocProfileOptions: SelectOption[]
   activeProviderUsesApiUrl: boolean
   activeProviderIsOpenAICompatible: boolean
   activeProviderSupportsApiProxy: boolean
@@ -129,7 +128,6 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
     fetchModels,
     addModelToCatalog,
     sopReverseProfileOptions,
-    vocProfileOptions,
     activeProviderUsesApiUrl,
     activeProviderIsOpenAICompatible,
     activeProviderSupportsApiProxy,
@@ -943,26 +941,6 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
                 disabled={amazonPlannerProfiles.length === 0}
                 options={sopReverseProfileOptions}
                 className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">VOC 评论分析配置</span>
-              <Select
-                value={draft.vocProfileId}
-                onChange={(value) => commitSettings({ ...draft, vocProfileId: String(value) })}
-                disabled={amazonPlannerProfiles.length === 0}
-                options={vocProfileOptions}
-                className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">Shulex OpenAPI Key</span>
-              <input
-                value={draft.vocApiKey}
-                onChange={(event) => commitSettings({ ...draft, vocApiKey: event.target.value })}
-                type="password"
-                placeholder="仅用于 VOC 评论实时任务"
-                className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none placeholder:text-gray-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
               />
             </label>
           </div>

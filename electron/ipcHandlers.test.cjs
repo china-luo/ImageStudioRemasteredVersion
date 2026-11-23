@@ -53,6 +53,23 @@ test('Electron fetch handler rejects a disallowed target before network access',
   assert.equal(called, false)
 })
 
+test('Electron fetch no longer allowlists Shulex hosts or realtime task paths', async () => {
+  let called = false
+  const handlers = createHandlers(os.tmpdir(), { fetchImpl: async () => { called = true } })
+  const event = { sender: sender() }
+  await assert.rejects(
+    handlers.fetch(event, { requestId: 'retired-host', url: 'https://openapi.shulex.com/v1/responses', method: 'POST' }),
+    /Forbidden host/,
+  )
+  for (const task of ['RtTask01', 'RtQry01']) {
+    await assert.rejects(
+      handlers.fetch(event, { requestId: task, url: `https://api.openai.com/v1/api/${task}`, method: 'POST' }),
+      /Forbidden API path/,
+    )
+  }
+  assert.equal(called, false)
+})
+
 test('Electron fetch handler forwards approved image requests', async () => {
   const handlers = createHandlers(os.tmpdir(), {
     fetchImpl: async (url, options) => {
@@ -380,11 +397,29 @@ test('Electron secrets handlers persist sanitized records', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'image-studio-ipc-'))
   try {
     const handlers = createHandlers(directory)
-    assert.deepEqual(await handlers.getSecrets(), { vocApiKey: '', apiKey: '', profiles: {} })
+    assert.deepEqual(await handlers.getSecrets(), { apiKey: '', profiles: {} })
     assert.equal(await handlers.setSecrets(null, { apiKey: 'key', vocApiKey: 'voc', profiles: { profile: 'secret' } }), true)
-    assert.deepEqual(await handlers.getSecrets(), { apiKey: 'key', vocApiKey: 'voc', profiles: { profile: 'secret' } })
+    assert.deepEqual(await handlers.getSecrets(), { apiKey: 'key', profiles: { profile: 'secret' } })
+    assert.equal(fs.readFileSync(path.join(directory, 'secrets.bin'), 'utf8').includes('vocApiKey'), false)
     assert.equal(await handlers.setSecrets(null, { apiKey: 42, profiles: [] }), true)
-    assert.deepEqual(await handlers.getSecrets(), { apiKey: '', vocApiKey: '', profiles: [] })
+    assert.deepEqual(await handlers.getSecrets(), { apiKey: '', profiles: [] })
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('Electron secrets ignore legacy VOC credentials while retaining general profile keys', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'image-studio-ipc-'))
+  try {
+    const handlers = createHandlers(directory)
+    const legacy = { apiKey: 'image-key', vocApiKey: 'retired-key', profiles: { 'voc-profile': 'retained-profile-key' } }
+    fs.writeFileSync(path.join(directory, 'secrets.bin'), JSON.stringify(legacy))
+    assert.deepEqual(await handlers.getSecrets(), { apiKey: legacy.apiKey, profiles: legacy.profiles })
+    assert.equal(await handlers.setSecrets(null, legacy), true)
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'secrets.bin'), 'utf8')), {
+      apiKey: legacy.apiKey,
+      profiles: legacy.profiles,
+    })
   } finally {
     fs.rmSync(directory, { recursive: true, force: true })
   }
@@ -394,7 +429,7 @@ test('Electron secret reads distinguish an unreadable vault from a missing vault
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'image-studio-ipc-'))
   try {
     const handlers = createHandlers(directory)
-    assert.deepEqual(await handlers.getSecrets(), { vocApiKey: '', apiKey: '', profiles: {} })
+    assert.deepEqual(await handlers.getSecrets(), { apiKey: '', profiles: {} })
     const file = path.join(directory, 'secrets.bin')
     fs.writeFileSync(file, 'not a valid encrypted record')
     await assert.rejects(handlers.getSecrets(), /无法解密已保存的 API 凭据/)
@@ -420,7 +455,7 @@ test('Electron secrets handlers do not persist plaintext when encryption is unav
     })
     assert.equal(await handlers.setSecrets(null, { apiKey: 'plaintext-secret' }), false)
     assert.equal(fs.existsSync(path.join(directory, 'secrets.bin')), false)
-    assert.deepEqual(await handlers.getSecrets(), { vocApiKey: '', apiKey: '', profiles: {} })
+    assert.deepEqual(await handlers.getSecrets(), { apiKey: '', profiles: {} })
   } finally {
     fs.rmSync(directory, { recursive: true, force: true })
   }

@@ -164,7 +164,7 @@ describe('custom provider proxy selection', () => {
     vi.unstubAllEnvs()
   })
 
-  it.each(['images/generations', 'images/edits', 'images/tasks/task-1', 'api/RtTask01', 'api/RtQry01'])(
+  it.each(['images/generations', 'images/edits', 'images/tasks/task-1'])(
     'retains the default local proxy for preset route %s',
     (path) => {
       expect(shouldUseCustomProviderApiProxy(false, proxyConfig, 'https://api.example/v1', path)).toBe(true)

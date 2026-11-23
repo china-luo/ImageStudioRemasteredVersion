@@ -354,7 +354,6 @@ function syncSettingsSecrets(previous: AppSettings, settings: AppSettings, incom
   const after = extractSecretsFromSettings(settings)
   // 完整设置可能仍含未读取凭据的占位值；只有定向凭据修改才能显式清空未读取的密钥。
   const explicitApiKey = incoming.apiKey !== undefined && incoming.profiles === undefined
-  const explicitVocApiKey = incoming.vocApiKey !== undefined && incoming.profiles === undefined
   const resetSecrets = JSON.stringify(incoming) === JSON.stringify(DEFAULT_SETTINGS)
   const removedProfileIds = previous.profiles
     .filter((profile) => !settings.profiles.some((item) => item.id === profile.id))
@@ -362,7 +361,6 @@ function syncSettingsSecrets(previous: AppSettings, settings: AppSettings, incom
   if (
     JSON.stringify(before) === JSON.stringify(after) &&
     !explicitApiKey &&
-    !explicitVocApiKey &&
     !resetSecrets &&
     removedProfileIds.length === 0
   ) {
@@ -379,7 +377,6 @@ function syncSettingsSecrets(previous: AppSettings, settings: AppSettings, incom
     if (resetSecrets) return after
     const next = { ...secrets, profiles: { ...secrets.profiles } }
     if (before.apiKey !== after.apiKey || explicitApiKey) next.apiKey = after.apiKey
-    if (before.vocApiKey !== after.vocApiKey || explicitVocApiKey) next.vocApiKey = after.vocApiKey
     for (const id of new Set([...Object.keys(before.profiles), ...Object.keys(after.profiles)])) {
       if (before.profiles[id] === after.profiles[id]) continue
       if (after.profiles[id]) next.profiles[id] = after.profiles[id]
