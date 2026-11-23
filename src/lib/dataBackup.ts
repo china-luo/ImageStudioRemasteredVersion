@@ -7,27 +7,30 @@ import {
   normalizeAgentConversations,
 } from './agentConversationNormalize'
 import { bytesToDataUrl, dataUrlToBytes } from './backupCodec'
-import { cacheImage, cacheThumbnail, clearImageCaches, scheduleThumbnailBackfill } from './imageCache'
+import { cacheThumbnail, clearImageCaches, scheduleThumbnailBackfill } from './imageCache'
 import { formatExportFileTime } from './downloadImages'
 import { migrateLegacyTaskStreamFields } from './legacyTaskMigration'
 import { stripSecretsFromSettings } from './secretStore'
 import { collectAmazonPlannerSessionImageIds } from './workspaceDrafts'
 import {
-  clearAmazonPlannerSessions as dbClearAmazonPlannerSessions,
-  clearImages,
-  clearTasks as dbClearTasks,
   getAllAmazonPlannerSessions,
   getAllImages,
   getAllTasks,
   getImageThumbnail,
-  putAmazonPlannerSession,
-  putImage,
-  putImageThumbnail,
-  putTask,
+  getAllGenerationProjects,
+  clearTaskData,
+  importTaskData,
+  type ImportedTaskData,
 } from './db'
-import { deleteUnreferencedImageIds, useStore } from '../store'
-import { getAllGenerationProjects, putGenerationProject, clearGenerationProjects } from './db'
-import { rememberActiveProject, PROJECT_DATA_EVENT, PROJECT_JOURNAL_KEY } from './generationProjects'
+import { cancelAllTaskWork, restoreInterruptedTaskWork, scheduleTaskRecordRecovery, useStore } from '../store'
+import { markInterruptedOpenAIRunningTasks } from './taskBootstrap'
+import {
+  rememberActiveProject,
+  PROJECT_DATA_EVENT,
+  PROJECT_DATA_IMPORTED_EVENT,
+  PROJECT_DATA_RESET_EVENT,
+  PROJECT_JOURNAL_KEY,
+} from './generationProjects'
 import { PLANNER_WORKSPACE_KEY } from '../components/planner/plannerWorkspaceDraft'
 import { resetSiteBackground } from './siteBackground'
 
@@ -46,39 +49,94 @@ export interface ImportOptions {
   importTasks?: boolean
 }
 
-export async function clearData(options: ClearOptions = { clearConfig: true, clearTasks: true }) {
-  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, showToast } = useStore.getState()
+const BACKUP_VERSION = 5
+let dataMutation = Promise.resolve()
 
-  if (options.clearTasks) {
-    await clearGenerationProjects()
-    if (typeof sessionStorage !== 'undefined') {
-      rememberActiveProject(null)
-      sessionStorage.removeItem(PLANNER_WORKSPACE_KEY)
-      sessionStorage.removeItem(PROJECT_JOURNAL_KEY)
+function serializeDataMutation<T>(action: () => Promise<T>): Promise<T> {
+  const result = dataMutation.then(action)
+  dataMutation = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
+
+function notifyProjectData(type: string) {
+  if (typeof window !== 'undefined') window.dispatchEvent?.(new Event(type))
+}
+
+// 本页清空和其他标签页的清空共用同一套内存与草稿清理。
+function resetLocalTaskView() {
+  try {
+    rememberActiveProject(null)
+    sessionStorage.removeItem(PLANNER_WORKSPACE_KEY)
+    sessionStorage.removeItem(PROJECT_JOURNAL_KEY)
+  } catch {
+    // 浏览器可能禁用会话存储；IndexedDB 已完成清空。
+  }
+  const state = useStore.getState()
+  clearImageCaches()
+  useStore.setState({
+    tasks: [],
+    agentConversations: [],
+    activeAgentConversationId: null,
+    supportPromptOpen: false,
+    selectedTaskIds: [],
+    detailTaskId: null,
+    lightboxImageId: null,
+    lightboxImageList: [],
+    pendingTaskCategory: null,
+  })
+  state.clearInputImages()
+  state.clearMaskDraft()
+  state.resetSeedreamEditorDraft()
+}
+
+export function applyExternalTaskDataReset() {
+  cancelAllTaskWork()
+  notifyProjectData(PROJECT_DATA_RESET_EVENT)
+  resetLocalTaskView()
+  return () => notifyProjectData(PROJECT_DATA_EVENT)
+}
+
+export function clearData(options: ClearOptions = { clearConfig: true, clearTasks: true }): Promise<boolean> {
+  return serializeDataMutation(async () => {
+    const { setTasks, setSettings, setParams, showToast } = useStore.getState()
+    try {
+      if (options.clearTasks) {
+        const previousTasks = useStore.getState().tasks
+        // 先取消本地后台工作，再让任务脱离状态；旧回调不能重新写入已清空的记录。
+        const generation = cancelAllTaskWork()
+        notifyProjectData(PROJECT_DATA_RESET_EVENT)
+        setTasks([])
+        try {
+          await clearTaskData()
+        } catch (error) {
+          try {
+            await restoreInterruptedTaskWork(previousTasks, generation)
+          } catch (restoreError) {
+            console.warn('清空回滚后未能完整恢复任务状态:', restoreError)
+          }
+          notifyProjectData(PROJECT_DATA_EVENT)
+          throw error
+        }
+        resetLocalTaskView()
+        notifyProjectData(PROJECT_DATA_EVENT)
+      }
+
+      if (options.clearConfig) {
+        useStore.setState({ dismissedCodexCliPrompts: [] })
+        setSettings({ ...DEFAULT_SETTINGS })
+        setParams({ ...DEFAULT_PARAMS })
+        resetSiteBackground()
+      }
+      showToast('所选数据已清空', 'success')
+      return true
+    } catch (error) {
+      showToast(`清空失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+      return false
     }
-    await dbClearTasks()
-    await dbClearAmazonPlannerSessions()
-    await clearImages()
-    clearImageCaches()
-    setTasks([])
-    useStore.setState({
-      agentConversations: [],
-      activeAgentConversationId: null,
-      supportPromptOpen: false,
-    })
-    clearInputImages()
-    clearMaskDraft()
-    if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event(PROJECT_DATA_EVENT))
-  }
-
-  if (options.clearConfig) {
-    useStore.setState({ dismissedCodexCliPrompts: [] })
-    setSettings({ ...DEFAULT_SETTINGS })
-    setParams({ ...DEFAULT_PARAMS })
-    resetSiteBackground()
-  }
-
-  showToast('所选数据已清空', 'success')
+  })
 }
 
 export async function exportData(options: ExportOptions = { exportConfig: true, exportTasks: true }) {
@@ -156,7 +214,7 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
     }
 
     const manifest: ExportData = {
-      version: 5,
+      version: BACKUP_VERSION,
       exportedAt: new Date(exportedAt).toISOString(),
     }
 
@@ -186,110 +244,168 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
   }
 }
 
-export async function importData(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function checkRows<T extends { id: string }>(rows: T[] | undefined, label: string, isValid: (row: T) => boolean): T[] {
+  if (rows === undefined) return []
+  if (!Array.isArray(rows)) throw new Error(`${label}格式无效`)
+  const ids = new Set<string>()
+  for (const row of rows) {
+    if (!isRecord(row) || typeof row.id !== 'string' || !row.id.trim() || ids.has(row.id) || !isValid(row)) {
+      throw new Error(`${label}包含无效记录或重复 ID`)
+    }
+    ids.add(row.id)
+  }
+  return rows
+}
+
+function prepareTaskData(data: ExportData, contents: Record<string, Uint8Array>): ImportedTaskData {
+  const tasks = markInterruptedOpenAIRunningTasks(
+    checkRows(
+      data.tasks,
+      '任务',
+      (task) =>
+        typeof task.prompt === 'string' &&
+        isRecord(task.params) &&
+        isStringList(task.inputImageIds) &&
+        isStringList(task.outputImages) &&
+        ['running', 'done', 'error'].includes(task.status) &&
+        Number.isFinite(task.createdAt),
+    ).map((task) => migrateLegacyTaskStreamFields(task).task),
+  ).tasks
+  const plannerSessions = checkRows(
+    data.amazonPlannerSessions,
+    '策划历史',
+    (session) =>
+      isRecord(session.draft) &&
+      isRecord(session.seriesStyleGuides) &&
+      isStringList(session.referenceImageIds) &&
+      Array.isArray(session.styleCandidates) &&
+      Array.isArray(session.styleImages) &&
+      Array.isArray(session.imagePlans) &&
+      Array.isArray(session.aPlusPlans),
+  )
+  const projects = checkRows(
+    data.generationProjects,
+    '项目',
+    (project) =>
+      typeof project.name === 'string' &&
+      isRecord(project.workspace) &&
+      isStringList(project.referenceImageIds) &&
+      isRecord(project.finals),
+  )
+  const readFiles = <T extends { path: string }, R>(
+    files: Record<string, T> | undefined,
+    map: (id: string, info: T, dataUrl: string) => R,
+  ): R[] => {
+    if (files === undefined) return []
+    if (!isRecord(files)) throw new Error('备份图片索引格式无效')
+    return Object.entries(files).map(([id, info]) => {
+      if (!id.trim() || !isRecord(info) || typeof info.path !== 'string' || !info.path) {
+        throw new Error('备份图片记录格式无效')
+      }
+      const bytes = Object.hasOwn(contents, info.path) && contents[info.path]
+      if (!bytes || bytes.length === 0) throw new Error(`ZIP 中缺少有效图片：${info.path}`)
+      return map(id, info, bytesToDataUrl(bytes, info.path))
+    })
+  }
+  const images = readFiles(data.imageFiles, (id, { path: _path, ...info }, dataUrl) => ({ ...info, id, dataUrl }))
+  const thumbnails = readFiles(data.thumbnailFiles, (id, { path: _path, ...info }, thumbnailDataUrl) => ({
+    ...info,
+    id,
+    thumbnailDataUrl,
+  }))
+  return { tasks, plannerSessions, projects, images, thumbnails }
+}
+
+export function importData(
   file: File,
   options: ImportOptions = { importConfig: true, importTasks: true },
 ): Promise<boolean> {
-  try {
-    const buffer = await file.arrayBuffer()
-    const unzipped = unzipSync(new Uint8Array(buffer))
-
-    const manifestBytes = unzipped['manifest.json']
-    if (!manifestBytes) throw new Error('ZIP 中缺少 manifest.json')
-
-    const data: ExportData = JSON.parse(strFromU8(manifestBytes))
-
-    const importedImageIds: string[] = []
-    if (options.importTasks && data.tasks && data.imageFiles) {
-      for (const [id, info] of Object.entries(data.imageFiles)) {
-        const bytes = unzipped[info.path]
-        if (!bytes) continue
-        const dataUrl = bytesToDataUrl(bytes, info.path)
-        await putImage({
-          id,
-          dataUrl,
-          createdAt: info.createdAt,
-          source: info.source,
-          width: info.width,
-          height: info.height,
-        })
-        cacheImage(id, dataUrl)
-        importedImageIds.push(id)
+  return serializeDataMutation(async () => {
+    let taskDataCommitted = false
+    try {
+      const unzipped = unzipSync(new Uint8Array(await file.arrayBuffer()))
+      const manifestBytes = unzipped['manifest.json']
+      if (!manifestBytes) throw new Error('ZIP 中缺少 manifest.json')
+      const data = JSON.parse(strFromU8(manifestBytes)) as ExportData
+      if (!isRecord(data) || !Number.isInteger(data.version) || data.version < 1 || data.version > BACKUP_VERSION) {
+        throw new Error('不支持此备份格式或版本')
       }
-
-      for (const [id, info] of Object.entries(data.thumbnailFiles ?? {})) {
-        const bytes = unzipped[info.path]
-        if (!bytes) continue
-        const thumbnailDataUrl = bytesToDataUrl(bytes, info.path)
-        await putImageThumbnail({
-          id,
-          thumbnailDataUrl,
-          width: info.width,
-          height: info.height,
-          thumbnailVersion: info.thumbnailVersion,
-        })
-        cacheThumbnail(id, {
-          dataUrl: thumbnailDataUrl,
-          width: info.width,
-          height: info.height,
-          thumbnailVersion: info.thumbnailVersion,
-        })
-      }
-
-      const legacyIntermediateImageIds = new Set<string>()
-      for (const task of data.tasks) {
-        const migration = migrateLegacyTaskStreamFields(task)
-        migration.removedImageIds.forEach((id) => legacyIntermediateImageIds.add(id))
-        await putTask(migration.task)
-      }
-      for (const session of data.amazonPlannerSessions ?? []) {
-        await putAmazonPlannerSession(session)
-      }
-      for (const project of data.generationProjects ?? []) {
-        await putGenerationProject(project)
-      }
-
-      const tasks = await getAllTasks()
-      useStore.getState().setTasks(tasks)
-      const importedAgentConversations = normalizeAgentConversations(data.agentConversations).filter(
-        (conversation) => !isEmptyAgentConversation(conversation),
-      )
-      useStore.setState((state) => {
-        const agentConversations = mergeImportedAgentConversations(state.agentConversations, importedAgentConversations)
-        const activeAgentConversationId =
-          state.activeAgentConversationId &&
-          agentConversations.some((conversation) => conversation.id === state.activeAgentConversationId)
-            ? state.activeAgentConversationId
-            : (importedAgentConversations[0]?.id ?? agentConversations[0]?.id ?? null)
-        return {
-          agentConversations,
-          activeAgentConversationId,
-        }
-      })
-      await deleteUnreferencedImageIds(legacyIntermediateImageIds)
-      scheduleThumbnailBackfill(importedImageIds)
-      if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event(PROJECT_DATA_EVENT))
-    }
-
-    if (options.importConfig && data.settings) {
+      const hasTaskData =
+        options.importTasks &&
+        [
+          data.tasks,
+          data.imageFiles,
+          data.thumbnailFiles,
+          data.amazonPlannerSessions,
+          data.generationProjects,
+          data.agentConversations,
+        ].some((part) => part !== undefined)
+      const taskData = hasTaskData ? prepareTaskData(data, unzipped) : null
+      const importedAgentConversations = taskData
+        ? normalizeAgentConversations(data.agentConversations).filter(
+            (conversation) => !isEmptyAgentConversation(conversation),
+          )
+        : []
       const state = useStore.getState()
-      state.setSettings(mergeImportedSettings(state.settings, data.settings))
-    }
+      const importedSettings =
+        options.importConfig && data.settings !== undefined
+          ? mergeImportedSettings(state.settings, data.settings)
+          : null
+      const saved = taskData ? await importTaskData(taskData) : null
+      taskDataCommitted = saved !== null
 
-    let msg = '数据已成功导入'
-    if (options.importTasks && data.tasks) {
-      const plannerSessionCount = data.amazonPlannerSessions?.length ?? 0
-      msg = plannerSessionCount
-        ? `已导入 ${data.tasks.length} 条记录和 ${plannerSessionCount} 条策划历史`
-        : `已导入 ${data.tasks.length} 条记录`
-    } else if (options.importConfig && data.settings) {
-      msg = '配置已成功导入'
-    }
+      // 只有 IndexedDB 完整提交之后才更新 UI 和缓存。
+      if (saved) {
+        useStore.setState((current) => {
+          const localTaskIds = new Set(current.tasks.map((task) => task.id))
+          const agentConversations = mergeImportedAgentConversations(
+            current.agentConversations,
+            importedAgentConversations,
+          )
+          const activeAgentConversationId =
+            current.activeAgentConversationId &&
+            agentConversations.some((conversation) => conversation.id === current.activeAgentConversationId)
+              ? current.activeAgentConversationId
+              : (importedAgentConversations[0]?.id ?? agentConversations[0]?.id ?? null)
+          return {
+            tasks: [...saved.tasks.filter((task) => !localTaskIds.has(task.id)), ...current.tasks],
+            agentConversations,
+            activeAgentConversationId,
+          }
+        })
+        scheduleThumbnailBackfill(saved.imageIds)
+        notifyProjectData(PROJECT_DATA_IMPORTED_EVENT)
+      }
+      if (importedSettings) state.setSettings(importedSettings)
+      if (saved) scheduleTaskRecordRecovery(saved.tasks)
 
-    useStore.getState().showToast(msg, 'success')
-    return true
-  } catch (e) {
-    useStore.getState().showToast(`导入失败：${e instanceof Error ? e.message : String(e)}`, 'error')
-    return false
-  }
+      let message = saved
+        ? `已导入 ${saved.importedTasks} 条记录`
+        : importedSettings
+          ? '配置已成功导入'
+          : '备份中没有所选数据'
+      if (saved?.importedSessions) message += `和 ${saved.importedSessions} 条策划历史`
+      if (saved?.importedProjects) message += `，新增 ${saved.importedProjects} 个项目`
+      if (saved?.skipped) message += `；已保留 ${saved.skipped} 条同 ID 的本地数据`
+      state.showToast(message, 'success')
+      return true
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      useStore
+        .getState()
+        .showToast(
+          taskDataCommitted ? `任务数据已导入，但后续刷新或配置保存失败：${detail}` : `导入失败：${detail}`,
+          'error',
+        )
+      return taskDataCommitted
+    }
+  })
 }

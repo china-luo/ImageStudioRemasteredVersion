@@ -14,23 +14,23 @@ export default function SettingsAboutTab({
 }: SettingsAboutTabProps) {
   return (
     <div className="flex h-full min-h-[300px] flex-col items-center overflow-y-auto px-6 py-6">
-      <div className="mb-5 flex h-[88px] w-[88px] items-center justify-center rounded-3xl border border-gray-200/80 bg-white p-1.5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04]">
+      <div className="mb-4 flex h-[88px] w-[88px] items-center justify-center rounded-3xl bg-[var(--surface-solid)] p-1.5 shadow-[var(--shadow-panel)]">
         <img
           src={getPublicAssetUrl('pwa-icon.png')}
           alt={`${APP_BRAND_NAME} Logo`}
           className="h-full w-full rounded-[1.25rem] object-cover"
         />
       </div>
-      <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">{APP_BRAND_NAME}</h4>
+      <h4 className="text-lg font-bold tracking-tight text-[var(--text-1)]">{APP_BRAND_NAME}</h4>
       <button
         type="button"
         title={description}
         onClick={onToggleDescription}
-        className="group mt-3 max-w-[460px] rounded-2xl px-3 py-2 text-center transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:hover:bg-white/[0.04]"
+        className="group mt-2.5 max-w-[460px] rounded-2xl px-3.5 py-2 text-center transition hover:bg-[var(--surface-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]"
         aria-expanded={descriptionExpanded}
       >
         <span
-          className="block text-[13px] leading-relaxed text-gray-500 dark:text-gray-400"
+          className="block text-[13px] leading-relaxed text-[var(--text-2)]"
           style={
             descriptionExpanded
               ? undefined
@@ -44,16 +44,16 @@ export default function SettingsAboutTab({
         >
           {description}
         </span>
-        <span className="mt-1 block text-[11px] font-medium text-blue-500 opacity-0 transition group-hover:opacity-100 group-focus:opacity-100 dark:text-blue-300">
+        <span className="mt-1 block text-[11px] font-semibold text-[var(--accent)] opacity-0 transition group-hover:opacity-100 group-focus:opacity-100">
           {descriptionExpanded ? '收起介绍' : '查看完整介绍'}
         </span>
       </button>
-      <div className="mt-5 flex w-full max-w-[420px] flex-col items-center gap-3 rounded-2xl border border-gray-200/70 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+      <div className="ui-inset mt-5 flex w-full max-w-[420px] flex-col items-center gap-3.5 p-5">
         <a
           href={APP_REPOSITORY_URL}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-gray-300 hover:text-gray-950 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:border-white/[0.18] dark:hover:text-white"
+          className="ui-btn ui-btn-sm rounded-full px-4"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path
@@ -68,9 +68,9 @@ export default function SettingsAboutTab({
           <img
             src={getPublicAssetUrl('support-wechat-pay-qr.png')}
             alt="微信赞助码"
-            className="w-full max-w-[200px] rounded-2xl border border-gray-200 bg-white object-contain p-1.5 shadow-sm dark:border-white/[0.08]"
+            className="w-full max-w-[200px] rounded-2xl border border-[var(--line)] bg-white object-contain p-1.5 shadow-sm"
           />
-          <span className="text-xs text-gray-500 dark:text-gray-400">微信赞助码</span>
+          <span className="text-xs text-[var(--text-3)]">微信赞助码</span>
         </div>
       </div>
     </div>

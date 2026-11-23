@@ -22,8 +22,11 @@ export function getStoredSiteBackground(): string | null {
 }
 
 export function applySiteBackground(dataUrl: string | null = getStoredSiteBackground()) {
-  const imageUrl = isValidSiteBackgroundDataUrl(dataUrl) ? dataUrl : getPublicAssetUrl('site-background.png')
+  const isCustom = isValidSiteBackgroundDataUrl(dataUrl)
+  const imageUrl = isCustom ? dataUrl : getPublicAssetUrl('site-background.png')
   document.documentElement.style.setProperty('--site-background-image', `url(${JSON.stringify(imageUrl)})`)
+  if (isCustom) document.documentElement.dataset.customBackground = 'true'
+  else delete document.documentElement.dataset.customBackground
 }
 
 export function saveSiteBackground(dataUrl: string) {

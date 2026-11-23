@@ -12,6 +12,7 @@ const thumbnailSubscribers = new Map<
   Set<(thumbnail: { dataUrl: string; width?: number; height?: number }) => void>
 >()
 let thumbnailBackfillScheduled = false
+let cacheGeneration = 0
 const MAX_IMAGE_CACHE_ENTRIES = 8
 const MAX_THUMBNAIL_CACHE_ENTRIES = 80
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4
@@ -69,6 +70,7 @@ export function forgetCachedImage(id: string) {
 }
 
 export function clearImageCaches() {
+  ++cacheGeneration
   imageCache.clear()
   thumbnailCache.clear()
   thumbnailBackfillIds.clear()
@@ -79,7 +81,9 @@ export function clearImageCaches() {
 export async function ensureImageCached(id: string): Promise<string | undefined> {
   const cached = getCachedImage(id)
   if (cached) return cached
+  const generation = cacheGeneration
   const rec = await getImage(id)
+  if (generation !== cacheGeneration) return undefined
   if (rec) {
     cacheImage(id, rec.dataUrl)
     return rec.dataUrl
@@ -93,7 +97,9 @@ export async function ensureImageThumbnailCached(
   const cached = getCachedThumbnail(id)
   if (cached) return cached
 
+  const generation = cacheGeneration
   const rec = await getStoredFreshImageThumbnail(id)
+  if (generation !== cacheGeneration) return undefined
   if (!rec?.thumbnailDataUrl) {
     scheduleThumbnailBackfill([id], 'visible')
     return undefined
@@ -167,12 +173,14 @@ async function getNextThumbnailBackfillBatch() {
   const candidates = getOrderedThumbnailBackfillIds().slice(0, MAX_THUMBNAIL_BACKFILL_CONCURRENT)
   if (candidates.length === 0) return []
 
+  const generation = cacheGeneration
   const sizes = await Promise.all(
     candidates.map(async (id) => {
       const image = await getImage(id)
       return { width: image?.width, height: image?.height }
     }),
   )
+  if (generation !== cacheGeneration) return []
   const concurrency = getThumbnailConcurrencyForBatch(sizes)
   const selected = candidates.slice(0, concurrency)
   for (const id of selected) thumbnailBackfillIds.delete(id)
@@ -202,13 +210,14 @@ function getThumbnailConcurrencyForBatch(sizes: Array<{ width?: number; height?:
 }
 
 function startThumbnailBackfill(id: string) {
+  const generation = cacheGeneration
   thumbnailBackfillRunningIds.add(id)
 
   void (async () => {
     if (getCachedThumbnail(id)) return
 
     const thumbnail = await getImageThumbnail(id)
-    if (thumbnail?.thumbnailDataUrl) {
+    if (generation === cacheGeneration && thumbnail?.thumbnailDataUrl) {
       cacheThumbnail(id, {
         dataUrl: thumbnail.thumbnailDataUrl,
         width: thumbnail.width,
@@ -226,7 +235,7 @@ function startThumbnailBackfill(id: string) {
       // Keep thumbnail generation best-effort; cards remain on placeholders if it fails.
     })
     .finally(() => {
-      thumbnailBackfillRunningIds.delete(id)
+      if (generation === cacheGeneration) thumbnailBackfillRunningIds.delete(id)
       scheduleThumbnailBackfillTick()
     })
 }

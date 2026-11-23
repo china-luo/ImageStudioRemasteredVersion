@@ -3,6 +3,7 @@ import type {
   ImageEditorEngine,
   SeedreamAnnotation,
   SeedreamEditorResolution,
+  SeedreamEditorDraft,
   TaskParams,
   TaskRecord,
 } from '../types'
@@ -22,6 +23,36 @@ export interface SeedreamEditPromptOptions {
 
 function getImageEditorTaskEngine(task: TaskRecord): ImageEditorEngine {
   return task.imageEditContext?.engine ?? (task.apiProvider === 'volcengine' ? 'seedream' : 'home')
+}
+
+/** 仅记录绘制内容，忽略临时标注 ID；字段顺序固定，避免对象属性插入顺序造成误判。 */
+export function getSeedreamAnnotationFingerprint(annotations: SeedreamAnnotation[]) {
+  return JSON.stringify(
+    annotations.map((annotation) => [
+      annotation.kind,
+      annotation.color,
+      annotation.width,
+      annotation.points.map((point) => [point.x, point.y]),
+    ]),
+  )
+}
+
+/** 仅在编辑器仍显示原提交草稿时跟随重试，不覆盖另一任务或新的编辑。 */
+export function shouldFollowImageEditorRetry(task: TaskRecord, draft: SeedreamEditorDraft) {
+  const context = task.imageEditContext
+  return Boolean(
+    context &&
+    draft.latestTaskId === task.id &&
+    draft.engine === getImageEditorTaskEngine(task) &&
+    draft.sourceImageId === context.sourceImageId &&
+    draft.instruction.trim() === context.userInstruction &&
+    // 旧任务无法证明视觉定位图与当前标注一致，仅保留双方均无标注时的跟随行为。
+    (context.annotationFingerprint !== undefined
+      ? context.annotationFingerprint === getSeedreamAnnotationFingerprint(draft.annotations)
+      : !context.visualGuideImageId && draft.annotations.length === 0) &&
+    draft.referenceImageIds.length === context.referenceImageIds.length &&
+    draft.referenceImageIds.every((id, index) => id === context.referenceImageIds[index]),
+  )
 }
 
 /**

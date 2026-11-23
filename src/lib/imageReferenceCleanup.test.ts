@@ -49,6 +49,23 @@ describe('image reference cleanup', () => {
     expect(forgetCachedImage).toHaveBeenCalledWith('orphan')
   })
 
+  it('does not delete images still referenced by an unsubmitted editor draft', async () => {
+    const deleteImage = vi.fn(async () => undefined)
+    const deleted = await deleteUnreferencedImageCandidates({
+      candidates: ['editor-source', 'editor-reference', 'orphan'],
+      state: {
+        ...state(),
+        seedreamEditorDraft: { sourceImageId: 'editor-source', referenceImageIds: ['editor-reference'] },
+      },
+      getPlannerSessions: async () => [],
+      deleteImage,
+      forgetCachedImage: vi.fn(),
+    })
+
+    expect(deleted).toEqual(['orphan'])
+    expect(deleteImage).toHaveBeenCalledExactlyOnceWith('orphan')
+  })
+
   it('forgets a replaced image even when another state reference retains it', async () => {
     const deleteImage = vi.fn(async () => undefined)
     const forgetCachedImage = vi.fn()

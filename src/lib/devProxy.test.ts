@@ -8,6 +8,8 @@ import {
   readClientDevProxyConfig,
   isApiProxyLocked,
   getApiConnectionHint,
+  shouldUseCustomProviderApiProxy,
+  isCustomProviderProxyPathSupported,
 } from './devProxy'
 
 describe('local preview proxy discovery', () => {
@@ -146,6 +148,57 @@ describe('resolveDevProxyRequestTarget', () => {
 
   it('ignores requests outside the configured proxy prefix', () => {
     expect(resolveDevProxyRequestTarget('/other/responses', proxyConfig)).toBeNull()
+  })
+})
+
+describe('custom provider proxy selection', () => {
+  const proxyConfig = {
+    enabled: true,
+    prefix: '/api-proxy',
+    target: LOCAL_DYNAMIC_PROXY_TARGET,
+    changeOrigin: true,
+    secure: true,
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it.each(['images/generations', 'images/edits', 'images/tasks/task-1', 'api/RtTask01', 'api/RtQry01'])(
+    'retains the default local proxy for preset route %s',
+    (path) => {
+      expect(shouldUseCustomProviderApiProxy(false, proxyConfig, 'https://api.example/v1', path)).toBe(true)
+    },
+  )
+
+  it('examines the final pathname, not only a standard-looking endpoint suffix', () => {
+    expect(isCustomProviderProxyPathSupported('https://api.example/tenant/v1', 'images/generations')).toBe(false)
+    expect(isCustomProviderProxyPathSupported('https://api.example/v1', 'jobs/submit?next=images/generations')).toBe(
+      false,
+    )
+    expect(isCustomProviderProxyPathSupported('https://api.example/v1', 'images/generations?async=true')).toBe(true)
+  })
+
+  it('allows unknown paths to use browser CORS without being forced by the local default lock', () => {
+    expect(isApiProxyLocked(proxyConfig)).toBe(true)
+    expect(shouldUseCustomProviderApiProxy(false, proxyConfig, 'https://api.example/v1', 'jobs/submit')).toBe(false)
+    expect(() => shouldUseCustomProviderApiProxy(true, proxyConfig, 'https://api.example/v1', 'jobs/submit')).toThrow(
+      '关闭该配置的 API 代理',
+    )
+  })
+
+  it('keeps fixed Docker proxy flags out of custom provider routing', () => {
+    vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'true')
+    vi.stubEnv('VITE_API_PROXY_LOCKED', 'true')
+    expect(shouldUseCustomProviderApiProxy(true, null, 'https://api.example/v1', 'jobs/submit')).toBe(false)
+  })
+
+  it('keeps Electron on its guarded native transport even with a local dev proxy', () => {
+    vi.stubGlobal('window', { imageStudioDesktop: { isDesktop: true } })
+    expect(shouldUseCustomProviderApiProxy(false, proxyConfig, 'https://api.example/v1', 'images/generations')).toBe(
+      false,
+    )
+    expect(shouldUseCustomProviderApiProxy(true, proxyConfig, 'https://api.example/v1', 'jobs/submit')).toBe(false)
   })
 })
 

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
-import { strFromU8, unzipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { createGenerationProject, ACTIVE_PROJECT_KEY } from '../src/lib/generationProjects'
 import type { ApiProfile } from '../src/types'
 
@@ -99,7 +99,7 @@ async function stage(page: Page, name: string) {
     .click()
 }
 
-test('database v5 adds projects without removing v4 planning history or images', async ({ page }) => {
+test('database v6 preserves v4 planning history and images', async ({ page }) => {
   await page.goto('/manifest.webmanifest')
   await page.evaluate(async (png) => {
     await new Promise<void>((resolve, reject) => {
@@ -148,7 +148,7 @@ test('database v5 adds projects without removing v4 planning history or images',
         }
       }),
   )
-  expect(state).toEqual({ version: 5, ids: ['v4-session'], image: true })
+  expect(state).toEqual({ version: 6, ids: ['v4-session'], image: true })
 })
 
 test('projects preserve independent drafts and references across switching, reload and a new tab', async ({
@@ -202,6 +202,116 @@ test('projects preserve independent drafts and references across switching, relo
     .toContain('project-reference')
 })
 
+test('项目缺图可切换和重载，导入同 ID 的原图后立即恢复', async ({ page }) => {
+  const first = await seedProject(page)
+  const second = { ...createGenerationProject(), name: '暂缺参考图项目', referenceImageIds: ['missing-reference'] }
+  const openDataSettings = async () => {
+    await page.getByRole('banner').getByRole('button', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '数据管理', exact: true }).click()
+  }
+  const upload = async (manifest: object, files: Record<string, Uint8Array> = {}) => {
+    const buffer = Buffer.from(
+      zipSync({ 'manifest.json': strToU8(JSON.stringify({ version: 5, ...manifest })), ...files }),
+    )
+    await page
+      .locator('input[type=file][accept=".zip"]')
+      .setInputFiles({ name: 'fixture.zip', mimeType: 'application/zip', buffer })
+    await expect(page.getByText(/已导入 0 条记录/)).toBeVisible()
+    await page.getByRole('button', { name: '关闭', exact: true }).click()
+  }
+  await openDataSettings()
+  await upload({ generationProjects: [second] })
+  const selector = page.getByRole('combobox', { name: '切换项目' })
+  const warning = page.getByText(/1 张项目参考图暂未找到/)
+  const name = page.getByRole('textbox', { name: '项目名称', exact: true })
+  await selector.selectOption(second.id)
+  await expect(warning).toBeVisible()
+  await name.fill('缺图期间修改项目')
+  await expect(page.getByText('已自动保存', { exact: true })).toBeVisible()
+  await selector.selectOption(first.id)
+  await expect(warning).toHaveCount(0)
+  await selector.selectOption(second.id)
+  await page.reload()
+  await expect(name).toHaveValue('缺图期间修改项目')
+  await expect(warning).toBeVisible()
+  await openDataSettings()
+  await upload(
+    { imageFiles: { 'missing-reference': { path: 'image.png' } } },
+    { 'image.png': Buffer.from(PNG, 'base64') },
+  )
+  await expect(warning).toHaveCount(0)
+  await page.reload()
+  await expect(name).toHaveValue('缺图期间修改项目')
+  await expect(warning).toHaveCount(0)
+})
+
+test('清空数据会取消生成，迟到的响应不会重建记录或图片', async ({ page }) => {
+  await seedProject(page)
+  let release!: () => void
+  const allowResponse = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const urlPattern = /(?:https:\/\/image-api\.test\/|\/api-proxy\/https%3A%2F%2Fimage-api\.test)/
+  await page.evaluate(() => {
+    const fetchImpl = window.fetch
+    window.fetch = (input, init) => {
+      if (!String(input).includes('image-api.test')) return fetchImpl(input, init)
+      init?.signal?.addEventListener(
+        'abort',
+        () => {
+          document.documentElement.dataset.fixtureRequestAborted = 'true'
+        },
+        { once: true },
+      )
+      // 模拟忽略取消的服务商，确保迟到响应仍不能写回。
+      return fetchImpl(input, { ...init, signal: undefined })
+    }
+  })
+  await page.route(urlPattern, async (route) => {
+    await allowResponse
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: [{ b64_json: PNG }] }),
+    })
+  })
+  try {
+    const submitted = page.waitForRequest(urlPattern)
+    await stage(page, '图片制作')
+    await page.getByRole('button', { name: '提交生成', exact: true }).click()
+    await submitted
+    await page.getByRole('banner').getByRole('button', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '数据管理', exact: true }).click()
+    await page.getByRole('button', { name: '清空所选数据', exact: true }).click()
+    await page.getByRole('button', { name: '确认清空', exact: true }).click()
+    await expect(page.getByText('所选数据已清空')).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('data-fixture-request-aborted', 'true')
+    const response = page.waitForResponse(urlPattern)
+    release()
+    expect((await response).status()).toBe(200)
+    const counts = await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('amazon-image-studio')
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      try {
+        return await new Promise<[number, number]>((resolve, reject) => {
+          const tx = db.transaction(['tasks', 'images'])
+          const tasks = tx.objectStore('tasks').count()
+          const images = tx.objectStore('images').count()
+          tx.oncomplete = () => resolve([tasks.result, images.result])
+          tx.onabort = () => reject(tx.error)
+        })
+      } finally {
+        db.close()
+      }
+    })
+    expect(counts).toEqual([0, 0])
+  } finally {
+    release()
+  }
+})
+
 test('generation versions remain associated with a renamed project and export only the selected final', async ({
   page,
 }) => {
@@ -235,9 +345,9 @@ test('generation versions remain associated with a renamed project and export on
   const overviewGrid = results.locator('.project-version-grid--overview')
   await expect(overviewGrid).toBeVisible()
   await expect(overviewGrid.locator('.project-version-context')).toHaveCount(2)
-  const overviewCardRows = await overviewGrid.locator('[data-project-task-id]').evaluateAll((items) =>
-    items.map((item) => Math.round(item.getBoundingClientRect().y)),
-  )
+  const overviewCardRows = await overviewGrid
+    .locator('[data-project-task-id]')
+    .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().y)))
   expect(new Set(overviewCardRows).size).toBe(1)
   const downloadEvent = page.waitForEvent('download')
   await results.getByRole('button', { name: '导出定稿（1）', exact: true }).click()

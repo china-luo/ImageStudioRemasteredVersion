@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { type DragEvent, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { getVocAnalysisProfile, isAmazonPlannerProfile, validateApiProfile } from '../lib/apiProfiles'
 import {
@@ -21,11 +21,22 @@ import {
 } from '../lib/workspaceAnalysis'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import Select from './Select'
-import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, ImportIcon, RefreshIcon, SettingsIcon } from './icons'
+import MarkdownRenderer from './MarkdownRenderer'
+import {
+  ChartBarIcon,
+  CloseIcon,
+  CodeIcon,
+  CopyIcon,
+  DownloadIcon,
+  EditIcon,
+  ImportIcon,
+  RefreshIcon,
+  SettingsIcon,
+  UploadCloudIcon,
+} from './icons'
 
-const FIELD_CLASS =
-  'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
-const LABEL_CLASS = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400'
+const FIELD_CLASS = 'ui-input'
+const LABEL_CLASS = 'ui-label'
 
 const marketOptions = [
   { label: 'US · amazon.com', value: 'US' },
@@ -97,6 +108,7 @@ export default function VocAmazonReviewsWorkspace() {
   const isFetching = analysisStatus === 'running' && analysisOperation === 'fetch'
   const isAnalyzing = analysisStatus === 'running' && analysisOperation === 'analyze'
   const [showVocConfig, setShowVocConfig] = useState(false)
+  const [isCsvDragging, setIsCsvDragging] = useState(false)
   const [draftVocApiKey, setDraftVocApiKey] = useState(settings.vocApiKey)
   const [draftVocProfileId, setDraftVocProfileId] = useState(settings.vocProfileId)
 
@@ -298,83 +310,97 @@ export default function VocAmazonReviewsWorkspace() {
   }
 
   const running = isFetching || isAnalyzing
+  const maxPainCount = Math.max(1, ...(localSummary?.painPoints.map((item) => item.count) ?? [1]))
+  const maxSellingCount = Math.max(1, ...(localSummary?.sellingPoints.map((item) => item.count) ?? [1]))
+
+  const handleCsvDragOver = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (!isCsvDragging) setIsCsvDragging(true)
+  }
+
+  const handleCsvDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setIsCsvDragging(false)
+  }
+
+  const handleCsvDrop = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    setIsCsvDragging(false)
+    if (event.dataTransfer.files?.length) {
+      void handleCsvFile(event.dataTransfer.files)
+    }
+  }
 
   return (
     <>
-      <section
-        data-no-drag-select
-        className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-gray-900"
-      >
-        <div className="border-b border-gray-200 bg-gray-50/80 p-4 dark:border-white/[0.08] dark:bg-gray-950/70 sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="inline-flex rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
-                独立 VOC 评论分析板块
-              </div>
-              <h2 className="mt-3 text-xl font-black tracking-tight text-gray-950 dark:text-gray-50 sm:text-2xl">
-                Amazon VOC 评论分析
-              </h2>
-              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-                ASIN 模式通过 Shulex OpenAPI 实时任务拉取 Amazon 评论；CSV 可直接解析，再由独立 VOC AI
-                配置生成痛点、卖点、Listing 建议和 HTML dashboard。
-              </p>
+      <div data-no-drag-select className="animate-fade-up space-y-4 pb-8">
+        <div className="ui-panel flex flex-col gap-3 px-4 py-3.5 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="ui-page-icon h-10 w-10 rounded-xl" aria-hidden="true">
+              <ChartBarIcon className="h-5 w-5" />
             </div>
-            <div className="grid min-w-[260px] gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-gray-900">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-gray-700 dark:text-gray-200">VOC AI</span>
-                <span
-                  className={
-                    profileValidation ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300'
-                  }
-                >
-                  {profileValidation ? '待配置' : '已连接'}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="ui-title text-lg">Amazon VOC 评论分析</h2>
+                <span className={`ui-badge ${profileValidation ? 'ui-badge-warning' : 'ui-badge-success'}`}>
+                  <span className="ui-dot" />
+                  {profileValidation ? 'VOC AI 待配置' : vocProfile?.model || 'VOC AI 已连接'}
+                </span>
+                <span className={`ui-badge ${hasShulexKey ? 'ui-badge-success' : 'ui-badge-neutral'}`}>
+                  Shulex {hasShulexKey ? '已配置' : '未配置'}
                 </span>
               </div>
-              <div className="min-w-0 text-[12px] text-gray-500 dark:text-gray-400">
-                {vocProfile ? `${vocProfile.name} · ${vocProfile.model}` : '未选择模型'}
-              </div>
-              <div className="text-[12px] text-gray-500 dark:text-gray-400">
-                Shulex Key：{hasShulexKey ? '已配置' : '未配置'}
-              </div>
-              <button
-                type="button"
-                onClick={openVocConfig}
-                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-xs font-medium text-gray-700 transition hover:bg-white dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-              >
-                <SettingsIcon className="h-3.5 w-3.5" />
-                配置 VOC
-              </button>
+              <p className="mt-0.5 truncate text-xs text-[var(--text-3)]">
+                支持 ASIN 实时拉取或 CSV/XLSX 导入，生成情绪分布、高频痛点卖点与可导出 HTML 看板
+              </p>
             </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={openVocConfig} className="ui-btn ui-btn-sm h-9">
+              <SettingsIcon className="h-3.5 w-3.5" />
+              配置 VOC
+            </button>
           </div>
         </div>
 
-        <div className="p-4 sm:p-5">
-          <div className="mb-4 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
-            {(
-              [
-                ['asin', 'ASIN 拉取'],
-                ['csv', '文件导入'],
-              ] as const
-            ).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setSourceMode(mode)}
-                className={`h-8 rounded-lg px-3 text-sm font-medium transition ${sourceMode === mode ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
-              >
-                {label}
-              </button>
-            ))}
+        <section className="ui-panel overflow-hidden p-5 sm:p-6">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div className="ui-segmented">
+              {(
+                [
+                  ['asin', 'ASIN 拉取'],
+                  ['csv', '文件导入'],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={sourceMode === mode}
+                  data-active={sourceMode === mode}
+                  onClick={() => setSourceMode(mode)}
+                  className="ui-segment px-4"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {reviewsEnvelope && (
+              <span className="ui-badge ui-badge-accent">
+                已加载 {reviewsEnvelope.reviews.length} 条评论
+              </span>
+            )}
           </div>
 
           {sourceMode === 'asin' ? (
-            <div className="grid gap-4 lg:grid-cols-[1fr_180px_170px]">
+            <div className="grid gap-4 lg:grid-cols-[1fr_196px_170px]">
               <label>
                 <span className={LABEL_CLASS}>Amazon ASIN</span>
                 <input
                   value={asin}
                   onChange={(event) => setAsin(event.target.value.toUpperCase())}
-                  className={FIELD_CLASS}
+                  className={`${FIELD_CLASS} font-mono`}
                   placeholder="例如 B08N5WRWNW"
                 />
               </label>
@@ -384,7 +410,7 @@ export default function VocAmazonReviewsWorkspace() {
                   value={market}
                   onChange={(value) => setMarket(String(value))}
                   options={marketOptions}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
+                  className="ui-input h-10"
                 />
               </label>
               <label>
@@ -398,13 +424,16 @@ export default function VocAmazonReviewsWorkspace() {
                   className={FIELD_CLASS}
                 />
               </label>
-              <div className="lg:col-span-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
+              <div className="ui-callout ui-callout-warning lg:col-span-3 text-xs">
                 Shulex OpenAPI 实时任务受接口限制，最大 10 页，每页 10 条，因此最多抓取 {SHULEX_REALTIME_MAX_REVIEWS}{' '}
                 条评论。当前版本不再使用 Amazon 买家账号 Cookie。
               </div>
               {!hasShulexKey && (
-                <div className="lg:col-span-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
-                  请先在系统设置里填写 Shulex OpenAPI Key。
+                <div className="ui-callout ui-callout-warning lg:col-span-3 items-center justify-between text-xs">
+                  <span>请先在系统设置里填写 Shulex OpenAPI Key。</span>
+                  <button type="button" onClick={openVocConfig} className="shrink-0 font-bold underline underline-offset-2">
+                    立即配置 →
+                  </button>
                 </div>
               )}
             </div>
@@ -417,17 +446,30 @@ export default function VocAmazonReviewsWorkspace() {
                 className="hidden"
                 onChange={(event) => void handleCsvFile(event.target.files)}
               />
-              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-gray-300 bg-gray-50/80 p-3 dark:border-white/[0.12] dark:bg-gray-950/40 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">CSV / XLSX 评论文件</div>
-                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    XLSX 默认读取第一个工作表；自动识别 review/body/content/评价/内容、rating/star/评分、date/日期列。
+              <div
+                onDragOver={handleCsvDragOver}
+                onDragLeave={handleCsvDragLeave}
+                onDrop={handleCsvDrop}
+                data-dragging={isCsvDragging ? 'true' : undefined}
+                className="ui-dropzone min-h-[112px] w-full flex-col gap-2 px-5 py-4 sm:flex-row sm:justify-between sm:text-left"
+              >
+                <div className="flex flex-col items-center gap-3 sm:flex-row">
+                  <span className="ui-dropzone-icon h-10 w-10 shrink-0 rounded-xl" aria-hidden="true">
+                    <UploadCloudIcon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <div className="text-sm font-bold text-[var(--text-1)]">
+                      {isCsvDragging ? '松开鼠标以解析评论文件' : '拖入或上传 CSV / XLSX 评论文件'}
+                    </div>
+                    <div className="mt-0.5 text-xs text-[var(--text-3)]">
+                      XLSX 默认读取第一个工作表；自动识别 review/body/content/评价/内容、rating/star/评分、date/日期列。
+                    </div>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                  className="ui-btn ui-btn-soft h-9 shrink-0"
                 >
                   <ImportIcon className="h-4 w-4" />
                   上传 CSV / XLSX
@@ -438,7 +480,7 @@ export default function VocAmazonReviewsWorkspace() {
                 <textarea
                   value={csvText}
                   onChange={(event) => setCsvText(event.target.value)}
-                  className={`${FIELD_CLASS} min-h-[140px] resize-y`}
+                  className={`${FIELD_CLASS} min-h-[140px] resize-y font-mono text-xs`}
                   placeholder="title,rating,body,date&#10;Great,5,Works great,2026-01-01"
                 />
               </label>
@@ -455,13 +497,13 @@ export default function VocAmazonReviewsWorkspace() {
             />
           </label>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-5">
             {sourceMode === 'asin' ? (
               <button
                 type="button"
                 onClick={() => void fetchByAsin()}
                 disabled={running || !hasShulexKey}
-                className="inline-flex h-10 items-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-500 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+                className="ui-btn ui-btn-primary h-10 px-5 text-sm"
               >
                 <ImportIcon className="h-4 w-4" />
                 抓取评论
@@ -471,7 +513,7 @@ export default function VocAmazonReviewsWorkspace() {
                 type="button"
                 onClick={() => parseCsvInput(csvText, 'paste')}
                 disabled={running || !csvText.trim()}
-                className="inline-flex h-10 items-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-500 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+                className="ui-btn ui-btn-primary h-10 px-5 text-sm"
               >
                 <CodeIcon className="h-4 w-4" />
                 解析 CSV
@@ -481,184 +523,212 @@ export default function VocAmazonReviewsWorkspace() {
               type="button"
               onClick={() => void analyzeWithAi()}
               disabled={running || !reviewsEnvelope}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+              className="ui-btn ui-btn-accent h-10 px-4 text-sm"
             >
               <EditIcon className="h-4 w-4" />
               VOC AI 分析
             </button>
             {running && (
-              <button
-                type="button"
-                onClick={stopCurrentTask}
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200"
-              >
+              <button type="button" onClick={stopCurrentTask} className="ui-btn ui-btn-danger-soft h-10">
                 <CloseIcon className="h-4 w-4" />
                 停止
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => void copyReport()}
-              disabled={!aiReport && !localSummary}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-            >
-              <CopyIcon className="h-4 w-4" />
-              复制报告
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                reviewsEnvelope &&
-                downloadText(
-                  'voc-reviews.json',
-                  JSON.stringify(reviewsEnvelope, null, 2),
-                  'application/json;charset=utf-8',
-                )
-              }
-              disabled={!reviewsEnvelope}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-            >
-              <DownloadIcon className="h-4 w-4" />
-              JSON
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                dashboardHtml && downloadText('voc-dashboard.html', dashboardHtml, 'text/html;charset=utf-8')
-              }
-              disabled={!dashboardHtml}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-            >
-              <DownloadIcon className="h-4 w-4" />
-              HTML
-            </button>
-            <button
-              type="button"
-              onClick={reset}
-              className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 active:translate-y-px dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-            >
-              <RefreshIcon className="h-4 w-4" />
-              重置
-            </button>
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+              <button
+                type="button"
+                onClick={() => void copyReport()}
+                disabled={!aiReport && !localSummary}
+                className="ui-btn h-9"
+              >
+                <CopyIcon className="h-4 w-4" />
+                复制报告
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  reviewsEnvelope &&
+                  downloadText(
+                    'voc-reviews.json',
+                    JSON.stringify(reviewsEnvelope, null, 2),
+                    'application/json;charset=utf-8',
+                  )
+                }
+                disabled={!reviewsEnvelope}
+                className="ui-btn h-9"
+              >
+                <DownloadIcon className="h-4 w-4" />
+                JSON
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  dashboardHtml && downloadText('voc-dashboard.html', dashboardHtml, 'text/html;charset=utf-8')
+                }
+                disabled={!dashboardHtml}
+                className="ui-btn h-9"
+              >
+                <DownloadIcon className="h-4 w-4" />
+                HTML
+              </button>
+              <button type="button" onClick={reset} className="ui-btn ui-btn-ghost h-9">
+                <RefreshIcon className="h-4 w-4" />
+                重置
+              </button>
+            </div>
           </div>
 
-          {statusText && <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">{statusText}</div>}
+          {statusText && (
+            <div className="ui-callout ui-callout-accent mt-4 py-2.5 text-xs font-medium">{statusText}</div>
+          )}
           {error && (
-            <div
-              data-selectable-text
-              className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-600 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200"
-            >
+            <div data-selectable-text className="ui-callout ui-callout-danger mt-4 text-xs">
               {error}
             </div>
           )}
+        </section>
 
-          {localSummary && (
-            <div className="mt-5 grid gap-4 lg:grid-cols-[320px_1fr]">
-              <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-white/[0.08] dark:bg-gray-950/40">
-                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">本地快速摘要</div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                  <div className="rounded-lg bg-white p-2 dark:bg-white/[0.04]">
-                    <div className="text-lg font-bold text-emerald-600">
-                      {formatPct(localSummary.sentiment.positive)}
-                    </div>
-                    <div className="text-[11px] text-gray-500">正面</div>
+        {localSummary && (
+          <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+            <section className="ui-panel p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-[var(--text-1)]">情绪概览</h3>
+                <span className="ui-badge">{reviewsEnvelope?.reviews.length ?? 0} 条评论</span>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-inset)] p-2.5">
+                  <div className="text-lg font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {formatPct(localSummary.sentiment.positive)}
                   </div>
-                  <div className="rounded-lg bg-white p-2 dark:bg-white/[0.04]">
-                    <div className="text-lg font-bold text-gray-600 dark:text-gray-200">
-                      {formatPct(localSummary.sentiment.neutral)}
-                    </div>
-                    <div className="text-[11px] text-gray-500">中性</div>
-                  </div>
-                  <div className="rounded-lg bg-white p-2 dark:bg-white/[0.04]">
-                    <div className="text-lg font-bold text-red-600">{formatPct(localSummary.sentiment.negative)}</div>
-                    <div className="text-[11px] text-gray-500">负面</div>
-                  </div>
+                  <div className="mt-0.5 text-[11px] text-[var(--text-3)]">正面</div>
                 </div>
-                <div className="mt-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                  {localSummary.summary}
+                <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-inset)] p-2.5">
+                  <div className="text-lg font-extrabold tabular-nums text-[var(--text-2)]">
+                    {formatPct(localSummary.sentiment.neutral)}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-[var(--text-3)]">中性</div>
                 </div>
-                <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                  评论数：{reviewsEnvelope?.reviews.length ?? 0}
+                <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-inset)] p-2.5">
+                  <div className="text-lg font-extrabold tabular-nums text-red-600 dark:text-red-400">
+                    {formatPct(localSummary.sentiment.negative)}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-[var(--text-3)]">负面</div>
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-gray-200 p-4 dark:border-white/[0.08]">
-                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Top 痛点</div>
-                  <div className="mt-3 space-y-2">
-                    {localSummary.painPoints.length ? (
-                      localSummary.painPoints.map((item) => (
-                        <div
-                          key={item.label}
-                          className="rounded-lg bg-red-50/70 p-2 text-xs text-red-800 dark:bg-red-400/10 dark:text-red-200"
-                        >
-                          <div className="font-semibold">
-                            {item.label} · {item.count}
-                          </div>
-                          <div className="mt-1 line-clamp-2 opacity-80">{item.quote}</div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-xs text-gray-500">暂无明显痛点信号</div>
-                    )}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-gray-200 p-4 dark:border-white/[0.08]">
-                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Top 卖点</div>
-                  <div className="mt-3 space-y-2">
-                    {localSummary.sellingPoints.length ? (
-                      localSummary.sellingPoints.map((item) => (
-                        <div
-                          key={item.label}
-                          className="rounded-lg bg-emerald-50/70 p-2 text-xs text-emerald-800 dark:bg-emerald-400/10 dark:text-emerald-200"
-                        >
-                          <div className="font-semibold">
-                            {item.label} · {item.count}
-                          </div>
-                          <div className="mt-1 line-clamp-2 opacity-80">{item.quote}</div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-xs text-gray-500">暂无明显卖点信号</div>
-                    )}
-                  </div>
-                </div>
+              <div className="mt-3.5 flex h-2 overflow-hidden rounded-full bg-[var(--line)]">
+                <div className="bg-emerald-500 transition-all" style={{ width: `${localSummary.sentiment.positive}%` }} />
+                <div className="bg-zinc-400 transition-all" style={{ width: `${localSummary.sentiment.neutral}%` }} />
+                <div className="bg-red-500 transition-all" style={{ width: `${localSummary.sentiment.negative}%` }} />
               </div>
-            </div>
-          )}
+              <div className="mt-3.5 text-xs leading-relaxed text-[var(--text-2)]">{localSummary.summary}</div>
+            </section>
 
-          {aiReport && (
-            <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4 dark:border-white/[0.08] dark:bg-gray-950/40">
-              <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">VOC AI 报告</div>
-              <pre
-                data-selectable-text
-                className="max-h-[520px] overflow-auto whitespace-pre-wrap break-words font-sans text-[13px] leading-7 text-gray-800 dark:text-gray-100 custom-scrollbar"
-              >
-                {aiReport}
-              </pre>
+            <div className="grid gap-4 md:grid-cols-2">
+              <section className="ui-panel p-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-[var(--text-1)]">Top 痛点</h3>
+                  <span className="ui-badge ui-badge-danger">{localSummary.painPoints.length}</span>
+                </div>
+                <div className="mt-3.5 space-y-2.5">
+                  {localSummary.painPoints.length ? (
+                    localSummary.painPoints.map((item) => (
+                      <div
+                        key={item.label}
+                        className="rounded-xl border border-[var(--line)] bg-[var(--surface-inset)] p-3 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-[var(--text-1)]">{item.label}</span>
+                          <span className="font-mono text-[11px] font-bold tabular-nums text-red-600 dark:text-red-400">
+                            {item.count} 次
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--line)]">
+                          <div
+                            className="h-full rounded-full bg-red-500/80 transition-all"
+                            style={{ width: `${Math.max(10, Math.round((item.count / maxPainCount) * 100))}%` }}
+                          />
+                        </div>
+                        <div className="mt-1.5 line-clamp-2 text-[var(--text-2)]">{item.quote}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="ui-empty min-h-[100px] text-xs">暂无明显痛点信号</div>
+                  )}
+                </div>
+              </section>
+
+              <section className="ui-panel p-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-[var(--text-1)]">Top 卖点</h3>
+                  <span className="ui-badge ui-badge-success">{localSummary.sellingPoints.length}</span>
+                </div>
+                <div className="mt-3.5 space-y-2.5">
+                  {localSummary.sellingPoints.length ? (
+                    localSummary.sellingPoints.map((item) => (
+                      <div
+                        key={item.label}
+                        className="rounded-xl border border-[var(--line)] bg-[var(--surface-inset)] p-3 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-[var(--text-1)]">{item.label}</span>
+                          <span className="font-mono text-[11px] font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                            {item.count} 次
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--line)]">
+                          <div
+                            className="h-full rounded-full bg-emerald-500/85 transition-all"
+                            style={{ width: `${Math.max(10, Math.round((item.count / maxSellingCount) * 100))}%` }}
+                          />
+                        </div>
+                        <div className="mt-1.5 line-clamp-2 text-[var(--text-2)]">{item.quote}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="ui-empty min-h-[100px] text-xs">暂无明显卖点信号</div>
+                  )}
+                </div>
+              </section>
             </div>
-          )}
-        </div>
-      </section>
+          </div>
+        )}
+
+        {aiReport && (
+          <section className="ui-panel overflow-hidden">
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] px-5 py-3.5">
+              <h3 className="text-sm font-bold text-[var(--text-1)]">VOC AI 分析报告</h3>
+              <button type="button" onClick={() => void copyReport()} className="ui-btn ui-btn-soft ui-btn-sm">
+                <CopyIcon className="h-3.5 w-3.5" />
+                复制报告
+              </button>
+            </div>
+            <div
+              data-selectable-text
+              className="custom-scrollbar max-h-[560px] overflow-auto p-5 text-sm leading-7 text-[var(--text-1)]"
+            >
+              <MarkdownRenderer content={aiReport} />
+            </div>
+          </section>
+        )}
+      </div>
       {showVocConfig && (
-        <div
-          data-no-drag-select
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
-        >
-          <div className="w-full max-w-lg rounded-2xl border border-white/60 bg-white p-5 shadow-2xl dark:border-white/[0.08] dark:bg-gray-900">
+        <div data-no-drag-select className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+          <div className="ui-backdrop animate-overlay-in absolute inset-0" onClick={() => setShowVocConfig(false)} />
+          <div className="ui-modal animate-modal-in relative z-10 w-full max-w-lg p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-base font-bold text-gray-950 dark:text-gray-100">VOC 配置</div>
-                <div className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                <div className="text-base font-bold text-[var(--text-1)]">VOC 配置</div>
+                <div className="mt-1 text-xs leading-relaxed text-[var(--text-3)]">
                   只配置 VOC 评论分析板块，不影响图片生成和拆图反推配置。
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowVocConfig(false)}
-                className="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                className="ui-icon-btn ui-icon-btn-sm"
                 aria-label="关闭"
               >
-                <CloseIcon className="h-5 w-5" />
+                <CloseIcon className="h-[18px] w-[18px]" />
               </button>
             </div>
 
@@ -684,24 +754,16 @@ export default function VocAmazonReviewsWorkspace() {
                       ? vocAiProfileOptions
                       : [{ label: '暂无 Chat/Responses 配置', value: '' }]
                   }
-                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
+                  className="ui-input h-10"
                 />
               </label>
             </div>
 
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowVocConfig(false)}
-                className="h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]"
-              >
+            <div className="mt-6 flex justify-end gap-2.5">
+              <button type="button" onClick={() => setShowVocConfig(false)} className="ui-btn h-9">
                 取消
               </button>
-              <button
-                type="button"
-                onClick={saveVocConfig}
-                className="h-9 rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-500"
-              >
+              <button type="button" onClick={saveVocConfig} className="ui-btn ui-btn-primary h-9 px-5">
                 保存
               </button>
             </div>

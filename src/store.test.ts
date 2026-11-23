@@ -21,6 +21,9 @@ import type {
 } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
 import { createGenerationProject } from './lib/generationProjects'
+import * as imageDb from './lib/db'
+import * as falImageApi from './lib/falAiImageApi'
+import { callImageApi } from './lib/api'
 import { getAllGenerationProjects, putGenerationProject, clearGenerationProjects } from './lib/db'
 vi.mock('./lib/db', () => {
   const tasks = new Map<string, TaskRecord>()
@@ -32,6 +35,36 @@ vi.mock('./lib/db', () => {
 
   return {
     CURRENT_THUMBNAIL_VERSION: 2,
+    clearTaskData: async () => {
+      for (const store of [tasks, amazonPlannerSessions, generationProjects, images, thumbnails]) store.clear()
+    },
+    importTaskData: async (data: import('./lib/db').ImportedTaskData) => {
+      const appendedTasks = data.tasks.filter((row) => !tasks.has(row.id))
+      const appendedSessions = data.plannerSessions.filter((row) => !amazonPlannerSessions.has(row.id))
+      const appendedProjects = data.projects.filter((row) => !generationProjects.has(row.id))
+      const appendedImages = data.images.filter((row) => !images.has(row.id))
+      for (const row of appendedTasks) tasks.set(row.id, row)
+      for (const row of appendedSessions) amazonPlannerSessions.set(row.id, row)
+      for (const row of appendedProjects) generationProjects.set(row.id, { ...row, revision: 1, writerId: undefined })
+      for (const row of appendedImages) images.set(row.id, row)
+      for (const row of data.thumbnails) if (!thumbnails.has(row.id)) thumbnails.set(row.id, row)
+      return {
+        tasks: appendedTasks,
+        importedTasks: appendedTasks.length,
+        importedSessions: appendedSessions.length,
+        importedProjects: appendedProjects.length,
+        imageIds: appendedImages.map((row) => row.id),
+        skipped:
+          data.tasks.length +
+          data.plannerSessions.length +
+          data.projects.length +
+          data.images.length -
+          appendedTasks.length -
+          appendedSessions.length -
+          appendedProjects.length -
+          appendedImages.length,
+      }
+    },
     getAllGenerationProjects: async () => [...generationProjects.values()],
     putGenerationProject: async (project: GenerationProject) => {
       generationProjects.set(project.id, project)
@@ -138,11 +171,14 @@ import {
   getPersistedState,
   getTaskApiProfile,
   importData,
+  initStore,
   markInterruptedOpenAIRunningTasks,
   mergePersistedState,
   regenerateAgentAssistantMessage,
   removeTask,
   retryTask,
+  resumeTaskRecovery,
+  cancelAllTaskWork,
   reuseConfig,
   submitAgentMessage,
   submitTask,
@@ -172,6 +208,59 @@ function supportTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     ...overrides,
   }
 }
+
+describe('local task recovery control', () => {
+  it('continues the same remote task with its original account instead of submitting another generation', async () => {
+    vi.useFakeTimers()
+    cancelAllTaskWork()
+    const original = createDefaultFalProfile({ id: 'original', apiKey: 'original-key' })
+    const active = createDefaultFalProfile({ id: 'active', apiKey: 'other-key' })
+    const recover = vi.spyOn(falImageApi, 'getFalQueuedImageResult').mockResolvedValue({ images: [] })
+    const submitCalls = vi.mocked(callImageApi).mock.calls.length
+    useStore.setState({
+      settings: normalizeSettings({ ...DEFAULT_SETTINGS, profiles: [original, active], activeProfileId: active.id }),
+      tasks: [
+        supportTask({
+          status: 'error',
+          apiProvider: 'fal',
+          apiProfileId: original.id,
+          falRequestId: 'same-remote',
+          falEndpoint: 'original-model',
+          falRecoverable: true,
+          recoveryPausedReason: 'timeout',
+        }),
+      ],
+    })
+    try {
+      resumeTaskRecovery('support-task')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(recover).toHaveBeenCalledWith(
+        expect.objectContaining({ id: original.id, apiKey: 'original-key' }),
+        'original-model',
+        'same-remote',
+        expect.any(Object),
+        expect.any(AbortSignal),
+      )
+      expect(vi.mocked(callImageApi).mock.calls).toHaveLength(submitCalls)
+      expect(useStore.getState().tasks[0]).toMatchObject({
+        status: 'done',
+        falRequestId: 'same-remote',
+        recoveryPausedReason: undefined,
+      })
+    } finally {
+      cancelAllTaskWork()
+      recover.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores updates for a task that has already been removed', () => {
+    useStore.setState({ tasks: [] })
+    const before = useStore.getState().tasks
+    updateTaskInStore('removed', { status: 'done' })
+    expect(useStore.getState().tasks).toBe(before)
+  })
+})
 
 describe('support prompt integration', () => {
   beforeEach(() => {
@@ -953,6 +1042,34 @@ describe('mask draft lifecycle in store actions', () => {
   })
 })
 
+describe('startup image cleanup', () => {
+  it('retains images attached to tasks after the original startup snapshot', async () => {
+    await imageDb.clearTasks()
+    await clearImages()
+    const recovered = task({ id: 'recovered', outputImages: [], status: 'error' })
+    await imageDb.putTask(recovered)
+    await putImage({ ...imageA, source: 'generated', createdAt: 1 })
+    await putImage({ ...imageB, source: 'upload', createdAt: 1 })
+    useStore.setState({ inputImages: [], galleryInputDraft: null, agentConversations: [], agentInputDrafts: {} })
+    const getImageIds = vi.spyOn(imageDb, 'getAllImageIds').mockImplementationOnce(async () => {
+      updateTaskInStore(recovered.id, { status: 'done', outputImages: [imageA.id] })
+      return [imageA.id, imageB.id]
+    })
+    try {
+      const initialization = initStore()
+      expect(initStore()).toBe(initialization)
+      await initialization
+      await vi.waitFor(async () => expect(await imageDb.getImage(imageB.id)).toBeUndefined())
+      expect(await imageDb.getImage(imageA.id)).toBeDefined()
+    } finally {
+      getImageIds.mockRestore()
+      await clearImages()
+      await imageDb.clearTasks()
+      useStore.getState().setTasks([])
+    }
+  })
+})
+
 describe('interrupted OpenAI running tasks', () => {
   it('marks legacy and OpenAI running tasks as interrupted', () => {
     const now = 10_000
@@ -974,6 +1091,8 @@ describe('interrupted OpenAI running tasks', () => {
     const falRunning = task({
       id: 'fal-running',
       apiProvider: 'fal',
+      falRequestId: 'request-id',
+      falEndpoint: 'owner/model',
       status: 'running',
       createdAt: 3_000,
       finishedAt: null,
@@ -1332,7 +1451,7 @@ describe('data export and clearing', () => {
     expect(clickedDownloads[0]?.download).toContain('amazon-image-studio-backup')
     await clearGenerationProjects()
     expect(await importData({ arrayBuffer: async () => buffer } as File, { importTasks: true })).toBe(true)
-    expect(await getAllGenerationProjects()).toEqual([project])
+    expect(await getAllGenerationProjects()).toEqual([{ ...project, revision: 1 }])
 
     createObjectUrl.mockRestore()
     revokeObjectUrl.mockRestore()
@@ -1405,6 +1524,39 @@ describe('data export and clearing', () => {
     await clearData({ clearConfig: false, clearTasks: true })
 
     expect(await getAllAmazonPlannerSessions()).toEqual([])
+  })
+
+  it('marks locally interrupted tasks as failed when the clear transaction rolls back', async () => {
+    const running = task({ id: 'clear-rollback-local', status: 'running', error: null, outputImages: [] })
+    await imageDb.putTask(running)
+    useStore.getState().setTasks([running])
+    const clear = vi.spyOn(imageDb, 'clearTaskData').mockRejectedValueOnce(new Error('测试回滚'))
+    try {
+      expect(await clearData({ clearConfig: false, clearTasks: true })).toBe(false)
+      const expected = { id: running.id, status: 'error', error: '请求中断' }
+      expect(useStore.getState().tasks).toMatchObject([expected])
+      expect(await imageDb.getAllTasks()).toContainEqual(expect.objectContaining(expected))
+    } finally {
+      clear.mockRestore()
+    }
+  })
+
+  it('cannot repersist a task that completes between the database clear and the UI refresh', async () => {
+    const running = task({ id: 'clear-during-task-completion', status: 'running', outputImages: [] })
+    await imageDb.putTask(running)
+    useStore.getState().setTasks([running])
+    const clear = imageDb.clearTaskData
+    const duringClear = vi.spyOn(imageDb, 'clearTaskData').mockImplementationOnce(async () => {
+      await clear()
+      updateTaskInStore(running.id, { status: 'done', outputImages: ['late-image'] })
+    })
+    try {
+      expect(await clearData({ clearConfig: false, clearTasks: true })).toBe(true)
+      expect(useStore.getState().tasks).toEqual([])
+      expect(await imageDb.getAllTasks()).toEqual([])
+    } finally {
+      duringClear.mockRestore()
+    }
   })
 })
 

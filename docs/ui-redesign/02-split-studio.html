@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>方案 02 · 极简单一侧栏 + 无顶栏工作台 — 跨境Image工作台</title>
+  <style>
+    /* ==========================================================================
+       Design Tokens -> Tailwind Config 1:1 Mapping Reference
+       --------------------------------------------------------------------------
+       零顶栏、单一克制侧栏（仅导航+最近SKU），右侧全高画布+属性检查器，中性无偏色灰。
+       tailwind.config.js -> theme.extend:
+       colors: {
+         matte: 'hsl(var(--bg-matte-hsl) / <alpha-value>)',
+         sidebar: 'hsl(var(--bg-sidebar-hsl) / <alpha-value>)',
+         surface: 'hsl(var(--bg-surface-hsl) / <alpha-value>)',
+         border: 'hsl(var(--border-hsl) / <alpha-value>)',
+         foreground: 'hsl(var(--ink-primary-hsl) / <alpha-value>)',
+         muted: { foreground: 'hsl(var(--ink-secondary-hsl) / <alpha-value>)' },
+         primary: { DEFAULT: 'hsl(var(--cta-bg-hsl) / <alpha-value>)', foreground: 'hsl(var(--cta-fg-hsl) / <alpha-value>)' },
+         accent: 'hsl(var(--accent-hsl) / <alpha-value>)',
+       }
+       ========================================================================== */
+
+    :root,
+    [data-theme="dark"] {
+      --bg-matte-hsl: 240 5% 7%;
+      --bg-sidebar-hsl: 240 5% 9.5%;
+      --bg-surface-hsl: 240 5% 13%;
+      --bg-hover-hsl: 240 4% 16%;
+      --border-hsl: 240 4% 18%;
+
+      --ink-primary-hsl: 240 10% 94%;
+      --ink-secondary-hsl: 240 4% 62%;
+      --ink-tertiary-hsl: 240 4% 44%;
+
+      --cta-bg-hsl: 240 10% 94%;
+      --cta-fg-hsl: 240 6% 7%;
+      --accent-hsl: 168 58% 48%;
+
+      --ok-hsl: 154 54% 52%;
+      --run-hsl: 208 82% 62%;
+      --warn-hsl: 38 84% 58%;
+      --err-hsl: 356 76% 62%;
+
+      --bg-matte: hsl(var(--bg-matte-hsl));
+      --bg-sidebar: hsl(var(--bg-sidebar-hsl));
+      --bg-surface: hsl(var(--bg-surface-hsl));
+      --bg-hover: hsl(var(--bg-hover-hsl));
+      --border: rgba(255, 255, 255, 0.07);
+      --border-strong: rgba(255, 255, 255, 0.14);
+
+      --ink-primary: hsl(var(--ink-primary-hsl));
+      --ink-secondary: hsl(var(--ink-secondary-hsl));
+      --ink-tertiary: hsl(var(--ink-tertiary-hsl));
+
+      --cta-bg: hsl(var(--cta-bg-hsl));
+      --cta-fg: hsl(var(--cta-fg-hsl));
+      --accent: hsl(var(--accent-hsl));
+      --accent-soft: rgba(52, 194, 168, 0.12);
+
+      --ok: hsl(var(--ok-hsl));
+      --run: hsl(var(--run-hsl));
+      --warn: hsl(var(--warn-hsl));
+      --err: hsl(var(--err-hsl));
+
+      --art-shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+
+      --font-sans: "SF Pro Text", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+
+      --text-2xs: 11px;
+      --text-xs: 12px;
+      --text-sm: 13px;
+      --text-base: 14px;
+      --text-lg: 18px;
+
+      --radius-xs: 5px;
+      --radius-sm: 7px;
+      --radius-md: 10px;
+    }
+
+    [data-theme="light"] {
+      --bg-matte-hsl: 240 6% 94%;
+      --bg-sidebar-hsl: 240 7% 97%;
+      --bg-surface-hsl: 0 0% 100%;
+      --bg-hover-hsl: 240 5% 91%;
+      --border-hsl: 240 5% 86%;
+
+      --ink-primary-hsl: 240 8% 10%;
+      --ink-secondary-hsl: 240 4% 42%;
+      --ink-tertiary-hsl: 240 4% 58%;
+
+      --cta-bg-hsl: 240 8% 11%;
+      --cta-fg-hsl: 0 0% 100%;
+      --accent-hsl: 172 70% 29%;
+
+      --ok-hsl: 156 56% 32%;
+      --run-hsl: 210 76% 42%;
+      --warn-hsl: 36 82% 39%;
+      --err-hsl: 356 68% 46%;
+
+      --border: rgba(16, 16, 20, 0.08);
+      --border-strong: rgba(16, 16, 20, 0.16);
+      --accent-soft: rgba(20, 124, 110, 0.10);
+      --art-shadow: 0 4px 18px rgba(16, 16, 20, 0.06);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      font-size: var(--text-sm);
+      background: var(--bg-matte);
+      color: var(--ink-primary);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input, textarea { font-family: inherit; color: inherit; }
+    button { border: none; background: transparent; cursor: pointer; }
+    .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* ==========================================================================
+       Full-Height Shell (Zero Top Bar! Single Clean Left Nav + Stage + Inspector)
+       ========================================================================== */
+    .shell {
+      display: grid;
+      grid-template-columns: 204px minmax(0, 1fr) 332px;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* 1. Single Timeless Left Sidebar (Apple / Notion / Arc Cleanliness) */
+    .sidebar {
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      padding: 18px 12px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 0;
+    }
+
+    .sb-upper {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 8px;
+    }
+
+    .brand-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: var(--cta-bg);
+      color: var(--cta-fg);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+
+    .brand-txt strong { display: block; font-size: var(--text-sm); font-weight: 600; line-height: 1.2; }
+    .brand-txt span { font-size: 10.5px; color: var(--ink-tertiary); }
+
+    .nav-group { display: flex; flex-direction: column; gap: 2px; }
+
+    .nav-cap {
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--ink-tertiary);
+      padding: 0 10px 6px;
+    }
+
+    .nav-item {
+      height: 34px;
+      padding: 0 10px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: var(--text-xs);
+      font-weight: 500;
+      color: var(--ink-secondary);
+      text-align: left;
+      transition: background 0.12s, color 0.12s;
+    }
+    .nav-item:hover { background: var(--bg-hover); color: var(--ink-primary); }
+    .nav-item.active { background: var(--bg-surface); color: var(--ink-primary); font-weight: 600; box-shadow: inset 0 0 0 1px var(--border); }
+    .nav-item svg { width: 15px; height: 15px; stroke-width: 1.6; opacity: 0.75; flex-shrink: 0; }
+    .nav-item.active svg { opacity: 1; }
+
+    .sku-item {
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      text-align: left;
+      transition: background 0.12s;
+    }
+    .sku-item:hover { background: var(--bg-hover); }
+    .sku-item.active { background: var(--bg-surface); box-shadow: inset 0 0 0 1px var(--border); }
+    .sku-item strong { font-size: var(--text-xs); font-weight: 500; color: var(--ink-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sku-item.active strong { font-weight: 600; }
+    .sku-item span { font-size: 10.5px; color: var(--ink-tertiary); }
+
+    .sb-lower {
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* 2. Center Pure Neutral Studio Stage (No Top Chrome Bar!) */
+    .stage {
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 28px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .stage-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .stage-title {
+      font-size: var(--text-lg);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+    }
+
+    .stage-sub {
+      font-size: var(--text-xs);
+      color: var(--ink-tertiary);
+      margin-top: 3px;
+    }
+
+    .stage-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .seg {
+      display: inline-flex;
+      background: var(--bg-sidebar);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 2px;
+    }
+    .seg-b {
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 5px;
+      font-size: 11.5px;
+      color: var(--ink-secondary);
+      font-weight: 500;
+    }
+    .seg-b.active { background: var(--bg-surface); color: var(--ink-primary); font-weight: 600; }
+
+    /* Inline Calm Style Board Selector */
+    .style-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .st-chip {
+      background: var(--bg-sidebar);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      text-align: left;
+      transition: border-color 0.14s, background 0.14s;
+    }
+    .st-chip:hover { border-color: var(--border-strong); }
+    .st-chip.active { background: var(--bg-surface); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+    .st-sq {
+      width: 28px;
+      height: 28px;
+      border-radius: 5px;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+    }
+
+    .st-meta { min-width: 0; }
+    .st-meta strong { display: block; font-size: 11.5px; font-weight: 600; color: var(--ink-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .st-meta span { display: block; font-size: 10px; color: var(--ink-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Amazon MAIN + PT01-PT06 Studio Grid */
+    .art-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px 16px;
+    }
+
+    .art {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      cursor: pointer;
+    }
+
+    .art-frame {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      box-shadow: var(--art-shadow);
+      transition: border-color 0.14s, transform 0.18s;
+    }
+    .art:hover .art-frame { border-color: var(--border-strong); transform: translateY(-1px); }
+    .art.selected .art-frame { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent), var(--art-shadow); }
+    .art-frame canvas { width: 100%; height: 100%; display: block; }
+
+    .safe-guide {
+      position: absolute;
+      inset: 8%;
+      border: 1px dashed var(--accent);
+      pointer-events: none;
+      display: none;
+    }
+    .guides-on .safe-guide { display: block; }
+
+    .art-cap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 0 2px;
+      font-size: 11.5px;
+    }
+    .art-cap-l { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .art-code { font-family: var(--font-mono); font-size: 11px; color: var(--ink-tertiary); font-weight: 600; }
+    .art-name { color: var(--ink-primary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .st-ind { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-tertiary); white-space: nowrap; flex-shrink: 0; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .dot.done { background: var(--ok); }
+    .dot.running { background: var(--run); }
+    .dot.review { background: var(--warn); }
+    .dot.failed { background: var(--err); }
+    .st-ind.failed { color: var(--err); font-weight: 600; }
+    .st-ind.review { color: var(--warn); font-weight: 600; }
+    .st-ind.running { color: var(--run); font-weight: 600; }
+
+    /* Loupe & Compare Views */
+    .loupe-box {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .loupe-frame {
+      width: min(540px, 68vh, 100%);
+      aspect-ratio: 1 / 1;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      box-shadow: var(--art-shadow);
+      position: relative;
+    }
+    .loupe-frame canvas { width: 100%; height: 100%; display: block; }
+
+    .cmp-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      align-items: start;
+      padding-top: 8px;
+    }
+    .cmp-frame {
+      aspect-ratio: 1 / 1;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: var(--art-shadow);
+      position: relative;
+    }
+    .cmp-frame.win { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent), var(--art-shadow); }
+    .cmp-frame canvas { width: 100%; height: 100%; display: block; }
+
+    /* 3. Right Full-Height Workflow + Slot Inspector */
+    .inspector {
+      background: var(--bg-sidebar);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    /* Compact 7-Step Progress Block at Top of Inspector (Replaces Top Status Bar!) */
+    .flow-card {
+      padding: 16px 16px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .flow-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+    }
+
+    .step-pills {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+
+    .sp-bar {
+      height: 4px;
+      border-radius: 99px;
+      background: var(--border-strong);
+      transition: background 0.14s;
+    }
+    .sp-bar.done { background: var(--ok); }
+    .sp-bar.warn { background: var(--warn); }
+    .sp-bar.active { background: var(--accent); }
+
+    .step-labels {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--ink-secondary);
+    }
+
+    /* Slot Inspector Body */
+    .ins-head {
+      padding: 14px 16px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .ins-tabs {
+      display: flex;
+      padding: 0 16px;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .itab {
+      padding: 7px 0 9px;
+      font-size: var(--text-xs);
+      color: var(--ink-tertiary);
+      font-weight: 500;
+      border-bottom: 1.5px solid transparent;
+    }
+    .itab.active { color: var(--ink-primary); font-weight: 600; border-bottom-color: var(--ink-primary); }
+
+    .ins-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .cap { font-size: 11px; color: var(--ink-secondary); margin-bottom: 6px; display: flex; justify-content: space-between; }
+
+    .ta {
+      width: 100%;
+      min-height: 116px;
+      padding: 10px 11px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      font-size: var(--text-xs);
+      line-height: 1.58;
+      resize: vertical;
+    }
+    .ta:focus { outline: none; border-color: var(--border-strong); }
+
+    .notice {
+      padding: 9px 11px;
+      border-radius: var(--radius-sm);
+      font-size: 11.5px;
+      line-height: 1.5;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+    }
+    .notice.err { color: var(--err); border-color: hsl(var(--err-hsl) / 0.34); }
+    .notice.warn { color: var(--warn); border-color: hsl(var(--warn-hsl) / 0.34); }
+    .notice.run { color: var(--run); border-color: hsl(var(--run-hsl) / 0.34); }
+
+    .kv-list { border-top: 1px solid var(--border); }
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 11.5px;
+    }
+    .kv span { color: var(--ink-tertiary); }
+    .kv strong { font-weight: 500; }
+
+    .ins-foot {
+      padding: 12px 16px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .btn {
+      height: 32px;
+      padding: 0 12px;
+      border-radius: var(--radius-sm);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .btn-cta { background: var(--cta-bg); color: var(--cta-fg); }
+    .btn-cta:hover { opacity: 0.9; }
+    .btn-ghost { background: var(--bg-surface); border: 1px solid var(--border); color: var(--ink-primary); font-weight: 500; }
+    .btn-ghost:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+
+    .foot-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--cta-bg);
+      color: var(--cta-fg);
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      font-size: var(--text-xs);
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s;
+      z-index: 90;
+    }
+    .toast.show { opacity: 1; }
+
+    @media (max-width: 1180px) {
+      .art-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .style-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 880px) {
+      .shell { grid-template-columns: 1fr 300px; }
+      .sidebar { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <!-- 1. Single Clean Left Navigation Sidebar -->
+    <aside class="sidebar">
+      <div class="sb-upper">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="2" width="12" height="12" rx="2.5"/><circle cx="8" cy="8" r="2.5"/></svg>
+          </div>
+          <div class="brand-txt">
+            <strong>跨境Image工作台</strong>
+            <span>本地优先 · 1.8 GB</span>
+          </div>
+        </div>
+
+        <nav class="nav-group" aria-label="功能模块">
+          <div class="nav-cap">工作区</div>
+          <button class="nav-item active" data-mod="Listing">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>
+            Listing 套图
+          </button>
+          <button class="nav-item" data-mod="A+">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="6" rx="1.2"/><rect x="3" y="13" width="8" height="7" rx="1.2"/><rect x="13" y="13" width="8" height="7" rx="1.2"/></svg>
+            A+ 页面
+          </button>
+          <button class="nav-item" data-mod="TikTok">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="6" y="2.5" width="12" height="19" rx="2"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+            TikTok 竖屏
+          </button>
+          <button class="nav-item" data-mod="拆图反推">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            拆图反推
+          </button>
+          <button class="nav-item" data-mod="VOC">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            VOC 评论洞察
+          </button>
+        </nav>
+
+        <div class="nav-group">
+          <div class="nav-cap">最近项目</div>
+          <button class="sku-item active" data-sku="Kettlo Pro 温控手冲壶|美亚 US · KT-900-BLK · B0D9K4M7X2">
+            <strong>Kettlo Pro 手冲壶</strong>
+            <span class="mono">US · 4/7 进行中</span>
+          </button>
+          <button class="sku-item" data-sku="Aerobrew 便携咖啡机|美亚 US · AB-ES200 · B0D8T1Q9M4">
+            <strong>Aerobrew 咖啡机</strong>
+            <span class="mono">US · 7/7 已定稿</span>
+          </button>
+          <button class="sku-item" data-sku="Luma 磁吸桌面护眼灯|德亚 DE · LM-400 · B0D7K2W3P1">
+            <strong>Luma 磁吸护眼灯</strong>
+            <span class="mono">DE · 待校对</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sb-lower">
+        <button class="nav-item" data-mod="历史交付">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>
+          历史交付
+        </button>
+        <button class="nav-item" data-mod="设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          设置
+        </button>
+        <button class="nav-item" id="themeBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <span id="themeText">切换亮色</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- 2. Center Neutral Calibrated Stage (Zero Top Status Bar) -->
+    <main class="stage" id="stage">
+      <div class="stage-head">
+        <div>
+          <h1 class="stage-title" id="projTitle">Kettlo Pro 温控手冲壶</h1>
+          <div class="stage-sub mono" id="projSub">美亚 US · KT-900-BLK · B0D9K4M7X2</div>
+        </div>
+        <div class="stage-controls">
+          <button class="btn btn-ghost" id="guideBtn" style="height:30px;font-size:11.5px;">安全区 8%</button>
+          <div class="seg" id="viewSeg">
+            <button class="seg-b active" data-v="grid">画板</button>
+            <button class="seg-b" data-v="loupe">精看</button>
+            <button class="seg-b" data-v="compare">双图比版</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inline Quiet Style Board Strip -->
+      <div class="style-row" id="styleRow"></div>
+
+      <!-- Dynamic Artboard Area -->
+      <div id="artContainer" style="flex:1;display:flex;flex-direction:column;"></div>
+    </main>
+
+    <!-- 3. Right Full-Height Workflow Progress + Slot Inspector -->
+    <aside class="inspector">
+      <!-- Compact 7-Step Flow Progress -->
+      <section class="flow-card">
+        <div class="flow-top">
+          <strong style="font-size:12px;">第 5/7 步 · 批量生成</strong>
+          <span class="mono" style="color:var(--ink-tertiary)" id="flowStat">已生成 4/7</span>
+        </div>
+        <div class="step-pills" title="1商品资料 → 2AI策划 → 3风格板 → 4校对提示词 → 5批量生成 → 6编辑比版 → 7定稿交付">
+          <div class="sp-bar done"></div>
+          <div class="sp-bar done"></div>
+          <div class="sp-bar done"></div>
+          <div class="sp-bar warn" id="sp4"></div>
+          <div class="sp-bar active"></div>
+          <div class="sp-bar"></div>
+          <div class="sp-bar"></div>
+        </div>
+        <div class="step-labels">
+          <span id="nextHint">下一步：校对 PT03 · 重试 PT05</span>
+          <button style="color:var(--accent);font-weight:600;font-size:11px;" id="jumpTodoBtn">立即定位</button>
+        </div>
+      </section>
+
+      <!-- Active Slot Header -->
+      <div class="ins-head">
+        <div style="min-width:0;">
+          <div style="display:flex;align-items:center;gap:7px;">
+            <strong class="mono" style="font-size:13px;" id="iCode">PT01</strong>
+            <span class="st-ind" id="iStatus"><span class="dot done"></span>已生成</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--ink-tertiary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="iTitle">±1°C PID 精准控温</div>
+        </div>
+        <button class="btn btn-ghost" id="insCmpBtn" style="height:26px;padding:0 9px;font-size:11px;">比版</button>
+      </div>
+
+      <div class="ins-tabs" id="insTabs">
+        <button class="itab active" data-t="prompt">提示词</button>
+        <button class="itab" data-t="versions">版本</button>
+        <button class="itab" data-t="check">质检与交付</button>
+      </div>
+
+      <div class="ins-body" id="insBody"></div>
+
+      <div class="ins-foot">
+        <button class="btn btn-cta" id="iPrimaryBtn" style="width:100%;">按当前提示词重新生成</button>
+        <div class="foot-pair">
+          <button class="btn btn-ghost" id="iSaveBtn">保存提示词</button>
+          <button class="btn btn-ghost" id="iExportBtn">打包交付 (4/7)</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const STYLES = [
+      { id: 'atelier', name: '德系极简影棚', sub: '5200K 侧逆光', swatches: ['#18181A', '#8B5A3C', '#EFECE6', '#C9B9A6'], backdrop: ['#EFECE6', '#DFD9CE'], darkStage: ['#1B1A19', '#0F0E0D'], wood: ['#7E4F33', '#A66E49'], accent: '#C87D55' },
+      { id: 'nordic', name: '暖调北欧晨光', sub: '3800K 斜射日光', swatches: ['#2C2621', '#B97A4B', '#F3EBDD', '#D8C4A8'], backdrop: ['#F4ECDF', '#E3D4BE'], darkStage: ['#261F1A', '#15110E'], wood: ['#8F5B38', '#BC8054'], accent: '#D08B52' },
+      { id: 'conversion', name: '美亚高转化白棚', sub: '5600K 商业平光', swatches: ['#14161A', '#C26D3A', '#FFFFFF', '#E5E7EB'], backdrop: ['#F4F5F7', '#E5E8EE'], darkStage: ['#171A20', '#0E1014'], wood: ['#744A31', '#9A6747'], accent: '#C26D3A' },
+      { id: 'obsidian', name: '黑金暗调精工', sub: '100mm 硬轮廓光', swatches: ['#0E0F12', '#C59A5B', '#23262D', '#6E737D'], backdrop: ['#202227', '#131418'], darkStage: ['#131418', '#090A0C'], wood: ['#6E452C', '#9C6843'], accent: '#CFA262' }
+    ];
+
+    const SLOTS = [
+      { id: 'MAIN', code: 'MAIN', title: '纯白底合规主图', status: 'done', statusText: '已定稿', ver: 'v3', seed: '#94201', versions: ['v3 · 当前定稿 (RGB255)', 'v2 · 柔和阴影', 'v1 · 初版'], prompt: '亚马逊主图棚拍，Kettlo Pro 哑光黑恒温手冲咖啡壶居中，胡桃木握柄木纹清晰，极薄底座柔和数显 92°C，纯白背景 RGB(255,255,255)，主体占比 86%，零促销文字。', neg: 'watermark, badge, text, gray background', checks: [['纯白背景 RGB 255', '通过'], ['主体画面占比', '86% 通过'], ['违禁文字水印', '0 处']] },
+      { id: 'PT01', code: 'PT01', title: '±1°C PID 精准控温', status: 'done', statusText: '已生成', ver: 'v2', seed: '#88412', versions: ['v2 · 暖金轮廓光 (主选)', 'v1 · 冷调对比版'], prompt: '暗调影棚商业特写，手冲壶优雅倾斜，细密稳定水流注入陶瓷 V60 滤杯，右侧极简杂志排版标注 ±1°C PID 精准控温与 0.9L 黄金容量。', neg: 'cluttered layout, messy text', checks: [['文字占比 ≤18%', '13% 通过'], ['安全边距 8%', '通过'], ['分辨率', '2000×2000']] },
+      { id: 'PT02', code: 'PT02', title: '晨间手冲场景图', status: 'running', statusText: '生成中 68%', progress: 68, eta: '剩 11s', ver: 'v1', seed: '#71209', versions: ['v1 · 渲染中 (68%)'], prompt: '清晨北欧实木厨房台面，柔和百叶窗斜射暖阳洒在哑光黑手冲壶与手工粗陶杯上，背景浅景深虚化绿植，松弛生活感。', neg: 'plastic look, harsh flash', checks: [['渲染进度', '68% (21/30步)'], ['风格色温一致', '待检测']] },
+      { id: 'PT03', code: 'PT03', title: '内部结构与探头', status: 'review', statusText: '待校对', ver: '草案', seed: '待分配', versions: ['AI 策划草案 (待校对)'], prompt: '迪特拉姆斯风格工业设计工程剖面图，哑光黑手冲壶标示：304 食品级一体内胆、底部高敏 NTC 感温探头、鹅颈恒流限流阀、胡桃木握柄。', neg: 'cartoon style, overlapping labels', checks: [['AI 提示词初稿', '待人工确认'], ['参数核对', '304 / 1200W']] },
+      { id: 'PT04', code: 'PT04', title: '尺寸规格与容量', status: 'done', statusText: '已生成', ver: 'v1', seed: '#55104', versions: ['v1 · 洞石台面版'], prompt: '温润洞石台面正侧视棚拍，手冲壶与底座对齐，极细建筑标尺线标注 292mm × 203mm、0.9L 黄金容量与 1200W 美标电压。', neg: 'perspective distortion', checks: [['双单位标尺', '通过'], ['分辨率', '2000×2000']] },
+      { id: 'PT05', code: 'PT05', title: 'VOC 痛点对比图', status: 'failed', statusText: '失败', error: 'ERR_422：底部对比说明距底边仅 16px（要求 ≥48px），点击下方按钮可自动收紧留白并重试。', ver: 'v1 失败', seed: '#31908', versions: ['v1 · 安全区越界失败'], prompt: '极简左右对比信息图：左侧突出 Kettlo Pro（2分35秒沸腾 / 恒流不断水 / 55dB 低噪），右侧淡化普通电水壶痛点，底部保留 12% 留白安全区。', neg: 'clipped text, competitor logo', checks: [['安全区检测', '失败 (底边距不足)'], ['VOC 痛点覆盖', '沸腾+低噪']] },
+      { id: 'PT06', code: 'PT06', title: '高端礼盒与桌面', status: 'done', statusText: '已生成', ver: 'v2', seed: '#66280', versions: ['v2 · 暖光石材版 (主选)', 'v1 · 暗木桌面版'], prompt: '高品质生活静物摄影，哑光黑手冲壶与极简压纹硬质礼盒、手工陶瓷杯并置在石材与橡木桌面，清晨斜射光影勾勒礼赠质感。', neg: 'cheap box, messy background', checks: [['礼盒规范', '通过'], ['分辨率', '2000×2000']] }
+    ];
+
+    let activeStyleId = 'atelier';
+    let selectedId = 'PT01';
+    let viewMode = 'grid';
+    let insTab = 'prompt';
+    let guidesOn = false;
+
+    const getStyle = () => STYLES.find(s => s.id === activeStyleId) || STYLES[0];
+    const getSlot = (id = selectedId) => SLOTS.find(s => s.id === id) || SLOTS[0];
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(window.__t);
+      window.__t = setTimeout(() => t.classList.remove('show'), 2100);
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+      ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+      ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+      ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y); ctx.closePath();
+    }
+
+    function drawKettle(ctx, cx, cy, scale, styleObj, opts = {}) {
+      ctx.save(); ctx.translate(cx, cy); ctx.scale(scale, scale);
+      const tilt = opts.tilt || 0;
+      const showBase = opts.showBase !== false;
+      if (!opts.noShadow) {
+        ctx.save(); ctx.filter = 'blur(16px)';
+        ctx.fillStyle = opts.darkBg ? 'rgba(0,0,0,0.62)' : 'rgba(20,16,12,0.16)';
+        ctx.beginPath(); ctx.ellipse(4, 152, 134, 19, 0, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+      if (showBase) {
+        const bg = ctx.createLinearGradient(-122, 124, 122, 146);
+        bg.addColorStop(0, '#19191B'); bg.addColorStop(0.35, '#2E2F34');
+        bg.addColorStop(0.75, '#1B1C1F'); bg.addColorStop(1, '#111113');
+        ctx.fillStyle = bg; roundRect(ctx, -122, 122, 244, 24, 6); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(-116, 122, 232, 1.5);
+        ctx.fillStyle = opts.altTone ? '#A9C4D4' : styleObj.accent; ctx.font = '600 11px ui-monospace, monospace';
+        ctx.textAlign = 'center'; ctx.fillText('92°C', 74, 138);
+      }
+      ctx.save(); ctx.rotate(tilt);
+      ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(-76, 86);
+      ctx.bezierCurveTo(-136, 78, -148, -12, -166, -64);
+      ctx.bezierCurveTo(-172, -80, -182, -88, -196, -86);
+      ctx.strokeStyle = '#191A1D'; ctx.lineWidth = 15; ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.restore();
+      ctx.save();
+      const wg = ctx.createLinearGradient(75, -60, 152, 85);
+      wg.addColorStop(0, styleObj.wood[1]); wg.addColorStop(0.55, styleObj.wood[0]); wg.addColorStop(1, '#4A2C1B');
+      ctx.fillStyle = '#1E1F23'; roundRect(ctx, 64, -56, 38, 18, 4); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(96, -54); ctx.bezierCurveTo(132, -54, 146, -24, 142, 22);
+      ctx.bezierCurveTo(139, 58, 126, 82, 114, 84); ctx.bezierCurveTo(100, 86, 98, 66, 102, 24);
+      ctx.bezierCurveTo(106, -12, 102, -32, 92, -36); ctx.closePath();
+      ctx.fillStyle = wg; ctx.fill();
+      ctx.restore();
+      ctx.beginPath();
+      ctx.moveTo(-76, -88); ctx.lineTo(76, -88); ctx.lineTo(92, 112);
+      ctx.quadraticCurveTo(92, 122, 80, 122); ctx.lineTo(-80, 122);
+      ctx.quadraticCurveTo(-92, 122, -92, 112); ctx.closePath();
+      const bGrad = ctx.createLinearGradient(-92, 0, 92, 0);
+      bGrad.addColorStop(0, '#131416'); bGrad.addColorStop(0.18, '#282A30');
+      bGrad.addColorStop(0.32, '#3C3E46'); bGrad.addColorStop(0.48, '#232429');
+      bGrad.addColorStop(0.84, '#141518'); bGrad.addColorStop(0.95, '#2A2C31'); bGrad.addColorStop(1, '#111214');
+      ctx.fillStyle = bGrad; ctx.fill();
+      ctx.fillStyle = '#2D2F35'; ctx.beginPath(); ctx.ellipse(0, -88, 76, 8, 0, 0, Math.PI*2); ctx.fill();
+      const kg = ctx.createLinearGradient(-22, -118, 22, -94);
+      kg.addColorStop(0, styleObj.wood[1]); kg.addColorStop(1, '#3D2315');
+      ctx.fillStyle = kg; roundRect(ctx, -20, -114, 40, 22, 8); ctx.fill();
+      ctx.fillStyle = '#18191C'; ctx.fillRect(-11, -93, 22, 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.font = '500 9px sans-serif';
+      ctx.textAlign = 'center'; ctx.fillText('K E T T L O', 0, 96);
+      ctx.restore(); ctx.restore();
+    }
+
+    function renderCanvas(canvas, slot, styleObj, alt = false) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const isObsidian = styleObj.id === 'obsidian';
+
+      if (slot.id === 'MAIN') {
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+        drawKettle(ctx, W*0.53, H*0.51, W/490, styleObj, { showBase: true, altTone: alt });
+        return;
+      }
+      if (slot.id === 'PT01') {
+        const bg = ctx.createLinearGradient(0, 0, W, H);
+        bg.addColorStop(0, alt ? '#1D2228' : styleObj.darkStage[0]);
+        bg.addColorStop(1, alt ? '#101317' : styleObj.darkStage[1]);
+        ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+        const glow = ctx.createRadialGradient(W*0.24, H*0.46, 20, W*0.28, H*0.48, W*0.52);
+        glow.addColorStop(0, alt ? 'rgba(130,175,205,0.16)' : 'rgba(216,148,92,0.22)');
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#252322';
+        ctx.beginPath(); ctx.moveTo(W*0.08, H*0.69); ctx.lineTo(W*0.30, H*0.69);
+        ctx.lineTo(W*0.24, H*0.80); ctx.lineTo(W*0.14, H*0.80); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 2;
+        roundRect(ctx, W*0.10, H*0.80, W*0.18, H*0.13, 14); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = 'rgba(130, 62, 24, 0.78)'; roundRect(ctx, W*0.11, H*0.855, W*0.16, H*0.068, 8); ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 245, 232, 0.85)'; ctx.lineWidth = 3.2;
+        ctx.beginPath(); ctx.moveTo(W*0.20, H*0.40); ctx.quadraticCurveTo(W*0.19, H*0.54, W*0.19, H*0.69); ctx.stroke();
+        drawKettle(ctx, W*0.40, H*0.37, W/630, styleObj, { tilt: -0.25, showBase: false, noShadow: true, darkBg: true });
+        ctx.fillStyle = alt ? '#A9C4D4' : styleObj.accent; ctx.font = `600 ${Math.round(W*0.105)}px -apple-system, sans-serif`;
+        ctx.textAlign = 'left'; ctx.fillText('±1°C', W*0.62, H*0.31);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(W*0.62, H*0.35, W*0.28, 1);
+        ctx.fillStyle = '#F5F2EC'; ctx.font = `600 ${Math.round(W*0.036)}px "PingFang SC", sans-serif`;
+        ctx.fillText('PID 精准温控', W*0.62, H*0.42);
+        ctx.fillStyle = 'rgba(245,242,236,0.58)'; ctx.font = `400 ${Math.round(W*0.024)}px "PingFang SC", sans-serif`;
+        ctx.fillText('40–100°C 逐度可调', W*0.62, H*0.47);
+        ctx.fillText('1200W 快沸 · 60min 保温', W*0.62, H*0.515);
+        return;
+      }
+      if (slot.id === 'PT02') {
+        const pct = slot.progress || 68;
+        const paint = (c) => {
+          const wall = c.createLinearGradient(0, 0, W, H*0.7);
+          wall.addColorStop(0, '#E9DFD1'); wall.addColorStop(1, '#D2C2AE');
+          c.fillStyle = wall; c.fillRect(0, 0, W, H);
+          c.fillStyle = 'rgba(255, 248, 232, 0.34)';
+          for (let i = 0; i < 4; i++) {
+            c.beginPath(); c.moveTo(W*(0.05+i*0.22), 0); c.lineTo(W*(0.19+i*0.22), 0);
+            c.lineTo(W*(-0.05+i*0.22), H*0.72); c.lineTo(W*(-0.19+i*0.22), H*0.72); c.closePath(); c.fill();
+          }
+          const wt = c.createLinearGradient(0, H*0.66, 0, H);
+          wt.addColorStop(0, '#B99876'); wt.addColorStop(1, '#8C6B4B');
+          c.fillStyle = wt; c.fillRect(0, H*0.66, W, H*0.34);
+          c.fillStyle = '#EAE4D9'; roundRect(c, W*0.14, H*0.56, W*0.15, H*0.15, 10); c.fill();
+          drawKettle(c, W*0.58, H*0.51, W/490, styleObj, { showBase: true });
+        };
+        paint(ctx);
+        if (slot.status === 'running') {
+          const y = Math.round(H * (1 - pct/100));
+          ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, y); ctx.clip();
+          ctx.filter = 'blur(12px)'; paint(ctx); ctx.filter = 'none';
+          ctx.fillStyle = 'rgba(18,20,24,0.24)'; ctx.fillRect(0, 0, W, y); ctx.restore();
+          ctx.fillStyle = 'rgba(255,255,255,0.88)'; ctx.fillRect(0, y, W, 1.5);
+          ctx.fillStyle = 'rgba(16,16,18,0.8)'; roundRect(ctx, 14, 14, 134, 28, 14); ctx.fill();
+          ctx.fillStyle = '#FFF'; ctx.font = '500 11.5px "PingFang SC", sans-serif';
+          ctx.textAlign = 'left'; ctx.fillText(`渲染中 · ${pct}%`, 26, 32);
+        }
+        return;
+      }
+      if (slot.id === 'PT03') {
+        const paper = isObsidian ? '#17191E' : '#F4F1EA';
+        const ink = isObsidian ? 'rgba(240,236,228,0.82)' : 'rgba(26,24,22,0.80)';
+        ctx.fillStyle = paper; ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = isObsidian ? 'rgba(255,255,255,0.045)' : 'rgba(26,24,22,0.05)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 10; i++) {
+          ctx.beginPath(); ctx.moveTo((W/10)*i, 0); ctx.lineTo((W/10)*i, H); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, (H/10)*i); ctx.lineTo(W, (H/10)*i); ctx.stroke();
+        }
+        ctx.save(); ctx.translate(W*0.38, H*0.52); ctx.scale(W/520, W/520);
+        ctx.strokeStyle = ink; ctx.lineWidth = 1.9;
+        ctx.beginPath(); ctx.moveTo(-70,-82); ctx.lineTo(70,-82); ctx.lineTo(84,108); ctx.lineTo(-84,108); ctx.closePath(); ctx.stroke();
+        ctx.save(); ctx.setLineDash([4,4]); ctx.strokeStyle = styleObj.accent;
+        ctx.beginPath(); ctx.moveTo(-60,-70); ctx.lineTo(60,-70); ctx.lineTo(72,96); ctx.lineTo(-72,96); ctx.closePath(); ctx.stroke(); ctx.restore();
+        ctx.beginPath(); ctx.moveTo(-78,76); ctx.bezierCurveTo(-132,70,-142,-16,-162,-68); ctx.stroke();
+        roundRect(ctx, -112, 114, 224, 22, 4); ctx.stroke();
+        ctx.fillStyle = styleObj.accent; ctx.beginPath(); ctx.arc(0, 100, 6, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        ctx.strokeStyle = styleObj.accent; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(W*0.49, H*0.40); ctx.lineTo(W*0.62, H*0.40); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(W*0.38, H*0.71); ctx.lineTo(W*0.62, H*0.71); ctx.stroke();
+        ctx.fillStyle = ink; ctx.font = `500 ${Math.round(W*0.025)}px "PingFang SC", sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.fillText('304 一体内胆', W*0.64, H*0.41);
+        ctx.fillText('NTC 底部探头', W*0.64, H*0.72);
+        return;
+      }
+      if (slot.id === 'PT04') {
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, styleObj.backdrop[0]); bg.addColorStop(1, styleObj.backdrop[1]);
+        ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+        drawKettle(ctx, W*0.52, H*0.50, W/490, styleObj, { showBase: true, darkBg: isObsidian });
+        ctx.strokeStyle = isObsidian ? 'rgba(255,255,255,0.36)' : 'rgba(24,22,20,0.34)'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(W*0.20, H*0.82); ctx.lineTo(W*0.78, H*0.82); ctx.stroke();
+        ctx.fillStyle = isObsidian ? '#ECE9E4' : '#1E1C1A';
+        ctx.font = `500 ${Math.round(W*0.025)}px ui-monospace, monospace`;
+        ctx.textAlign = 'center'; ctx.fillText('292 × 203 mm · 0.9L', W*0.50, H*0.88);
+        return;
+      }
+      if (slot.id === 'PT05') {
+        ctx.fillStyle = isObsidian ? '#191718' : '#F3EFEF'; ctx.fillRect(0, 0, W, H);
+        ctx.save(); ctx.globalAlpha = 0.22;
+        drawKettle(ctx, W*0.34, H*0.50, W/580, styleObj, { showBase: true, noShadow: true });
+        ctx.restore();
+        ctx.save(); ctx.setLineDash([5,5]); ctx.strokeStyle = 'rgba(196,68,58,0.5)';
+        ctx.strokeRect(W*0.08, H*0.08, W*0.84, H*0.84); ctx.restore();
+        ctx.fillStyle = isObsidian ? 'rgba(26,24,25,0.92)' : 'rgba(255,255,255,0.94)';
+        roundRect(ctx, W*0.13, H*0.39, W*0.74, H*0.22, 10); ctx.fill();
+        ctx.strokeStyle = 'rgba(196,68,58,0.3)'; ctx.stroke();
+        ctx.fillStyle = isObsidian ? '#F28B82' : '#B9382C';
+        ctx.font = `600 ${Math.round(W*0.028)}px "PingFang SC", sans-serif`;
+        ctx.textAlign = 'center'; ctx.fillText('排版安全区越界 · ERR_422', W*0.5, H*0.49);
+        ctx.fillStyle = isObsidian ? 'rgba(240,236,234,0.62)' : 'rgba(40,36,34,0.6)';
+        ctx.font = `400 ${Math.round(W*0.022)}px "PingFang SC", sans-serif`;
+        ctx.fillText('请在右侧一键修复重试', W*0.5, H*0.555);
+        return;
+      }
+      const bg = ctx.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0, alt ? '#23201E' : styleObj.backdrop[0]);
+      bg.addColorStop(1, alt ? '#151312' : styleObj.backdrop[1]);
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = (isObsidian || alt) ? '#191B1F' : '#DFD6C7'; ctx.fillRect(0, H*0.72, W, H*0.28);
+      const boxG = ctx.createLinearGradient(W*0.61, H*0.30, W*0.90, H*0.74);
+      boxG.addColorStop(0, '#27272B'); boxG.addColorStop(1, '#141417');
+      ctx.fillStyle = boxG; roundRect(ctx, W*0.61, H*0.30, W*0.29, H*0.44, 6); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(W*0.61, H*0.40, W*0.29, 1.5);
+      ctx.fillStyle = styleObj.accent; ctx.font = `600 ${Math.round(W*0.022)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.fillText('K E T T L O', W*0.755, H*0.54);
+      drawKettle(ctx, W*0.38, H*0.54, W/640, styleObj, { showBase: true, darkBg: isObsidian || alt });
+    }
+
+    function renderStyleRow() {
+      const row = document.getElementById('styleRow');
+      row.innerHTML = STYLES.map(s => `
+        <button class="st-chip ${s.id === activeStyleId ? 'active' : ''}" data-s="${s.id}">
+          <div class="st-sq">${s.swatches.map(c => `<span style="background:${c}"></span>`).join('')}</div>
+          <div class="st-meta"><strong>${s.name}</strong><span>${s.sub}</span></div>
+        </button>
+      `).join('');
+      row.querySelectorAll('.st-chip').forEach(b => {
+        b.addEventListener('click', () => { activeStyleId = b.dataset.s; renderAll(); showToast(`风格板已切换：${getStyle().name}`); });
+      });
+    }
+
+    function renderStage() {
+      const container = document.getElementById('artContainer');
+      const st = getStyle();
+      const cur = getSlot();
+      container.classList.toggle('guides-on', guidesOn);
+
+      if (viewMode === 'grid') {
+        container.innerHTML = `
+          <div class="art-grid">
+            ${SLOTS.map(slot => `
+              <div class="art ${slot.id === selectedId ? 'selected' : ''}" data-id="${slot.id}">
+                <div class="art-frame">
+                  <canvas width="520" height="520" data-cv="${slot.id}"></canvas>
+                  <div class="safe-guide"></div>
+                </div>
+                <div class="art-cap">
+                  <div class="art-cap-l"><span class="art-code">${slot.code}</span><span class="art-name">${slot.title}</span></div>
+                  <span class="st-ind ${slot.status}"><span class="dot ${slot.status}"></span>${slot.statusText}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+        container.querySelectorAll('canvas[data-cv]').forEach(c => renderCanvas(c, getSlot(c.dataset.cv), st));
+        container.querySelectorAll('.art').forEach(a => {
+          a.addEventListener('click', () => { selectedId = a.dataset.id; renderAll(); });
+          a.addEventListener('dblclick', () => { selectedId = a.dataset.id; setView('loupe'); });
+        });
+      } else if (viewMode === 'loupe') {
+        container.innerHTML = `
+          <div class="loupe-box">
+            <div class="loupe-frame"><canvas width="680" height="680" id="lCv"></canvas><div class="safe-guide"></div></div>
+            <div style="font-size:12px;color:var(--ink-secondary);"><strong class="mono" style="color:var(--ink-primary)">${cur.code}</strong> · ${cur.title} · ${cur.statusText}</div>
+          </div>
+        `;
+        renderCanvas(document.getElementById('lCv'), cur, st);
+      } else {
+        container.innerHTML = `
+          <div class="cmp-grid">
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;justify-content:space-between;font-size:12px;"><span><strong class="mono">${cur.code}</strong> · 候选 A（当前 ${cur.ver}）</span><span style="color:var(--accent);font-weight:600;">主选</span></div>
+              <div class="cmp-frame win"><canvas width="540" height="540" id="cA"></canvas><div class="safe-guide"></div></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;justify-content:space-between;font-size:12px;"><span><strong class="mono">${cur.code}</strong> · 候选 B（历史对照）</span><button style="color:var(--accent);font-weight:600;font-size:11.5px;" id="pickB">设为主选</button></div>
+              <div class="cmp-frame"><canvas width="540" height="540" id="cB"></canvas><div class="safe-guide"></div></div>
+            </div>
+          </div>
+        `;
+        renderCanvas(document.getElementById('cA'), cur, st, false);
+        renderCanvas(document.getElementById('cB'), cur, st, true);
+        document.getElementById('pickB').addEventListener('click', () => showToast(`已将候选 B 设为 ${cur.code} 主选版本`));
+      }
+    }
+
+    function renderInspector() {
+      const done = SLOTS.filter(s => s.status === 'done').length;
+      const rev = SLOTS.filter(s => s.status === 'review').length;
+      const fail = SLOTS.filter(s => s.status === 'failed').length;
+      document.getElementById('flowStat').textContent = `已生成 ${done}/7`;
+      document.getElementById('iExportBtn').textContent = `打包交付 (${done}/7)`;
+      document.getElementById('sp4').className = `sp-bar ${rev ? 'warn' : 'done'}`;
+      document.getElementById('nextHint').textContent = (rev || fail)
+        ? `下一步：${rev ? '校对 PT03' : ''}${rev && fail ? ' · ' : ''}${fail ? '重试 PT05' : ''}`
+        : '所有坑位就绪，可定稿交付';
+
+      const s = getSlot();
+      const st = getStyle();
+      document.getElementById('iCode').textContent = s.code;
+      document.getElementById('iTitle').textContent = s.title;
+      const ist = document.getElementById('iStatus');
+      ist.className = `st-ind ${s.status}`;
+      ist.innerHTML = `<span class="dot ${s.status}"></span>${s.statusText}`;
+
+      const btn = document.getElementById('iPrimaryBtn');
+      if (s.status === 'failed') btn.textContent = '自动收紧边距并重试';
+      else if (s.status === 'review') btn.textContent = '通过校对并提交生成';
+      else if (s.status === 'running') btn.textContent = '推进当前渲染 (+35%)';
+      else btn.textContent = '按当前提示词重新生成';
+
+      const body = document.getElementById('insBody');
+      if (insTab === 'prompt') {
+        let note = '';
+        if (s.status === 'failed') note = `<div class="notice err">${s.error}</div>`;
+        else if (s.status === 'review') note = `<div class="notice warn">AI 策划已完成本坑位结构提示词，确认后即可提交渲染。</div>`;
+        else if (s.status === 'running') note = `<div class="notice run">本地渲染队列中 · ${s.progress}% · ${s.eta}</div>`;
+
+        body.innerHTML = `
+          ${note}
+          <div>
+            <div class="cap"><span>正向提示词</span><span class="mono">${s.code}</span></div>
+            <textarea class="ta" id="pTa">${s.prompt}</textarea>
+          </div>
+          <div>
+            <div class="cap"><span>负向排除词</span></div>
+            <textarea class="ta" id="nTa" style="min-height:54px;">${s.neg}</textarea>
+          </div>
+          <div class="kv-list">
+            <div class="kv"><span>当前风格板</span><strong>${st.name}</strong></div>
+            <div class="kv"><span>画幅与版本</span><strong class="mono">2000px · ${s.ver} · ${s.seed}</strong></div>
+          </div>
+        `;
+      } else if (insTab === 'versions') {
+        body.innerHTML = `
+          <div class="kv-list" style="border-top:none;">
+            ${s.versions.map((v, i) => `
+              <div class="kv"><span>${v}</span><strong style="color:${i===0?'var(--accent)':'var(--ink-secondary)'}">${i===0?'当前主选':'切换'}</strong></div>
+            `).join('')}
+          </div>
+          <button class="btn btn-ghost" id="goCmp" style="width:100%;">在画布中双图比版</button>
+        `;
+        document.getElementById('goCmp').addEventListener('click', () => setView('compare'));
+      } else {
+        body.innerHTML = `
+          <div class="kv-list" style="border-top:none;">
+            ${s.checks.map(([k, v]) => `
+              <div class="kv"><span>${k}</span><strong style="color:${v.includes('失败')?'var(--err)':(v.includes('通过')||v.includes('0 处')?'var(--ok)':'var(--ink-primary)')}">${v}</strong></div>
+            `).join('')}
+            <div class="kv"><span>规范文件名</span><strong class="mono">B0D9K4M7X2.${s.code}.jpg</strong></div>
+          </div>
+        `;
+      }
+    }
+
+    function setView(v) {
+      viewMode = v;
+      document.querySelectorAll('#viewSeg .seg-b').forEach(el => el.classList.toggle('active', el.dataset.v === v));
+      renderStage();
+    }
+
+    function renderAll() { renderStyleRow(); renderStage(); renderInspector(); }
+
+    document.getElementById('viewSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('.seg-b'); if (b) setView(b.dataset.v);
+    });
+    document.getElementById('insTabs').addEventListener('click', (e) => {
+      const t = e.target.closest('.itab'); if (!t) return;
+      insTab = t.dataset.t;
+      document.querySelectorAll('#insTabs .itab').forEach(el => el.classList.toggle('active', el === t));
+      renderInspector();
+    });
+    document.getElementById('insCmpBtn').addEventListener('click', () => setView(viewMode === 'compare' ? 'grid' : 'compare'));
+    document.getElementById('guideBtn').addEventListener('click', (e) => {
+      guidesOn = !guidesOn;
+      e.target.style.borderColor = guidesOn ? 'var(--accent)' : '';
+      e.target.style.color = guidesOn ? 'var(--accent)' : '';
+      renderStage();
+    });
+    document.getElementById('iPrimaryBtn').addEventListener('click', () => {
+      const s = getSlot();
+      const ta = document.getElementById('pTa'); if (ta) s.prompt = ta.value;
+      if (s.status === 'failed') { s.status = 'running'; s.progress = 26; s.eta = '剩 20s'; s.statusText = '生成中 26%'; showToast(`${s.code} 已修复底边距并重试`); }
+      else if (s.status === 'review') { s.status = 'running'; s.progress = 20; s.eta = '剩 22s'; s.statusText = '生成中 20%'; showToast(`${s.code} 校对通过并开始生成`); }
+      else if (s.status === 'running') {
+        s.progress = Math.min(100, (s.progress || 50) + 35);
+        if (s.progress >= 100) { s.status = 'done'; s.statusText = '已生成'; showToast(`${s.code} 渲染完成`); }
+        else { s.statusText = `生成中 ${s.progress}%`; s.eta = `剩 ${Math.max(3, Math.round((100-s.progress)/4))}s`; }
+      } else { s.status = 'running'; s.progress = 28; s.eta = '剩 18s'; s.statusText = '生成中 28%'; showToast(`${s.code} 已触发新候选版重绘`); }
+      renderAll();
+    });
+    document.getElementById('iSaveBtn').addEventListener('click', () => {
+      const ta = document.getElementById('pTa'); if (ta) getSlot().prompt = ta.value;
+      showToast(`${selectedId} 提示词已保存到本地库`);
+    });
+    document.getElementById('iExportBtn').addEventListener('click', () => showToast('正在导出 Amazon 规范命名 ZIP 包'));
+    document.getElementById('jumpTodoBtn').addEventListener('click', () => {
+      const todo = SLOTS.find(s => s.status === 'review' || s.status === 'failed');
+      if (todo) { selectedId = todo.id; insTab = 'prompt'; renderAll(); showToast(`已定位待办：${todo.code}`); }
+      else showToast('当前没有待处理的校对或失败项');
+    });
+    document.getElementById('themeBtn').addEventListener('click', () => {
+      const h = document.documentElement;
+      const next = h.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      h.setAttribute('data-theme', next);
+      document.getElementById('themeText').textContent = next === 'dark' ? '切换亮色' : '切换暗色';
+    });
+    document.querySelectorAll('.nav-item[data-mod]').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.nav-item[data-mod]').forEach(el => el.classList.toggle('active', el === b));
+        showToast(`已切换工作区：${b.dataset.mod}`);
+      });
+    });
+    document.querySelectorAll('.sku-item').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.sku-item').forEach(el => el.classList.toggle('active', el === b));
+        const [t, sub] = b.dataset.sku.split('|');
+        document.getElementById('projTitle').textContent = t;
+        document.getElementById('projSub').textContent = sub;
+        showToast(`已切换项目：${t}`);
+      });
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>

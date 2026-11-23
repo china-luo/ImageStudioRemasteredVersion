@@ -26,7 +26,7 @@ npm run build:installer
 
 ## 前置工具
 
-- Node.js 与项目依赖（`npm install`）
+- Node.js 24 LTS 或更高版本与项目依赖（`npm ci`）；与 CI、Docker 构建使用的 Node.js 24 基线一致
 - NSIS 3（`makensis.exe` 在 PATH 中，或位于 electron-builder 缓存目录）
 - `rcedit.exe`（通常随 npm 依赖提供）
 

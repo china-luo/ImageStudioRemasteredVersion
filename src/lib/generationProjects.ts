@@ -5,6 +5,8 @@ export const ACTIVE_PROJECT_KEY = 'amazon-image-studio:active-project:v1'
 export const PROJECT_JOURNAL_KEY = 'amazon-image-studio:project-journal:v1'
 export const PROJECT_WRITER_KEY = 'amazon-image-studio:project-writer:v1'
 export const PROJECT_DATA_EVENT = 'generation-projects-changed'
+export const PROJECT_DATA_RESET_EVENT = 'generation-projects-resetting'
+export const PROJECT_DATA_IMPORTED_EVENT = 'generation-projects-imported'
 
 // Browser tabs keep independent selections; the desktop window resumes after exit.
 export function readActiveProjectId(): string | null {
@@ -59,13 +61,24 @@ export function projectSnapshotSignature(value: unknown): string {
   )
 }
 
+// Project and writer identities are local IDs, not credentials. getRandomValues is
+// available on HTTP LAN deployments where the secure-context randomUUID API is not.
+export function createProjectId(): string {
+  if (typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID()
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export function createGenerationProject(
   workspace = createEmptyPlannerWorkspace(),
   referenceImageIds: string[] = [],
 ): GenerationProject {
   const now = Date.now()
   return {
-    id: crypto.randomUUID(),
+    id: createProjectId(),
     name: workspace.draft.productTitle.trim() || '未命名项目',
     createdAt: now,
     updatedAt: now,

@@ -61,10 +61,10 @@ function SubmitButton({
         onClick={hasSubmitApiConfig ? onSubmit : onOpenSettings}
         disabled={hasSubmitApiConfig ? !canSubmit : false}
         aria-label={ariaLabel}
-        className={`${mobile ? 'w-full flex items-center justify-center gap-2 py-2.5 text-sm font-medium' : 'p-2.5'} rounded-xl transition-all shadow-sm hover:shadow ${
+        className={`${mobile ? 'w-full flex items-center justify-center gap-2 py-2.5 text-sm font-semibold' : 'p-2.5'} rounded-xl transition-all ${
           !hasSubmitApiConfig
-            ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-            : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+            ? 'ui-btn ui-btn-soft cursor-pointer'
+            : 'ui-btn-primary text-white disabled:opacity-45 disabled:cursor-not-allowed active:scale-95'
         }`}
       >
         <svg className={mobile ? 'w-4 h-4' : 'w-5 h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">

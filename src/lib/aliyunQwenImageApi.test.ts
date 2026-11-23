@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { createDefaultOpenAIProfile, normalizeSettings } from './apiProfiles'
+import * as devProxy from './devProxy'
+import { evaluateProxyRequest } from './networkGuard'
 import {
   callAliyunQwenImageApi,
   createAliyunQwenImageEndpoint,
@@ -34,6 +36,7 @@ function createSettings(profile: ReturnType<typeof createDefaultOpenAIProfile>) 
 describe('Aliyun Qwen-Image native API', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
   })
 
   it('builds a native endpoint from DashScope and workspace base URLs', () => {
@@ -117,6 +120,82 @@ describe('Aliyun Qwen-Image native API', () => {
     expect(result.images).toEqual(['data:image/png;base64,aW1hZ2U='])
     expect(result.actualParams).toMatchObject({ size: '1024x1536', output_format: 'png', n: 1 })
   })
+
+  it.each([
+    'https://dashscope.aliyuncs.com/api/v1',
+    'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    'https://workspace.cn-beijing.maas.aliyuncs.com/v1',
+    'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+  ])('keeps the native endpoint through the local API proxy for %s', async (baseUrl) => {
+    const proxyConfig = {
+      enabled: true,
+      prefix: '/api-proxy',
+      target: devProxy.LOCAL_DYNAMIC_PROXY_TARGET,
+      changeOrigin: true,
+      secure: true,
+    }
+    vi.spyOn(devProxy, 'readClientDevProxyConfig').mockReturnValue(proxyConfig)
+    const profile = createProfile({ baseUrl, apiProxy: false })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        output: { choices: [{ message: { content: [{ image: 'data:image/png;base64,aW1hZ2U=' }] } }] },
+      }),
+    )
+
+    await callAliyunQwenImageApi(
+      {
+        settings: createSettings(profile),
+        prompt: 'prompt',
+        params: { ...DEFAULT_PARAMS },
+        inputImageDataUrls: [],
+      },
+      profile,
+    )
+
+    const requestUrl = String(fetchMock.mock.calls[0][0])
+    expect(requestUrl).toMatch(/^\/api-proxy\//)
+    const target = devProxy.resolveDevProxyRequestTarget(requestUrl, proxyConfig)
+    expect(target?.dynamic).toBe(true)
+    expect(target?.url.href).toBe(createAliyunQwenImageEndpoint(baseUrl))
+    // Native Qwen is already supported by the existing host/path security rules.
+    expect(
+      evaluateProxyRequest({
+        origin: 'http://localhost:5173',
+        method: 'POST',
+        hostname: target?.url.hostname,
+        pathname: target?.url.pathname,
+        protocol: target?.url.protocol,
+      }),
+    ).toEqual({ ok: true })
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(body).toHaveProperty('input.messages')
+    expect(body).not.toHaveProperty('prompt')
+  })
+
+  it.each(['unavailable', 'available', 'locked'] as const)(
+    'keeps native requests direct without local proxy config, including fixed Docker %s',
+    async (mode) => {
+      vi.stubEnv('VITE_API_PROXY_AVAILABLE', mode === 'unavailable' ? 'false' : 'true')
+      vi.stubEnv('VITE_API_PROXY_LOCKED', mode === 'locked' ? 'true' : 'false')
+      vi.spyOn(devProxy, 'readClientDevProxyConfig').mockReturnValue(null)
+      const profile = createProfile({ apiProxy: true })
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        jsonResponse({
+          output: { choices: [{ message: { content: [{ image: 'data:image/png;base64,aW1hZ2U=' }] } }] },
+        }),
+      )
+      await callAliyunQwenImageApi(
+        {
+          settings: createSettings(profile),
+          prompt: 'prompt',
+          params: { ...DEFAULT_PARAMS },
+          inputImageDataUrls: [],
+        },
+        profile,
+      )
+      expect(fetchMock.mock.calls[0][0]).toBe(createAliyunQwenImageEndpoint(profile.baseUrl))
+    },
+  )
 
   it('falls back to the same-origin proxy for Alibaba result URLs blocked by CORS', async () => {
     const profile = createProfile()

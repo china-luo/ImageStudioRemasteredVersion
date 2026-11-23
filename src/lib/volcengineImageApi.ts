@@ -188,7 +188,12 @@ export async function callVolcengineImageApi(opts: CallApiOptions, profile: ApiP
       throw new Error(await getApiErrorMessage(response))
     }
 
-    return parseImagesApiResponse((await response.json()) as ImageApiResponse, opts.params, mime, controller.signal)
+    return await parseImagesApiResponse(
+      (await response.json()) as ImageApiResponse,
+      opts.params,
+      mime,
+      controller.signal,
+    )
   } finally {
     abortController.cleanup()
   }

@@ -11,6 +11,7 @@ import {
   showCodexCliPrompt,
   getCodexCliPromptKey,
   retryTask,
+  resumeTaskRecovery,
 } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
@@ -23,6 +24,7 @@ import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { downloadImageIds } from '../lib/downloadImages'
 import { summarizeGenerationError } from '../lib/generationError'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
+import { canResumeTaskRecovery, isTaskReconnecting } from '../lib/taskRecovery'
 import { getAspectLabel, getTaskHistoryCategory, getWorkflowLabel } from '../lib/taskHistory'
 import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, LinkIcon, TrashIcon } from './icons'
 
@@ -92,12 +94,11 @@ export default function DetailModal() {
   }, [detailTaskId])
 
   useEffect(() => {
-    if (task?.status !== 'running' && !(task?.status === 'error' && (task.falRecoverable || task.customRecoverable)))
-      return
+    if (!task || (task.status !== 'running' && !isTaskReconnecting(task))) return
     const id = window.setInterval(() => setNow(Date.now()), 1000)
     setNow(Date.now())
     return () => window.clearInterval(id)
-  }, [task?.customRecoverable, task?.falRecoverable, task?.status])
+  }, [task?.customRecoverable, task?.falRecoverable, task?.recoveryPausedReason, task?.status])
 
   // 加载所有相关图片
   useEffect(() => {
@@ -213,8 +214,9 @@ export default function DetailModal() {
   const taskProfileName = task.apiProfileName || '未知'
   const taskModel = task.apiModel || '未知'
   const showSourceInfo = Boolean(task.apiProvider || task.apiProfileName || task.apiModel)
-  const isFalReconnecting = task.status === 'error' && task.falRecoverable
-  const isCustomReconnecting = task.status === 'error' && task.customRecoverable
+  const isReconnecting = isTaskReconnecting(task)
+  const canContinueQuery = canResumeTaskRecovery(task)
+  const isRecoveryPaused = task.status === 'error' && Boolean(task.recoveryPausedReason)
   const rawImageUrls = task.rawImageUrls ?? []
   const currentHistoryCategory = historyCategory ?? getTaskHistoryCategory(task)
   const categoryChanged =
@@ -227,7 +229,7 @@ export default function DetailModal() {
   }
 
   const formatDuration = () => {
-    if (task.status === 'running' || isFalReconnecting || isCustomReconnecting) {
+    if (task.status === 'running' || isReconnecting) {
       const seconds = Math.max(0, Math.floor((now - task.createdAt) / 1000))
       const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
       const ss = String(seconds % 60).padStart(2, '0')
@@ -362,10 +364,10 @@ export default function DetailModal() {
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={() => setDetailTaskId(null)}
     >
-      <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
+      <div className="ui-backdrop animate-overlay-in absolute inset-0" />
       <div
         ref={modalRef}
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row z-10 ring-1 ring-black/5 dark:ring-white/10 animate-modal-in"
+        className="ui-modal animate-modal-in relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col md:flex-row"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 items-center justify-end px-4 md:hidden">
@@ -494,7 +496,7 @@ export default function DetailModal() {
               )}
             </>
           )}
-          {(task.status === 'running' || isFalReconnecting) && (
+          {(task.status === 'running' || isReconnecting) && (
             <>
               <div className="absolute left-4 top-4 flex items-center gap-1 bg-black/50 text-white text-xs px-2 py-0.5 rounded backdrop-blur-sm font-mono">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -515,7 +517,7 @@ export default function DetailModal() {
               )}
             </>
           )}
-          {task.status === 'error' && isFalReconnecting && (
+          {task.status === 'error' && isReconnecting && (
             <div className="w-full max-w-md px-4 text-center">
               <svg
                 className="w-10 h-10 text-yellow-400 mx-auto mb-2"
@@ -533,8 +535,9 @@ export default function DetailModal() {
               <p className="text-sm font-medium text-yellow-500">重连中</p>
             </div>
           )}
-          {task.status === 'error' && !isFalReconnecting && (
+          {task.status === 'error' && !isReconnecting && (
             <div className="w-full max-w-md px-4 text-center">
+              {isRecoveryPaused && <p className="mb-2 text-sm font-medium text-yellow-500">查询已暂停</p>}
               <svg
                 className="w-10 h-10 text-red-400 mx-auto mb-2"
                 fill="none"
@@ -630,10 +633,11 @@ export default function DetailModal() {
                     {...retryTooltip.handlers}
                     onClick={(_e) => {
                       retryTooltip.handlers.onClick()
-                      handleRetry()
+                      if (canContinueQuery) resumeTaskRecovery(task.id)
+                      else handleRetry()
                     }}
                     className="inline-flex items-center justify-center rounded-full border border-blue-200/80 bg-white/80 px-3 py-1.5 text-blue-500 transition hover:bg-blue-50 dark:border-blue-400/20 dark:bg-white/[0.04] dark:hover:bg-blue-500/10"
-                    aria-label="重试任务"
+                    aria-label={canContinueQuery ? '继续查询原远端任务' : '重试任务（重新生成）'}
                   >
                     <svg
                       className="h-4 w-4"
@@ -651,9 +655,10 @@ export default function DetailModal() {
                         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                       />
                     </svg>
+                    {canContinueQuery && <span className="ml-1.5 text-xs">继续查询</span>}
                   </button>
                   <ViewportTooltip visible={retryTooltip.visible} className="whitespace-nowrap">
-                    重试任务
+                    {canContinueQuery ? '继续查询（原远端任务，不重新生成）' : '重试任务（重新生成）'}
                   </ViewportTooltip>
                 </div>
               </div>

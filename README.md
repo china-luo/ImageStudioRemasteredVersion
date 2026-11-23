@@ -144,16 +144,18 @@
 
 ### 环境要求
 
-- Node.js 20 或更高版本，推荐 Node.js 24
+- Node.js 24 LTS 或更高版本（Windows 启动脚本、CI 与 Docker 构建统一使用 Node.js 24 基线）
 - npm
 - Windows 安装包构建额外需要 NSIS 3 和 `rcedit.exe`
+
+锁文件中的 Wrangler / Miniflare 要求 Node.js ≥22，Electron rebuild 要求 ≥22.12，ESLint 10 要求 22.x ≥22.13（或 ≥24）；因此不再支持 Node.js 20，也不能笼统使用任意 Node.js 22。项目统一以 CI 已使用的 Node.js 24 为开发与构建基线。
 
 ### 本地开发
 
 ```bash
 git clone https://github.com/china-luo/ImageStudioRemasteredVersion.git
 cd ImageStudioRemasteredVersion
-npm install
+npm ci
 npm run dev
 ```
 
@@ -180,6 +182,20 @@ docker run --rm -p 8080:80 amazon-image-studio
 ```
 
 打开 `http://localhost:8080/`。默认镜像只托管静态文件，不包含通用 API 代理。
+
+如需代理，只能转发到部署者指定的固定上游；例如：
+
+```bash
+docker run --rm -p 8080:80 \
+  -e ENABLE_API_PROXY=true \
+  -e API_PROXY_URL=https://api.example.com/v1 \
+  -e DEFAULT_API_URL=https://api.example.com/v1 \
+  amazon-image-studio
+```
+
+将示例域名替换为自己的上游，`API_PROXY_URL` 不要带尾部 `/`。前端仍需在 API 配置中启用代理（或由部署者设置 `LOCK_API_PROXY=true`）。代理仅允许 `GET /api-proxy/models`、对 `images/generations`、`images/edits`、`responses`、`chat/completions` 的 `POST`，以及上述精确路径的 `OPTIONS`；兼容可选 `/v1/` 前缀，不会在上游已含 `/v1` 时重复追加。其他路径或方法一律拒绝，不支持通过请求指定任意上游。
+
+通过局域网普通 HTTP 访问时，项目 ID 与图片缓存支持安全上下文 API 缺失时的本地兼容路径；这并不加密 API Key 或请求数据。生产或跨设备使用仍应配置 HTTPS，避免在不可信网络传输敏感信息。
 
 ### Windows 安装包
 

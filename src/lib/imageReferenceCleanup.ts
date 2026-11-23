@@ -1,11 +1,16 @@
 import type { AgentConversation, AmazonPlannerSession, GenerationProject, InputImage, TaskRecord } from '../types'
 import { collectAmazonPlannerSessionImageIds, collectSopDraftImageIds } from './workspaceDrafts'
-import { collectReferencedImageIdsFromState, collectUnreferencedImageIds } from './taskImageReferences'
+import {
+  collectReferencedImageIdsFromState,
+  collectUnreferencedImageIds,
+  type EditorImageReferences,
+} from './taskImageReferences'
 
 export interface ImageReferenceState {
   tasks: TaskRecord[]
   inputImages: InputImage[]
   galleryInputDraft?: { inputImages: InputImage[] } | null
+  seedreamEditorDraft?: EditorImageReferences | null
   sopDraft: Parameters<typeof collectSopDraftImageIds>[0]
   agentConversations: AgentConversation[]
   agentInputDrafts: Array<{ inputImages: InputImage[] }>
@@ -20,6 +25,7 @@ export function collectStateImageReferences(
     tasks: state.tasks,
     inputImages: state.inputImages,
     galleryInputDraft: state.galleryInputDraft,
+    seedreamEditorDraft: state.seedreamEditorDraft,
     sopDraftImageIds: collectSopDraftImageIds(state.sopDraft),
     agentConversations: state.agentConversations,
     agentInputDrafts: state.agentInputDrafts,

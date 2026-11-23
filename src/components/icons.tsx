@@ -476,3 +476,99 @@ export const TagIcon = (props: SVGProps<SVGSVGElement>) => (
     <path d="M20 13l-7 7-9-9V4h7zM8 8h.01" />
   </ToolIcon>
 )
+
+export const SparklesIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+    <path d="M20 3v4M22 5h-4M4 17v2M5 18H3" />
+  </ToolIcon>
+)
+
+export const SunIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+  </ToolIcon>
+)
+
+export const MoonIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+  </ToolIcon>
+)
+
+export const MonitorIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <rect x="2" y="3" width="20" height="14" rx="2" />
+    <path d="M8 21h8M12 17v4" />
+  </ToolIcon>
+)
+
+export const SearchIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m21 21-4.35-4.35" />
+  </ToolIcon>
+)
+
+export const LayersIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+    <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
+    <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
+  </ToolIcon>
+)
+
+export const ScanIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+    <path d="M7 12h10" />
+  </ToolIcon>
+)
+
+export const ChartBarIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="M3 3v18h18" />
+    <path d="M18 17V9M13 17V5M8 17v-3" />
+  </ToolIcon>
+)
+
+export const CheckIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="M5 13l4 4L19 7" />
+  </ToolIcon>
+)
+
+export const FolderIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+  </ToolIcon>
+)
+
+export const PanelLeftCloseIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M9 3v18M16 15l-3-3 3-3" />
+  </ToolIcon>
+)
+
+export const PanelLeftOpenIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M9 3v18M14 9l3 3-3 3" />
+  </ToolIcon>
+)
+
+export const UploadCloudIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+    <path d="M12 12v9M8 16l4-4 4 4" />
+  </ToolIcon>
+)
+
+export const WandIcon = (props: SVGProps<SVGSVGElement>) => (
+  <ToolIcon {...props}>
+    <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z" />
+    <path d="m14 7 3 3M5 6v4M19 14v4M10 2v2M7 8H3M21 16h-4M11 3H9" />
+  </ToolIcon>
+)

@@ -1,6 +1,15 @@
-import type { AgentConversation, AmazonPlannerSession, GenerationProject, InputImage, TaskRecord } from '../types'
+import type {
+  AgentConversation,
+  AmazonPlannerSession,
+  GenerationProject,
+  InputImage,
+  SeedreamEditorDraft,
+  TaskRecord,
+} from '../types'
 import { collectProjectImageIds } from './generationProjects'
 import type { SopWorkspaceDraft } from './workspaceDrafts'
+
+export type EditorImageReferences = Pick<SeedreamEditorDraft, 'sourceImageId' | 'referenceImageIds'>
 
 export function collectTaskImageIds(
   task: Pick<TaskRecord, 'inputImageIds' | 'maskImageId' | 'outputImages'>,
@@ -42,6 +51,7 @@ export function collectReferencedImageIds(options: {
   tasks?: TaskRecord[]
   inputImages?: InputImage[]
   galleryInputDraft?: { inputImages: InputImage[] } | null
+  seedreamEditorDraft?: EditorImageReferences | null
   sopDraftImageIds?: string[]
   agentConversations?: AgentConversation[]
   agentInputDrafts?: Array<{ inputImages: InputImage[] }>
@@ -54,6 +64,8 @@ export function collectReferencedImageIds(options: {
     for (const id of collectProjectImageIds(project)) referenced.add(id)
   for (const image of options.inputImages ?? []) referenced.add(image.id)
   for (const image of options.galleryInputDraft?.inputImages ?? []) referenced.add(image.id)
+  if (options.seedreamEditorDraft?.sourceImageId) referenced.add(options.seedreamEditorDraft.sourceImageId)
+  for (const id of options.seedreamEditorDraft?.referenceImageIds ?? []) referenced.add(id)
   for (const id of options.sopDraftImageIds ?? []) referenced.add(id)
   for (const task of options.tasks ?? []) addTaskImageReferences(referenced, task)
   addAgentImageReferences(referenced, options.agentConversations, options.agentInputDrafts)
@@ -73,6 +85,7 @@ export function collectReferencedImageIdsFromState(options: {
   tasks: TaskRecord[]
   inputImages: InputImage[]
   galleryInputDraft?: { inputImages: InputImage[] } | null
+  seedreamEditorDraft?: EditorImageReferences | null
   sopDraftImageIds?: string[]
   agentConversations: AgentConversation[]
   agentInputDrafts: Array<{ inputImages: InputImage[] }>

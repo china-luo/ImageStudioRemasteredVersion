@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { GenerationProject } from '../types'
+import type { GenerationProject, InputImage } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { getAllGenerationProjects, putGenerationProject } from '../lib/db'
 import {
   readActiveProjectId,
   rememberActiveProject,
   PROJECT_DATA_EVENT,
+  PROJECT_DATA_IMPORTED_EVENT,
+  PROJECT_DATA_RESET_EVENT,
   PROJECT_JOURNAL_KEY,
   PROJECT_WRITER_KEY,
   readProjectJournal,
   canSelectProjectFinal,
   createGenerationProject,
+  createProjectId,
   persistableProjectWorkspace,
   projectSnapshotSignature,
 } from '../lib/generationProjects'
@@ -22,6 +25,25 @@ import {
 } from './planner/plannerWorkspaceDraft'
 import AmazonPlanner from './AmazonPlanner'
 import InputBar from './InputBar'
+import { FolderIcon, PlusIcon } from './icons'
+
+async function readProjectReferences(ids: string[]) {
+  const entries = await Promise.all(ids.map(async (id) => ({ id, dataUrl: await ensureImageCached(id) })))
+  return {
+    available: entries.flatMap(({ id, dataUrl }) => (dataUrl ? [{ id, dataUrl }] : [])),
+    missing: entries.filter(({ dataUrl }) => !dataUrl).map(({ id }) => id),
+  }
+}
+
+// 未加载的参考图保留其位置；可见参考图仍遵循用户调整后的顺序。
+function withMissingReferences(previous: string[], visible: string[], missing: string[]) {
+  const merged = [...visible]
+  const missingSet = new Set(missing)
+  previous.forEach((id, index) => {
+    if (missingSet.has(id) && !merged.includes(id)) merged.splice(index, 0, id)
+  })
+  return merged
+}
 
 export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) {
   const [project, setProject] = useState<GenerationProject | null>(null)
@@ -31,6 +53,12 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
   const [busy, setBusy] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [reload, setReload] = useState(0)
+  const [missingCount, setMissingCount] = useState(0)
+  const missingReferences = useRef<string[]>([])
+  const setMissingReferences = useCallback((ids: string[]) => {
+    missingReferences.current = ids
+    setMissingCount(ids.length)
+  }, [])
   const active = useRef<GenerationProject | null>(null)
   const queue = useRef<Promise<void>>(Promise.resolve())
   const revisions = useRef(new Map<string, number>())
@@ -39,7 +67,7 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
   const inputPrompt = useStore((state) => state.prompt)
   const inputParams = useStore((state) => state.params)
   const [writerId] = useState(() => {
-    const id = sessionStorage.getItem(PROJECT_WRITER_KEY) ?? crypto.randomUUID()
+    const id = sessionStorage.getItem(PROJECT_WRITER_KEY) ?? createProjectId()
     sessionStorage.setItem(PROJECT_WRITER_KEY, id)
     return id
   })
@@ -89,15 +117,16 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
   )
 
   useEffect(() => {
-    ++epoch.current
+    const generation = ++epoch.current
     let canceled = false
+    const isStale = () => canceled || generation !== epoch.current
     active.current = null
     saveError.current = ''
     setError('')
     setProject(null)
     void (async () => {
       const all = await getAllGenerationProjects()
-      if (canceled) return
+      if (isStale()) return
       setProjects(all)
       revisions.current = new Map(all.map((item) => [item.id, item.revision]))
       const activeProjectId = readActiveProjectId()
@@ -119,42 +148,104 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
       savePlannerWorkspaceDraft(next.workspace)
       next.workspace = readPlannerWorkspaceDraft()
       if (selected || pending) {
-        const images = await Promise.all(
-          next.referenceImageIds.map(async (id) => ({ id, dataUrl: await ensureImageCached(id) })),
-        )
-        if (canceled) return
-        useStore
-          .getState()
-          .setInputImages(images.flatMap((image) => (image.dataUrl ? [{ id: image.id, dataUrl: image.dataUrl }] : [])))
-        if (images.some((image) => !image.dataUrl))
-          useStore.getState().showToast('部分项目参考图已丢失，请重新上传。', 'error')
+        const { available, missing } = await readProjectReferences(next.referenceImageIds)
+        if (isStale()) return
+        setMissingReferences(missing)
+        useStore.getState().setInputImages(available)
         useStore.getState().setPrompt(next.inputDraft?.prompt ?? '')
         useStore.getState().setParams(next.inputDraft?.params ?? DEFAULT_PARAMS)
-      }
-      if (canceled) return
+      } else setMissingReferences([])
+      if (isStale()) return
       rememberActiveProject(next.id)
       active.current = next
       setProject(next)
       setStatus(selected ? '已自动保存' : '新项目')
       setBusy(false)
     })().catch((cause) => {
-      if (!canceled) setError(`项目加载失败：${String(cause)}`)
+      if (!isStale()) setError(`项目加载失败：${String(cause)}`)
     })
     return () => {
       canceled = true
     }
-  }, [reload, writerId])
+  }, [reload, setMissingReferences, writerId])
 
   useEffect(() => {
-    const refresh = () => {
+    let mounted = true
+    let importVersion = 0
+    const pauseForReset = () => {
       epoch.current++
+      importVersion++
       active.current = null
-      sessionStorage.removeItem(PROJECT_JOURNAL_KEY)
+      setMissingReferences([])
+      setProject(null)
+      setError('')
+      setSwitching(false)
+    }
+    const refresh = () => {
+      pauseForReset()
       setReload((value) => value + 1)
     }
+    const refreshList = () => {
+      const version = ++importVersion
+      const projectId = active.current?.id
+      const missing = missingReferences.current
+      if (projectId && missing.length) {
+        void readProjectReferences(missing)
+          .then(({ available, missing: unresolved }) => {
+            const current = active.current
+            if (
+              !mounted ||
+              version !== importVersion ||
+              current?.id !== projectId ||
+              missingReferences.current !== missing
+            )
+              return
+            if (!available.length) return
+            const state = useStore.getState()
+            const restored = new Map<string, InputImage>(available.map((image) => [image.id, image]))
+            for (const image of state.inputImages) restored.set(image.id, image)
+            const ids = withMissingReferences(
+              current.referenceImageIds,
+              state.inputImages.map(({ id }) => id),
+              missing,
+            )
+            setMissingReferences(unresolved)
+            state.setInputImages(
+              ids.flatMap((id) => {
+                const image = restored.get(id)
+                return image ? [image] : []
+              }),
+            )
+          })
+          .catch(() => useStore.getState().showToast('参考图暂未恢复，重新打开项目后可重试。', 'error'))
+      }
+      void getAllGenerationProjects()
+        .then((items) => {
+          if (mounted && version === importVersion) {
+            setProjects((current) => {
+              const latest = new Map(items.map((item) => [item.id, item]))
+              for (const item of current) {
+                if ((latest.get(item.id)?.revision ?? -1) <= item.revision) latest.set(item.id, item)
+              }
+              return [...latest.values()]
+            })
+          }
+        })
+        .catch((cause) => {
+          if (mounted && version === importVersion)
+            useStore.getState().showToast(`项目列表刷新失败：${String(cause)}`, 'error')
+        })
+    }
+    window.addEventListener(PROJECT_DATA_RESET_EVENT, pauseForReset)
     window.addEventListener(PROJECT_DATA_EVENT, refresh)
-    return () => window.removeEventListener(PROJECT_DATA_EVENT, refresh)
-  }, [])
+    window.addEventListener(PROJECT_DATA_IMPORTED_EVENT, refreshList)
+    return () => {
+      mounted = false
+      window.removeEventListener(PROJECT_DATA_RESET_EVENT, pauseForReset)
+      window.removeEventListener(PROJECT_DATA_EVENT, refresh)
+      window.removeEventListener(PROJECT_DATA_IMPORTED_EVENT, refreshList)
+    }
+  }, [setMissingReferences])
 
   useEffect(() => {
     const current = active.current
@@ -168,9 +259,14 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
   }, [inputPrompt, inputParams, project?.id, switching, save])
 
   const onWorkspaceChange = useCallback(
-    (workspace: PlannerWorkspaceDraft, referenceImageIds: string[]) => {
+    (workspace: PlannerWorkspaceDraft, visibleReferenceIds: string[]) => {
       const current = active.current
       if (!current) return
+      const referenceImageIds = withMissingReferences(
+        current.referenceImageIds,
+        visibleReferenceIds,
+        missingReferences.current,
+      )
       const nextWorkspace = persistableProjectWorkspace(workspace)
       if (
         current.revision > 0 &&
@@ -191,21 +287,24 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
 
   const switchProject = async (id?: string) => {
     if (busy || switching) return
+    const generation = epoch.current
+    const isStale = () => generation !== epoch.current
     setSwitching(true)
     try {
       await queue.current
+      if (isStale()) return
       if (saveError.current) throw new Error(saveError.current)
       const all = await getAllGenerationProjects()
+      if (isStale()) return
       const next = id ? all.find((item) => item.id === id) : createGenerationProject()
       if (!next) throw new Error('项目不存在，请重新加载项目列表。')
-      const images = await Promise.all(
-        next.referenceImageIds.map(async (imageId) => ({ id: imageId, dataUrl: await ensureImageCached(imageId) })),
-      )
-      if (images.some((image) => !image.dataUrl)) throw new Error('项目参考图缺失，请先从备份恢复图片。')
+      const { available, missing } = await readProjectReferences(next.referenceImageIds)
+      if (isStale()) return
       savePlannerWorkspaceDraft(next.workspace)
       next.workspace = readPlannerWorkspaceDraft()
       const state = useStore.getState()
-      state.setInputImages(images.map((image) => ({ id: image.id, dataUrl: image.dataUrl! })))
+      setMissingReferences(missing)
+      state.setInputImages(available)
       state.setPrompt(next.inputDraft?.prompt ?? '')
       state.setParams(next.inputDraft?.params ?? DEFAULT_PARAMS)
       state.setPendingTaskCategory(null)
@@ -218,9 +317,9 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
       setProject(next)
       setStatus('已自动保存')
     } catch (cause) {
-      useStore.getState().showToast(String(cause), 'error')
+      if (!isStale()) useStore.getState().showToast(String(cause), 'error')
     } finally {
-      setSwitching(false)
+      if (!isStale()) setSwitching(false)
     }
   }
 
@@ -241,17 +340,36 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
 
   if (!project)
     return (
-      <div className="planner-empty" role="status">
-        {error || '正在加载项目…'}
-        {error && <button onClick={() => setReload((n) => n + 1)}>重试加载</button>}
+      <div className="ui-panel animate-fade-up flex flex-col items-center justify-center gap-3 px-6 py-20 text-center" role="status">
+        {!error && <div className="progress-ring" aria-hidden="true" />}
+        <p className={error ? 'text-sm font-medium text-[var(--danger)]' : 'text-sm text-[var(--text-2)]'}>
+          {error || '正在加载项目…'}
+        </p>
+        {error && (
+          <button type="button" className="ui-btn ui-btn-primary mt-1" onClick={() => setReload((n) => n + 1)}>
+            重试加载
+          </button>
+        )}
       </div>
     )
 
+  const statusTone = error
+    ? 'bg-red-500'
+    : busy || status.includes('正在')
+      ? 'bg-amber-500 animate-pulse'
+      : 'bg-emerald-500'
+
   return (
-    <>
+    <div className="animate-fade-up">
       <section className="project-toolbar" aria-label="商品项目" data-no-drag-select>
+        <div
+          aria-hidden="true"
+          className="hidden h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-inset)] text-[var(--text-2)] shadow-[inset_0_0_0_1px_var(--line)] sm:grid"
+        >
+          <FolderIcon className="h-4 w-4" />
+        </div>
         <label>
-          切换项目
+          <span className="shrink-0">项目</span>
           <select
             aria-label="切换项目"
             value={project.id}
@@ -266,31 +384,44 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
           </select>
         </label>
         <label>
-          项目名称
+          <span className="shrink-0">名称</span>
           <input
             aria-label="项目名称"
             value={project.name}
             maxLength={100}
             disabled={switching || Boolean(error)}
+            placeholder="输入商品或项目名称…"
             onChange={(event) => save({ ...active.current!, name: event.target.value, updatedAt: Date.now() })}
           />
         </label>
-        <button type="button" disabled={busy || switching || Boolean(error)} onClick={() => void switchProject()}>
-          新建项目
-        </button>
-        <span role="status" className="text-xs text-gray-500">
-          {busy ? '当前操作完成后可切换项目' : status}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="project-new-btn"
+            disabled={busy || switching || Boolean(error)}
+            onClick={() => void switchProject()}
+          >
+            <PlusIcon className="h-3.5 w-3.5" />
+            新建项目
+          </button>
+          <span
+            role="status"
+            className="inline-flex h-[34px] items-center gap-1.5 rounded-lg bg-[var(--surface-inset)] px-2.5 text-xs font-medium text-[var(--text-2)] shadow-[inset_0_0_0_1px_var(--line)]"
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${statusTone}`} aria-hidden="true" />
+            {busy ? '当前操作完成后可切换项目' : status}
+          </span>
+        </div>
         {error && (
-          <div role="alert" className="w-full text-sm text-red-600">
-            {error}
+          <div role="alert" className="ui-callout ui-callout-danger w-full flex-wrap items-center justify-between gap-2 text-sm">
+            <span>{error}</span>
             <button
               type="button"
               onClick={() => {
                 // Keep the unsaved work as a new project when storage is available again.
                 const copy = {
                   ...active.current!,
-                  id: crypto.randomUUID(),
+                  id: createProjectId(),
                   revision: 0,
                   finals: {},
                   name: `${active.current!.name}（恢复副本）`,
@@ -306,6 +437,11 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
           </div>
         )}
       </section>
+      {missingCount > 0 && (
+        <p role="status" className="ui-callout ui-callout-warning mb-4 text-sm">
+          {missingCount} 张项目参考图暂未找到，引用已保留；导入包含原图的备份后会自动恢复。
+        </p>
+      )}
       <fieldset className="min-w-0" disabled={switching || Boolean(error)}>
         <AmazonPlanner
           key={project.id}
@@ -317,6 +453,6 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
           onFinalChange={onFinalChange}
         />
       </fieldset>
-    </>
+    </div>
   )
 }

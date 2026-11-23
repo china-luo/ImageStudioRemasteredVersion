@@ -65,29 +65,27 @@ const PRODUCT_SUMMARY_FIELDS: ProductSummaryField[] = [
 ]
 
 const READ_ONLY_FIELD_CLASS =
-  'w-full cursor-text rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 outline-none placeholder:text-gray-400 focus:border-gray-300 focus:ring-0 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:placeholder:text-gray-600'
+  'w-full cursor-text rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--text-1)] outline-none placeholder:text-[var(--text-3)] focus:border-[var(--line-strong)] focus:ring-0'
 
 export default function PlannerProductSummary({ draft }: { draft: AmazonPromptDraft }) {
   const [expandedField, setExpandedField] = useState<ProductSummaryField['key'] | null>(null)
 
   return (
     <section
-      className="mt-5 border-t border-gray-200 pt-4 dark:border-white/[0.08]"
+      className="mt-2 border-t border-[var(--line)] pt-4"
       aria-labelledby="product-summary-title"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h3 id="product-summary-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+        <h3 id="product-summary-title" className="text-sm font-semibold text-[var(--text-1)]">
           AI 商品信息摘要
         </h3>
-        <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
-          只读
-        </span>
+        <span className="ui-badge">只读</span>
       </div>
-      <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+      <p className="mt-1.5 text-xs leading-relaxed text-[var(--text-3)]">
         以下内容由最近一次 AI
         策划返回，用于核对结果和恢复策划历史。字段旁的标记说明返回后是否仍被工作流读取，点击信息图标可查看具体用途；如需调整商品事实，请修改上方标题、五点描述或参考图后重新策划。
       </p>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-2)]">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
           涉及工作流逻辑
@@ -98,26 +96,22 @@ export default function PlannerProductSummary({ draft }: { draft: AmazonPromptDr
         </span>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className="mt-4 grid gap-3.5 md:grid-cols-2">
         {PRODUCT_SUMMARY_FIELDS.map((field) => {
           const descriptionId = `product-summary-${field.key}-description`
           const value = draft[field.key]
           const descriptionExpanded = expandedField === field.key
-          const badgeClass =
-            field.usage === 'workflow'
-              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'
-              : 'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'
 
           return (
             <div key={field.key} className={field.wide ? 'md:col-span-2' : ''}>
               <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-300">{field.label}</span>
-                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
+                <span className="text-xs font-semibold text-[var(--text-2)]">{field.label}</span>
+                <span className={`ui-badge h-5 px-1.5 text-[10px] ${field.usage === 'workflow' ? 'ui-badge-success' : ''}`}>
                   {field.usage === 'workflow' ? '涉及逻辑' : '仅展示'}
                 </span>
                 <button
                   type="button"
-                  className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-[var(--text-3)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]"
                   aria-label={`查看${field.label}字段说明`}
                   aria-expanded={descriptionExpanded}
                   aria-controls={descriptionId}
@@ -131,7 +125,7 @@ export default function PlannerProductSummary({ draft }: { draft: AmazonPromptDr
                 </button>
               </div>
               {descriptionExpanded && (
-                <p id={descriptionId} className="mb-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                <p id={descriptionId} className="mb-2 rounded-lg bg-[var(--surface-inset)] px-2.5 py-1.5 text-[11px] leading-relaxed text-[var(--text-2)]">
                   {field.note}
                 </p>
               )}

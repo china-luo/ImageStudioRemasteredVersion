@@ -211,21 +211,21 @@ export function sortPlannerSessions(sessions: AmazonPlannerSession[]) {
 
 export function getActionStepClass(status: WorkflowStepStatus) {
   if (status === 'done')
-    return 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200'
+    return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
   if (status === 'current')
-    return 'border-blue-200 bg-blue-50 text-blue-800 ring-1 ring-blue-500/10 dark:border-blue-400/30 dark:bg-blue-400/10 dark:text-blue-200'
-  return 'border-gray-200 bg-white text-gray-500 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-400'
+    return 'border-[var(--accent-ring)] bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--accent-soft)]'
+  return 'border-[var(--line)] bg-[var(--surface-solid)] text-[var(--text-3)]'
 }
 
 export function getGuidePanelClass(isActive: boolean, tone: GuidePanelTone = 'white') {
   if (isActive)
-    return 'border-blue-300 bg-blue-50/60 ring-2 ring-blue-500/15 dark:border-blue-400/60 dark:bg-blue-500/10'
-  if (tone === 'muted') return 'border-gray-200 bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950'
-  return 'border-gray-200 bg-white dark:border-white/[0.08] dark:bg-gray-950'
+    return 'border-[var(--accent-ring)] bg-[var(--surface-panel-strong)] shadow-[0_0_0_3px_var(--accent-soft),var(--shadow-panel)]'
+  if (tone === 'muted') return 'border-[var(--line)] bg-[var(--surface-inset)]'
+  return 'border-[var(--line)] bg-[var(--surface-panel-strong)]'
 }
 
 export function getGuideFocusClass(isActive: boolean) {
-  return isActive ? 'ring-2 ring-blue-500/20 dark:ring-blue-400/20' : ''
+  return isActive ? 'ring-2 ring-[var(--accent-ring)]' : ''
 }
 
 export function getPlannerActionKey(

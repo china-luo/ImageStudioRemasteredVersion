@@ -678,6 +678,21 @@ describe('custom providers', () => {
     expect(profile.model).toBe(DEFAULT_IMAGES_MODEL)
   })
 
+  it('preserves an explicitly selected custom proxy preference when switching providers', () => {
+    const provider = importCustomProviderDefinitionFromJson(
+      JSON.stringify({
+        name: 'Custom Provider',
+        template: 'http-image',
+        submit: { path: 'jobs/submit' },
+      }),
+    )
+    const initial = switchApiProfileProvider(createDefaultOpenAIProfile({ apiProxy: true }), provider.id, provider)
+    expect(initial.apiProxy).toBe(false)
+    const custom = { ...initial, apiProxy: true }
+    const openai = switchApiProfileProvider(custom, 'openai')
+    expect(switchApiProfileProvider(openai, provider.id, provider).apiProxy).toBe(true)
+  })
+
   it('enables Agent submit auto scroll by default', () => {
     expect(DEFAULT_SETTINGS.agentScrollToBottomAfterSubmit).toBe(true)
     expect(normalizeSettings({}).agentScrollToBottomAfterSubmit).toBe(true)

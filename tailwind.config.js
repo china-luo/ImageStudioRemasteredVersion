@@ -1,8 +1,13 @@
 import colors from 'tailwindcss/colors';
 
+/**
+ * Theme strategy
+ * - Default: follow the OS (`prefers-color-scheme`).
+ * - Manual override: `html.dark` forces dark, `html.light` forces light (see src/lib/theme.ts).
+ */
 /** @type {import('tailwindcss').Config} */
 export default {
-  darkMode: 'media',
+  darkMode: ['variant', ['@media (prefers-color-scheme: dark) { &:not(:where(.light, .light *)) }', '&:where(.dark, .dark *)']],
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}', './node_modules/streamdown/dist/*.js'],
   theme: {
     extend: {
@@ -10,6 +15,8 @@ export default {
         background: 'hsl(var(--background) / <alpha-value>)',
         border: 'hsl(var(--border) / <alpha-value>)',
         gray: colors.zinc,
+        blue: colors.blue,
+        brand: colors.blue,
         foreground: 'hsl(var(--foreground) / <alpha-value>)',
         input: 'hsl(var(--input) / <alpha-value>)',
         muted: {
@@ -28,6 +35,18 @@ export default {
       fontFamily: {
         sans: ['var(--font-ui-sans)'],
         mono: ['var(--font-mono)'],
+      },
+      borderRadius: {
+        panel: 'var(--radius-panel)',
+        control: 'var(--radius-control)',
+      },
+      boxShadow: {
+        panel: 'var(--shadow-panel)',
+        float: 'var(--shadow-float)',
+        glow: 'var(--shadow-glow)',
+      },
+      transitionTimingFunction: {
+        spring: 'cubic-bezier(0.22, 1, 0.36, 1)',
       },
     },
   },
