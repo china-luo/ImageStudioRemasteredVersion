@@ -197,6 +197,46 @@ export function getApiConnectionHint(): string {
   return '当前页面未提供 API 代理。请使用本地启动方式（npm run dev 或 npm run preview）或桌面版，或使用允许浏览器跨域的接口。'
 }
 
+// Routing hints only: the server/native network guard remains the authority.
+// Unknown custom paths must not be sent to a proxy that only supports preset APIs.
+export function isCustomProviderProxyPathSupported(baseUrl: string, path: string): boolean {
+  try {
+    const pathname = new URL(buildApiUrl(baseUrl, path)).pathname
+    return [
+      /^\/v1\/(responses|models|chat\/completions)\/?$/,
+      /^\/v1\/images\/(generations|edits|tasks\/[^/]+)\/?$/,
+      /^\/v1\/api\/(RtTask01|RtQry01)\/?$/,
+      /^\/api\/v[13](\/|$)/,
+      /^\/images\/(generations|edits|tasks\/[^/]+)\/?$/,
+      /^\/(responses|models|chat\/completions)\/?$/,
+      /^\/(openai|fal-ai)\//,
+    ].some((pattern) => pattern.test(pathname))
+  } catch {
+    return false
+  }
+}
+
+export function shouldUseCustomProviderApiProxy(
+  apiProxy: boolean,
+  proxyConfig: DevProxyConfig | null,
+  baseUrl: string,
+  path: string,
+): boolean {
+  // Desktop keeps its guarded native transport; Docker's fixed OpenAI proxy is
+  // not a transport for custom providers. Never retry via another transport.
+  if (typeof window !== 'undefined' && window.imageStudioDesktop?.isDesktop) return false
+  if (!proxyConfig?.enabled) return false
+  if (!isCustomProviderProxyPathSupported(baseUrl, path)) {
+    if (apiProxy) {
+      throw new Error(
+        '本地 API 代理不支持此自定义接口路径。请在设置中关闭该配置的 API 代理，使用允许浏览器跨域（CORS）的服务商直连；不会自动重发请求。',
+      )
+    }
+    return false
+  }
+  return shouldUseApiProxy(apiProxy, proxyConfig, baseUrl)
+}
+
 export function shouldUseApiProxy(
   apiProxy: boolean,
   proxyConfig: DevProxyConfig | null = readClientDevProxyConfig(),

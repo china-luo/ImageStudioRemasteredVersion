@@ -92,5 +92,5 @@ test('clears legacy planner sessions during the database v4 upgrade', async ({ p
           }),
       ),
     )
-    .toEqual({ version: 5, sessionCount: 0 })
+    .toEqual({ version: 6, sessionCount: 0 })
 })

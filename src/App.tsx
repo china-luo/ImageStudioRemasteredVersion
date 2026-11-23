@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { initStore } from './store'
+import { initSettingsSecrets, initStore } from './store'
 import { useStore } from './store'
 import { parseAppRoute, routeFromAppState, serializeAppRoute, type AppFeatureView, type AppRoute } from './lib/appRoute'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import Header from './components/Header'
+import CommandPalette from './components/CommandPalette'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
 import DetailModal from './components/DetailModal'
@@ -34,6 +35,15 @@ function applyAppRoute(route: AppRoute, setFeatureView: (view: AppFeatureView) =
   useStore.getState().setAppMode(route.mode)
 }
 
+function PageLoadingSkeleton({ message = '页面加载中…' }: { message?: string }) {
+  return (
+    <div className="ui-panel animate-fade-up flex flex-col items-center justify-center gap-3 px-6 py-20 text-center">
+      <div className="progress-ring" aria-hidden="true" />
+      <p className="text-sm font-medium text-[var(--text-2)]">{message}</p>
+    </div>
+  )
+}
+
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
   const appMode = useStore((s) => s.appMode)
@@ -47,16 +57,17 @@ export default function App() {
   const [routeReady, setRouteReady] = useState(false)
   const [storeReady, setStoreReady] = useState(false)
   const [storeError, setStoreError] = useState('')
+  const [commandOpen, setCommandOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
-    const nextSettings = buildSettingsFromUrlParams(useStore.getState().settings, searchParams)
+    const hasUrlSettings = hasUrlSettingParams(searchParams)
+    const urlSettingsParams = new URLSearchParams(searchParams)
 
-    setSettings(nextSettings)
-
-    if (hasUrlSettingParams(searchParams)) {
+    if (hasUrlSettings) {
       clearUrlSettingParams(searchParams)
 
       const nextSearch = searchParams.toString()
@@ -64,7 +75,15 @@ export default function App() {
       window.history.replaceState(null, '', nextUrl)
     }
 
-    void initStore()
+    void initSettingsSecrets()
+      .then(() => {
+        // Apply URL overrides only after saved keys are present, so imports retain
+        // unrelated credentials and explicitly supplied URL keys take precedence.
+        if (hasUrlSettings) {
+          setSettings(buildSettingsFromUrlParams(useStore.getState().settings, urlSettingsParams))
+        }
+        return initStore()
+      })
       .then(() => setStoreReady(true))
       .catch((error) => {
         setStoreError(`数据加载失败：${String(error)}`)
@@ -102,13 +121,36 @@ export default function App() {
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
 
+  useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setCommandOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
+  }, [])
+
   const navigateFeature = (view: AppFeatureView) => setFeatureView(view)
   return (
     <div className="studio-shell">
-      <Header activeView={featureView} onNavigate={navigateFeature} />
-      <main data-home-main data-drag-select-surface className="studio-main pb-10">
+      <Header
+        activeView={featureView}
+        onNavigate={navigateFeature}
+        onOpenCommandPalette={() => setCommandOpen(true)}
+        helpOpen={helpOpen}
+        onHelpOpenChange={setHelpOpen}
+      />
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        onNavigate={navigateFeature}
+        onOpenHelp={() => setHelpOpen(true)}
+      />
+      <main data-home-main data-drag-select-surface className="studio-main pb-12">
         <div className="studio-content safe-area-x mx-auto">
-          <Suspense fallback={<div className="py-16 text-center text-sm text-gray-500">页面加载中…</div>}>
+          <Suspense fallback={<PageLoadingSkeleton />}>
             {featureView === 'editor' ? (
               <ImageEditorPage />
             ) : featureView === 'tagger' ? (
@@ -127,10 +169,16 @@ export default function App() {
                 }
               />
             ) : (
-              <div role={storeError ? 'alert' : 'status'} className="py-16 text-center text-gray-500">
-                {storeError || '正在加载图片数据…'}
+              <div
+                role={storeError ? 'alert' : 'status'}
+                className="ui-panel animate-fade-up flex flex-col items-center justify-center gap-3 px-6 py-20 text-center"
+              >
+                {!storeError && <div className="progress-ring" aria-hidden="true" />}
+                <p className={storeError ? 'text-sm font-medium text-[var(--danger)]' : 'text-sm text-[var(--text-2)]'}>
+                  {storeError || '正在加载图片数据…'}
+                </p>
                 {storeError && (
-                  <button className="ml-3 underline" onClick={() => window.location.reload()}>
+                  <button type="button" className="ui-btn ui-btn-primary mt-1" onClick={() => window.location.reload()}>
                     重新加载
                   </button>
                 )}
@@ -144,34 +192,24 @@ export default function App() {
       <ErrorBoundary
         resetKey={showSettings}
         fallback={(error, reset) => (
-          <div
-            data-no-drag-select
-            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
-          >
-            <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 shadow-2xl dark:border-red-400/20 dark:bg-gray-900">
-              <div className="text-base font-semibold text-gray-900 dark:text-gray-100">设置面板打开失败</div>
-              <div
-                data-selectable-text
-                className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700 dark:bg-red-400/10 dark:text-red-200"
-              >
+          <div data-no-drag-select className="ui-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4">
+            <div className="ui-modal animate-modal-in w-full max-w-md p-6">
+              <div className="text-base font-bold text-[var(--text-1)]">设置面板打开失败</div>
+              <div data-selectable-text className="ui-callout ui-callout-danger mt-3 font-mono text-xs">
                 {error.message}
               </div>
-              <div className="mt-4 flex justify-end gap-2">
+              <div className="mt-5 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     setShowSettings(false)
                     reset()
                   }}
-                  className="h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                  className="ui-btn"
                 >
                   关闭设置
                 </button>
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="h-9 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white transition hover:bg-blue-500"
-                >
+                <button type="button" onClick={reset} className="ui-btn ui-btn-primary">
                   重新打开
                 </button>
               </div>

@@ -25,6 +25,31 @@ test('stage navigation preserves mounted inputs and keeps generation explicit', 
   await expect(listing).toHaveValue('Layout test: stainless steel travel mug')
 })
 
+test('快捷面板 Enter 激活获得焦点的按钮，搜索框仍可用方向键选择', async ({ page }) => {
+  await page.goto('/#/')
+  const palette = page.getByRole('dialog', { name: '快捷命令面板' })
+  const search = palette.getByRole('textbox')
+  const editor = palette.getByRole('button', { name: /^图片编辑/ })
+
+  await page.keyboard.press('Control+k')
+  await expect(search).toBeFocused()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await expect(editor).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/#\/editor$/)
+  await expect(palette).toHaveCount(0)
+
+  await page.keyboard.press('Control+k')
+  await expect(search).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowDown')
+  await expect(palette.locator('[data-active="true"]')).toContainText('拆图反推 SOP')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/#\/sop$/)
+  await expect(palette).toHaveCount(0)
+})
+
 test('production layout keeps plan selection, batch selection and prompt editing available', async ({ page }) => {
   const draft = createEmptyPlannerWorkspace()
   draft.listingText = 'Title: Stainless Steel Travel Mug\n- Leak-resistant lid\n- 500 ml capacity'

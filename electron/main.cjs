@@ -67,6 +67,7 @@ const ipcHandlers = createIpcHandlers({
 })
 
 ipcMain.handle('image-studio:fetch', ipcHandlers.fetch)
+ipcMain.handle('image-studio:fetch-cancel', ipcHandlers.cancelFetch)
 
 ipcMain.handle('image-studio:secrets-get', ipcHandlers.getSecrets)
 ipcMain.handle('image-studio:secrets-set', ipcHandlers.setSecrets)

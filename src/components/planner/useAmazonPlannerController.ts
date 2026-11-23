@@ -1,5 +1,5 @@
-import { useCallback } from 'react'
-import { putAmazonPlannerSession } from '../../lib/db'
+import { useCallback, useRef } from 'react'
+import { deleteAmazonPlannerSession, putAmazonPlannerSession } from '../../lib/db'
 import { storeImage } from '../../lib/db'
 import { callImageApi } from '../../lib/api'
 import { callAmazonPlannerApi } from '../../lib/listingPlannerApi'
@@ -55,6 +55,7 @@ export async function requestPlannerStyleImage(options: {
 }) {
   const result = await callImageApi(options)
   const dataUrl = result.images[0]
+  if (options.signal.aborted) throw options.signal.reason
   if (!dataUrl) throw new Error('风格板接口没有返回图片')
   const imageId = await storeImage(dataUrl, 'generated')
   return { imageId, dataUrl }
@@ -154,10 +155,13 @@ export type PlannerControllerSnapshot = {
 
 export function useAmazonPlannerController(
   snapshot: PlannerControllerSnapshot,
-  setCurrentPlannerSessionId: (id: string | null) => void,
   setPlannerSessions: (updater: (current: AmazonPlannerSession[]) => AmazonPlannerSession[]) => void,
   showToast: (message: string, type?: 'info' | 'success' | 'error') => void,
 ) {
+  const latestSnapshotRef = useRef(snapshot)
+  latestSnapshotRef.current = snapshot
+  const deletedSessionIdsRef = useRef(new Set<string>())
+  const pendingSavesRef = useRef(new Map<string, Promise<unknown>>())
   const getSnapshot = useCallback(
     (overrides: Partial<AmazonPlannerSession> = {}) =>
       createPlannerSessionSnapshot(
@@ -173,19 +177,39 @@ export function useAmazonPlannerController(
   const savePlannerSession = useCallback(
     async (overrides: Partial<AmazonPlannerSession> = {}) => {
       const session = getSnapshot(overrides)
-      await putAmazonPlannerSession(session)
-      setCurrentPlannerSessionId(session.id)
-      setPlannerSessions((current) =>
-        sortPlannerSessions([session, ...current.filter((item) => item.id !== session.id)]),
-      )
-      return session
+      // 同一历史串行保存；删除先封禁后等待，避免在途保存将记录复活。
+      const pending = (pendingSavesRef.current.get(session.id) ?? Promise.resolve())
+        .catch(() => undefined)
+        .then(async () => {
+          if (deletedSessionIdsRef.current.has(session.id)) return session
+          await putAmazonPlannerSession(session)
+          if (!deletedSessionIdsRef.current.has(session.id)) {
+            setPlannerSessions((current) =>
+              sortPlannerSessions([session, ...current.filter((item) => item.id !== session.id)]),
+            )
+          }
+          return session
+        })
+      pendingSavesRef.current.set(session.id, pending)
+      try {
+        return await pending
+      } finally {
+        if (pendingSavesRef.current.get(session.id) === pending) pendingSavesRef.current.delete(session.id)
+      }
     },
-    [getSnapshot, setCurrentPlannerSessionId, setPlannerSessions],
+    [getSnapshot, setPlannerSessions],
   )
 
   const updateCurrentPlannerSession = useCallback(
     (overrides: Partial<AmazonPlannerSession>) => {
-      if (!snapshot.currentPlannerSessionId) return
+      const id = snapshot.currentPlannerSessionId
+      if (
+        !id ||
+        deletedSessionIdsRef.current.has(id) ||
+        latestSnapshotRef.current.currentPlannerSessionId !== id ||
+        !latestSnapshotRef.current.plannerSessions.some((session) => session.id === id)
+      )
+        return
       void savePlannerSession(overrides).catch((error) => {
         showToast(`策划历史保存失败：${error instanceof Error ? error.message : String(error)}`, 'error')
       })
@@ -193,5 +217,25 @@ export function useAmazonPlannerController(
     [savePlannerSession, showToast, snapshot.currentPlannerSessionId],
   )
 
-  return { getPlannerSessionSnapshot: getSnapshot, savePlannerSession, updateCurrentPlannerSession }
+  const deletePlannerSessionHistory = useCallback(
+    async (id: string) => {
+      deletedSessionIdsRef.current.add(id)
+      try {
+        await pendingSavesRef.current.get(id)?.catch(() => undefined)
+        await deleteAmazonPlannerSession(id)
+        setPlannerSessions((current) => current.filter((session) => session.id !== id))
+      } catch (error) {
+        deletedSessionIdsRef.current.delete(id)
+        throw error
+      }
+    },
+    [setPlannerSessions],
+  )
+
+  return {
+    getPlannerSessionSnapshot: getSnapshot,
+    savePlannerSession,
+    updateCurrentPlannerSession,
+    deletePlannerSessionHistory,
+  }
 }

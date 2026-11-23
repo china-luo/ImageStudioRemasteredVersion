@@ -11,7 +11,7 @@ function renderMessage(message: string) {
       return (
         <code
           key={index}
-          className="rounded bg-gray-100 px-1 py-0.5 text-[0.85em] text-gray-700 dark:bg-white/[0.06] dark:text-gray-200"
+          className="rounded-md bg-[var(--surface-inset)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--text-1)] shadow-[inset_0_0_0_1px_var(--line)]"
         >
           {part.slice(1, -1)}
         </code>
@@ -20,7 +20,7 @@ function renderMessage(message: string) {
 
     if (part.startsWith('「') && part.endsWith('」')) {
       return (
-        <strong key={index} className="font-semibold text-gray-700 dark:text-gray-200">
+        <strong key={index} className="font-semibold text-[var(--text-1)]">
           {part}
         </strong>
       )
@@ -28,7 +28,7 @@ function renderMessage(message: string) {
 
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
-        <strong key={index} className="font-semibold text-gray-700 dark:text-gray-200">
+        <strong key={index} className="font-semibold text-[var(--text-1)]">
           {part.slice(2, -2)}
         </strong>
       )
@@ -39,12 +39,11 @@ function renderMessage(message: string) {
 }
 
 function getActionButtonClass(tone: 'primary' | 'secondary' | 'danger' | 'warning' = 'primary') {
-  if (tone === 'secondary') {
-    return 'border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-400 dark:hover:bg-white/[0.06]'
-  }
-  if (tone === 'warning') return 'bg-orange-500 text-white hover:bg-orange-600'
-  if (tone === 'danger') return 'bg-red-500 text-white hover:bg-red-600'
-  return 'bg-blue-500 text-white hover:bg-blue-600'
+  if (tone === 'secondary') return 'ui-btn'
+  if (tone === 'warning')
+    return 'ui-btn border-0 bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-md hover:brightness-105'
+  if (tone === 'danger') return 'ui-btn ui-btn-danger'
+  return 'ui-btn ui-btn-primary'
 }
 
 export default function ConfirmDialog() {
@@ -98,32 +97,38 @@ export default function ConfirmDialog() {
       className="fixed inset-0 z-[110] flex items-center justify-center p-4"
       onClick={handleClose}
     >
-      <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
+      <div className="ui-backdrop animate-overlay-in absolute inset-0" />
       <div
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-sm w-full p-6 z-10 ring-1 ring-black/5 dark:ring-white/10 animate-confirm-in"
+        className="ui-modal animate-confirm-in relative z-10 w-full max-w-sm p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-2 flex items-center gap-2 text-base font-bold text-gray-800 dark:text-gray-100">
+        <h3 className="mb-2.5 flex items-center gap-2.5 text-base font-bold text-[var(--text-1)]">
           {confirmDialog.icon === 'info' && (
-            <svg
-              className="h-5 w-5 shrink-0 text-blue-500"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              viewBox="0 0 24 24"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 16v-4" />
-              <path d="M12 8h.01" />
-            </svg>
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
+            </span>
           )}
-          {confirmDialog.icon === 'copy' && <CopyIcon className="h-5 w-5 shrink-0 text-blue-500" />}
+          {confirmDialog.icon === 'copy' && (
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
+              <CopyIcon className="h-4 w-4" />
+            </span>
+          )}
           {confirmDialog.title}
         </h3>
         <p
-          className={`text-sm text-gray-500 dark:text-gray-400 ${confirmDialog.checkbox ? 'mb-4' : 'mb-6'} leading-relaxed whitespace-pre-line ${confirmDialog.messageAlign === 'center' ? 'text-center' : ''}`}
+          className={`whitespace-pre-line text-sm leading-relaxed text-[var(--text-2)] ${confirmDialog.checkbox ? 'mb-4' : 'mb-6'} ${confirmDialog.messageAlign === 'center' ? 'text-center' : ''}`}
         >
           {renderMessage(confirmDialog.message)}
         </p>
@@ -138,7 +143,7 @@ export default function ConfirmDialog() {
           />
         )}
         {customButtons.length > 0 ? (
-          <div className="flex gap-2">
+          <div className="flex gap-2.5">
             {customButtons.map((button) => (
               <button
                 key={button.label}
@@ -148,19 +153,16 @@ export default function ConfirmDialog() {
                   setConfirmDialog(null)
                 }}
                 disabled={!canConfirm}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${getActionButtonClass(button.tone)}`}
+                className={`flex-1 ${getActionButtonClass(button.tone)}`}
               >
                 {button.label}
               </button>
             ))}
           </div>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex gap-2.5">
             {confirmDialog.showCancel !== false && (
-              <button
-                onClick={handleCancel}
-                className="flex-1 py-2 rounded-lg border border-gray-200 dark:border-white/[0.08] text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06] transition"
-              >
+              <button onClick={handleCancel} className="ui-btn flex-1">
                 {cancelText}
               </button>
             )}
@@ -171,7 +173,7 @@ export default function ConfirmDialog() {
                 setConfirmDialog(null)
               }}
               disabled={!canConfirm}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${confirmClassName}`}
+              className={`flex-1 ${confirmClassName}`}
             >
               {confirmText}
             </button>

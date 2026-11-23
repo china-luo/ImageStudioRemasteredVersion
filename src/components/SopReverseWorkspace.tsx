@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { type DragEvent, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { getSopReverseProfile, validateApiProfile } from '../lib/apiProfiles'
@@ -13,11 +13,21 @@ import {
   stopWorkspaceAnalysis,
 } from '../lib/workspaceAnalysis'
 import Select from './Select'
-import { CloseIcon, CopyIcon, EditIcon, EyeIcon, ImportIcon, RefreshIcon, SettingsIcon } from './icons'
+import MarkdownRenderer from './MarkdownRenderer'
+import {
+  CloseIcon,
+  CopyIcon,
+  EditIcon,
+  EyeIcon,
+  ImportIcon,
+  RefreshIcon,
+  ScanIcon,
+  SettingsIcon,
+  UploadCloudIcon,
+} from './icons'
 
-const FIELD_CLASS =
-  'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-500'
-const LABEL_CLASS = 'mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400'
+const FIELD_CLASS = 'ui-input'
+const LABEL_CLASS = 'ui-label'
 const MAX_REFERENCE_IMAGES = 8
 
 const platformOptions = [
@@ -169,6 +179,7 @@ export default function SopReverseWorkspace() {
   const resetSopDraft = useStore((s) => s.resetSopDraft)
   const isAnalyzing = useStore((s) => s.sopDraft.analysisStatus === 'running')
   const [showPromptModal, setShowPromptModal] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const settings = useStore((s) => s.settings)
@@ -181,6 +192,26 @@ export default function SopReverseWorkspace() {
   const profileValidation = (reverseProfile ? validateApiProfile(reverseProfile) : '未选择拆图反推 AI 配置') ?? ''
   const generatedPrompt = useMemo(() => buildSopPrompt(form, referenceImages.length), [form, referenceImages.length])
   const englishPrompt = useMemo(() => (output ? extractEnglishImagePrompt(output) : ''), [output])
+  const missingFields = useMemo(() => buildMissingFields(form, referenceImages.length), [form, referenceImages.length])
+
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (!isDragging) setIsDragging(true)
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setIsDragging(false)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    setIsDragging(false)
+    if (event.dataTransfer.files?.length) {
+      void addImages(event.dataTransfer.files)
+    }
+  }
 
   const addImages = async (files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'))
@@ -289,53 +320,48 @@ export default function SopReverseWorkspace() {
   }
 
   return (
-    <section
-      data-no-drag-select
-      className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-gray-900"
-    >
-      <div className="border-b border-gray-200 bg-gray-50/80 p-4 dark:border-white/[0.08] dark:bg-gray-950/70 sm:p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200">
-              独立 AI 分析板块
-            </div>
-            <h2 className="mt-3 text-xl font-black tracking-tight text-gray-950 dark:text-gray-50 sm:text-2xl">
-              电商图片拆解反推 SOP
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-              竞品图、商品资料和 SOP 会一起发送给拆图反推模型，由 AI
-              输出中文拆解、迁移方案、英文生图提示词和英文负面提示词。
-            </p>
+    <div data-no-drag-select className="animate-fade-up space-y-4 pb-8">
+      <div className="ui-panel flex flex-col gap-3 px-4 py-3.5 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="ui-page-icon h-10 w-10 rounded-xl" aria-hidden="true">
+            <ScanIcon className="h-5 w-5" />
           </div>
-          <div className="grid min-w-[240px] gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-white/[0.08] dark:bg-gray-900">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-gray-700 dark:text-gray-200">拆图 AI</span>
-              <span
-                className={
-                  profileValidation ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300'
-                }
-              >
-                {profileValidation ? '待配置' : '已连接'}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="ui-title text-lg">电商图片拆解反推 SOP</h2>
+              <span className={`ui-badge ${profileValidation ? 'ui-badge-warning' : 'ui-badge-success'}`}>
+                <span className="ui-dot" />
+                {profileValidation ? '拆图 AI 待配置' : reverseProfile?.model || '已连接'}
               </span>
             </div>
-            <div className="min-w-0 text-[12px] text-gray-500 dark:text-gray-400">
-              {reverseProfile ? `${reverseProfile.name} · ${reverseProfile.model}` : '未选择模型'}
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowSettings(true, 'api')}
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-xs font-medium text-gray-700 transition hover:bg-white dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-            >
-              <SettingsIcon className="h-3.5 w-3.5" />
-              配置拆图 AI
-            </button>
+            <p className="mt-0.5 truncate text-xs text-[var(--text-3)]">
+              上传竞品图并补充自家产品资料，AI 自动拆解画面结构、迁移方案与英文生图提示词
+            </p>
           </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {reverseProfile && (
+            <span className="hidden max-w-[200px] truncate text-xs text-[var(--text-3)] xl:inline">
+              {reverseProfile.name}
+            </span>
+          )}
+          <button type="button" onClick={() => setShowSettings(true, 'api')} className="ui-btn ui-btn-sm h-9">
+            <SettingsIcon className="h-3.5 w-3.5" />
+            配置拆图 AI
+          </button>
         </div>
       </div>
 
-      <div>
-        <div className="p-4 sm:p-5">
-          <div className="mb-4 rounded-xl border border-dashed border-gray-300 bg-gray-50/80 p-3 dark:border-white/[0.12] dark:bg-gray-950/40">
+      <div className="grid gap-4 xl:grid-cols-[372px_minmax(0,1fr)]">
+        <aside className="space-y-4 xl:sticky xl:top-[68px] xl:self-start">
+          <section
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`ui-panel p-4 transition ${
+              isDragging ? 'border-[var(--accent)] ring-2 ring-[var(--accent-ring)]' : ''
+            }`}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -347,34 +373,57 @@ export default function SopReverseWorkspace() {
                 event.currentTarget.value = ''
               }}
             />
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">竞品图</div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  可上传多张，AI 会直接看图拆解；没有图片时可填写图片说明。
+                <div className="text-sm font-bold text-[var(--text-1)]">
+                  竞品图
+                  <span className="ml-1.5 font-mono text-xs font-medium text-[var(--text-3)]">
+                    {referenceImages.length}/{MAX_REFERENCE_IMAGES}
+                  </span>
                 </div>
+                <div className="mt-0.5 text-xs text-[var(--text-3)]">拖拽或点击上传，AI 直接看图拆解</div>
               </div>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                className="ui-btn ui-btn-soft ui-btn-sm h-8"
               >
-                <ImportIcon className="h-4 w-4" />
+                <ImportIcon className="h-3.5 w-3.5" />
                 上传竞品图
               </button>
             </div>
-            {referenceImages.length > 0 && (
-              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+
+            {referenceImages.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                data-dragging={isDragging ? 'true' : undefined}
+                className="ui-dropzone mt-3 min-h-[126px] w-full"
+              >
+                <span className="ui-dropzone-icon h-10 w-10 rounded-xl" aria-hidden="true">
+                  <UploadCloudIcon className="h-5 w-5" />
+                </span>
+                <span className="text-sm font-semibold text-[var(--text-1)]">
+                  {isDragging ? '松开鼠标以上传竞品图' : '拖入或选择竞品图片'}
+                </span>
+                <span className="text-xs text-[var(--text-3)]">最多 8 张 · 没图也可在右侧文字描述</span>
+              </button>
+            ) : (
+              <div className="mt-3 grid grid-cols-3 gap-2">
                 {referenceImages.map((image) => (
                   <div
                     key={image.id}
-                    className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/[0.08] dark:bg-gray-900"
+                    className="group relative overflow-hidden rounded-xl bg-[var(--surface-solid)] shadow-[0_0_0_1px_var(--line)]"
                   >
-                    <img src={image.dataUrl} alt={image.name} className="aspect-square w-full object-cover" />
+                    <img
+                      src={image.dataUrl}
+                      alt={image.name}
+                      className="aspect-square w-full object-cover transition duration-300 group-hover:scale-105"
+                    />
                     <button
                       type="button"
                       onClick={() => removeImage(image.id)}
-                      className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition group-hover:opacity-100"
+                      className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white opacity-100 backdrop-blur-sm transition hover:bg-red-500 sm:opacity-0 sm:group-hover:opacity-100"
                       aria-label="移除图片"
                     >
                       <CloseIcon className="h-3.5 w-3.5" />
@@ -383,216 +432,274 @@ export default function SopReverseWorkspace() {
                 ))}
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="grid gap-4 xl:grid-cols-2">
-            <label className="xl:col-span-2">
-              <span className={LABEL_CLASS}>竞品图片说明</span>
-              <textarea
-                value={form.competitorDescription}
-                onChange={(event) => setForm(updateForm(form, 'competitorDescription', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[112px] resize-y`}
-                placeholder="可补充图片中难以识别的文字、卖点、证书、场景、价格、品牌风险等。"
-              />
-            </label>
-
-            <div className="grid gap-4 sm:grid-cols-3 xl:col-span-2">
+          <section className="ui-panel space-y-3.5 p-4">
+            <div className="text-sm font-bold text-[var(--text-1)]">迁移目标规格</div>
+            <div className="grid gap-3">
               <label>
                 <span className={LABEL_CLASS}>目标平台</span>
                 <Select
                   value={form.targetPlatform}
                   onChange={(value) => setForm(updateForm(form, 'targetPlatform', String(value)))}
                   options={platformOptions}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
+                  className="ui-input h-9"
                 />
               </label>
-              <label>
-                <span className={LABEL_CLASS}>目标图位</span>
-                <Select
-                  value={form.imageRole}
-                  onChange={(value) => setForm(updateForm(form, 'imageRole', String(value)))}
-                  options={roleOptions}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
-                />
-              </label>
-              <label>
-                <span className={LABEL_CLASS}>生成比例</span>
-                <Select
-                  value={form.ratio}
-                  onChange={(value) => setForm(updateForm(form, 'ratio', String(value)))}
-                  options={ratioOptions}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-white/[0.06]"
-                />
-              </label>
+              <div className="grid grid-cols-2 gap-2.5">
+                <label>
+                  <span className={LABEL_CLASS}>目标图位</span>
+                  <Select
+                    value={form.imageRole}
+                    onChange={(value) => setForm(updateForm(form, 'imageRole', String(value)))}
+                    options={roleOptions}
+                    className="ui-input h-9"
+                  />
+                </label>
+                <label>
+                  <span className={LABEL_CLASS}>生成比例</span>
+                  <Select
+                    value={form.ratio}
+                    onChange={(value) => setForm(updateForm(form, 'ratio', String(value)))}
+                    options={ratioOptions}
+                    className="ui-input h-9"
+                  />
+                </label>
+              </div>
             </div>
 
-            <label>
-              <span className={LABEL_CLASS}>自家产品名称</span>
-              <input
-                value={form.productName}
-                onChange={(event) => setForm(updateForm(form, 'productName', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例如 便携式宠物饮水杯"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>自家产品品类</span>
-              <input
-                value={form.category}
-                onChange={(event) => setForm(updateForm(form, 'category', event.target.value))}
-                className={FIELD_CLASS}
-                placeholder="例如 宠物外出用品"
-              />
-            </label>
-
-            <label>
-              <span className={LABEL_CLASS}>自家产品核心卖点</span>
-              <textarea
-                value={form.sellingPoints}
-                onChange={(event) => setForm(updateForm(form, 'sellingPoints', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[92px] resize-y`}
-                placeholder="逐条写真卖点，例如材质、尺寸、结构、套装内容、使用场景。"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>目标人群</span>
-              <textarea
-                value={form.audience}
-                onChange={(event) => setForm(updateForm(form, 'audience', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[92px] resize-y`}
-                placeholder="例如 美国养小型犬的通勤用户，关注便携、防漏、易清洗。"
-              />
-            </label>
-
-            <label>
-              <span className={LABEL_CLASS}>真实证据</span>
-              <textarea
-                value={form.evidence}
-                onChange={(event) => setForm(updateForm(form, 'evidence', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[76px] resize-y`}
-                placeholder="检测报告、认证、规格、材质、使用数据。没有就写无。"
-              />
-            </label>
-            <label>
-              <span className={LABEL_CLASS}>不能出现的表达</span>
-              <textarea
-                value={form.forbidden}
-                onChange={(event) => setForm(updateForm(form, 'forbidden', event.target.value))}
-                className={`${FIELD_CLASS} min-h-[76px] resize-y`}
-                placeholder="平台禁词、医疗功效、绝对化承诺、竞品品牌、价格、未经证实数据。"
-              />
-            </label>
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void analyzeWithAi()}
-              disabled={isAnalyzing}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isAnalyzing ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-xs text-[var(--text-2)]">
+              {missingFields.length === 0 ? (
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                  核心资料完整，可直接开始 AI 拆解反推
+                </span>
               ) : (
-                <EditIcon className="h-4 w-4" />
+                <span>建议补充：{missingFields.join('、')}</span>
               )}
-              {isAnalyzing ? 'AI 分析中' : 'AI 拆解反推'}
-            </button>
-            {isAnalyzing && (
-              <button
-                type="button"
-                onClick={stopAnalyze}
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-              >
-                停止
+            </div>
+
+            <div className="space-y-2 border-t border-[var(--line)] pt-3">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void analyzeWithAi()}
+                  disabled={isAnalyzing}
+                  className="ui-btn ui-btn-primary h-10 flex-1 text-sm"
+                >
+                  {isAnalyzing ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70" />
+                  ) : (
+                    <EditIcon className="h-4 w-4" />
+                  )}
+                  {isAnalyzing ? 'AI 分析中' : 'AI 拆解反推'}
+                </button>
+                {isAnalyzing && (
+                  <button type="button" onClick={stopAnalyze} className="ui-btn ui-btn-danger-soft h-10 px-3.5 text-sm">
+                    停止
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={openEnglishPromptModal}
+                  disabled={!englishPrompt.trim() || isAnalyzing}
+                  className="ui-btn ui-btn-sm h-9"
+                >
+                  <EyeIcon className="h-3.5 w-3.5" />
+                  查看完整提示词
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyEnglishPrompt()}
+                  disabled={!englishPrompt.trim() || isAnalyzing}
+                  className="ui-btn ui-btn-sm h-9"
+                >
+                  <CopyIcon className="h-3.5 w-3.5" />
+                  复制英文提示词
+                </button>
+              </div>
+              <button type="button" onClick={resetForm} className="ui-btn ui-btn-ghost ui-btn-sm h-8 w-full">
+                <RefreshIcon className="h-3.5 w-3.5" />
+                重置表单
               </button>
-            )}
-            <button
-              type="button"
-              onClick={openEnglishPromptModal}
-              disabled={!englishPrompt.trim() || isAnalyzing}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-            >
-              <EyeIcon className="h-4 w-4" />
-              查看完整提示词
-            </button>
-            <button
-              type="button"
-              onClick={() => void copyEnglishPrompt()}
-              disabled={!englishPrompt.trim() || isAnalyzing}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-            >
-              <CopyIcon className="h-4 w-4" />
-              复制英文提示词
-            </button>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 active:translate-y-px dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-            >
-              <RefreshIcon className="h-4 w-4" />
-              重置
-            </button>
-          </div>
+            </div>
+          </section>
+        </aside>
+
+        <div className="min-w-0 space-y-4">
           {error && (
-            <div
-              data-selectable-text
-              className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-600 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200"
-            >
+            <div data-selectable-text className="ui-callout ui-callout-danger text-xs">
               {error}
             </div>
           )}
+
+          {output && (
+            <section className="ui-panel overflow-hidden">
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] px-5 py-3.5">
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--text-1)]">AI 拆解分析报告</h3>
+                  <p className="mt-0.5 text-xs text-[var(--text-3)]">包含 12 项完整结构拆解、迁移方案与中英文提示词</p>
+                </div>
+                {englishPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => void copyEnglishPrompt()}
+                    className="ui-btn ui-btn-soft ui-btn-sm"
+                  >
+                    <CopyIcon className="h-3.5 w-3.5" />
+                    复制提示词
+                  </button>
+                )}
+              </div>
+              <div data-selectable-text className="custom-scrollbar max-h-[540px] overflow-auto p-5 text-sm leading-7">
+                <MarkdownRenderer content={output} />
+              </div>
+            </section>
+          )}
+
+          <section className="ui-panel space-y-5 p-5">
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="ui-section-title">竞品画面观察</h3>
+                <span className="text-xs text-[var(--text-3)]">选填 · 补充文字与卖点细节</span>
+              </div>
+              <label className="block">
+                <span className={LABEL_CLASS}>竞品图片说明</span>
+                <textarea
+                  value={form.competitorDescription}
+                  onChange={(event) => setForm(updateForm(form, 'competitorDescription', event.target.value))}
+                  className={`${FIELD_CLASS} min-h-[96px] resize-y`}
+                  placeholder="可补充图片中难以识别的文字、卖点、证书、场景、价格、品牌风险等。"
+                />
+              </label>
+            </div>
+
+            <div className="border-t border-[var(--line)] pt-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="ui-section-title">自家产品定位</h3>
+                <span className="text-xs text-[var(--text-3)]">用于把竞品结构精准迁移到你的产品</span>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label>
+                  <span className={LABEL_CLASS}>自家产品名称</span>
+                  <input
+                    value={form.productName}
+                    onChange={(event) => setForm(updateForm(form, 'productName', event.target.value))}
+                    className={FIELD_CLASS}
+                    placeholder="例如 便携式宠物饮水杯"
+                  />
+                </label>
+                <label>
+                  <span className={LABEL_CLASS}>自家产品品类</span>
+                  <input
+                    value={form.category}
+                    onChange={(event) => setForm(updateForm(form, 'category', event.target.value))}
+                    className={FIELD_CLASS}
+                    placeholder="例如 宠物外出用品"
+                  />
+                </label>
+                <label>
+                  <span className={LABEL_CLASS}>自家产品核心卖点</span>
+                  <textarea
+                    value={form.sellingPoints}
+                    onChange={(event) => setForm(updateForm(form, 'sellingPoints', event.target.value))}
+                    className={`${FIELD_CLASS} min-h-[100px] resize-y`}
+                    placeholder="逐条写真卖点，例如材质、尺寸、结构、套装内容、使用场景。"
+                  />
+                </label>
+                <label>
+                  <span className={LABEL_CLASS}>目标人群</span>
+                  <textarea
+                    value={form.audience}
+                    onChange={(event) => setForm(updateForm(form, 'audience', event.target.value))}
+                    className={`${FIELD_CLASS} min-h-[100px] resize-y`}
+                    placeholder="例如 美国养小型犬的通勤用户，关注便携、防漏、易清洗。"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="border-t border-[var(--line)] pt-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="ui-section-title">真实证据与合规边界</h3>
+                <span className="text-xs text-[var(--text-3)]">避免虚假背书与平台违规风险</span>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label>
+                  <span className={LABEL_CLASS}>真实证据</span>
+                  <textarea
+                    value={form.evidence}
+                    onChange={(event) => setForm(updateForm(form, 'evidence', event.target.value))}
+                    className={`${FIELD_CLASS} min-h-[84px] resize-y`}
+                    placeholder="检测报告、认证、规格、材质、使用数据。没有就写无。"
+                  />
+                </label>
+                <label>
+                  <span className={LABEL_CLASS}>不能出现的表达</span>
+                  <textarea
+                    value={form.forbidden}
+                    onChange={(event) => setForm(updateForm(form, 'forbidden', event.target.value))}
+                    className={`${FIELD_CLASS} min-h-[84px] resize-y`}
+                    placeholder="平台禁词、医疗功效、绝对化承诺、竞品品牌、价格、未经证实数据。"
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
+
       {showPromptModal &&
         englishPrompt &&
         createPortal(
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-6">
-            <div className="absolute inset-0 bg-black/35 backdrop-blur-md" onClick={() => setShowPromptModal(false)} />
             <div
-              className="relative z-10 flex h-[72vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl ring-1 ring-black/10 dark:border-white/[0.08] dark:bg-gray-900 dark:ring-white/10"
+              className="ui-backdrop animate-overlay-in absolute inset-0"
+              onClick={() => setShowPromptModal(false)}
+            />
+            <div
+              className="ui-modal animate-modal-in relative z-10 flex h-[72vh] w-full max-w-3xl flex-col"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="flex min-h-0 w-full flex-col bg-white dark:bg-gray-900">
-                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-white/[0.08]">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">英文提示词</div>
-                    <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                      可复制到图片生成输入框，配合参考图使用
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => void copyEnglishPrompt()}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 active:translate-y-px dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]"
-                    >
-                      <CopyIcon className="h-3.5 w-3.5" />
-                      复制
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowPromptModal(false)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-                      aria-label="关闭英文提示词窗口"
-                    >
-                      <CloseIcon className="h-4 w-4" />
-                    </button>
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-4">
+                <div className="min-w-0">
+                  <div className="text-base font-bold text-[var(--text-1)]">英文提示词</div>
+                  <div className="mt-0.5 truncate text-xs text-[var(--text-3)]">
+                    可复制到图片生成输入框，配合参考图使用
                   </div>
                 </div>
-                <div className="min-h-0 flex-1 overflow-auto p-4 custom-scrollbar">
-                  <pre
-                    data-selectable-text
-                    className="whitespace-pre-wrap break-words font-sans text-[13px] leading-7 text-gray-800 dark:text-gray-100"
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void copyEnglishPrompt()}
+                    className="ui-btn ui-btn-primary ui-btn-sm"
                   >
-                    {englishPrompt}
-                  </pre>
+                    <CopyIcon className="h-3.5 w-3.5" />
+                    复制
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPromptModal(false)}
+                    className="ui-icon-btn ui-icon-btn-sm"
+                    aria-label="关闭英文提示词窗口"
+                  >
+                    <CloseIcon className="h-4 w-4" />
+                  </button>
                 </div>
+              </div>
+              <div className="custom-scrollbar min-h-0 flex-1 overflow-auto p-5">
+                <pre
+                  data-selectable-text
+                  className="whitespace-pre-wrap break-words font-mono text-[13px] leading-7 text-[var(--text-1)]"
+                >
+                  {englishPrompt}
+                </pre>
               </div>
             </div>
           </div>,
           document.body,
         )}
-    </section>
+    </div>
   )
 }

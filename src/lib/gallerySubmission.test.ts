@@ -63,6 +63,29 @@ describe('gallery submission preflight', () => {
     )
   })
 
+  it('reserves a slot for a separate style reference without counting a duplicate twice', async () => {
+    const { deps, state, submitPrepared } = createDeps()
+    state.settings.profiles[0] = {
+      ...state.settings.profiles[0],
+      model: 'qwen-image-2.0-pro',
+      baseUrl: 'https://dashscope.aliyuncs.com/api/v1',
+    }
+    state.inputImages = ['a', 'b', 'c'].map((id) => ({ id, dataUrl: 'image' }))
+    state.pendingTaskCategory = {
+      mode: 'next-submit',
+      category: { workflow: 'gallery', styleReferenceImageId: 'separate-style' },
+    }
+
+    await expect(submitGalleryTask(deps)).resolves.toBe(false)
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('参考图和风格板合计不能超过 3 张'), 'error')
+    expect(deps.ensureImageCached).not.toHaveBeenCalled()
+    expect(submitPrepared).not.toHaveBeenCalled()
+
+    state.pendingTaskCategory.category.styleReferenceImageId = 'b'
+    await expect(submitGalleryTask(deps)).resolves.toBe(true)
+    expect(submitPrepared).toHaveBeenCalledWith(expect.objectContaining({ inputImages: state.inputImages }))
+  })
+
   it('opens a confirmation when the temporarily reused profile no longer exists', async () => {
     const { deps, state, submitPrepared } = createDeps()
     state.reusedTaskApiProfileId = 'deleted-profile'

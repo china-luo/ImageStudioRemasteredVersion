@@ -52,28 +52,92 @@ function withAllowedHostsHeader(request: Request, extraHosts: string[]): Request
   return new Request(request, { headers })
 }
 
+async function readRequestBody(request: Request): Promise<number[] | undefined> {
+  if (request.bodyUsed) throw new TypeError('Request body has already been consumed')
+  if (!request.body) return undefined
+  const reader = request.body.getReader()
+  const onAbort = () => {
+    void reader.cancel(request.signal.reason).catch(() => {})
+  }
+  request.signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    request.signal.throwIfAborted()
+    const chunks: Uint8Array[] = []
+    let length = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      request.signal.throwIfAborted()
+      if (done) break
+      chunks.push(value)
+      length += value.length
+    }
+    const bytes = new Uint8Array(length)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.length
+    }
+    return Array.from(bytes)
+  } finally {
+    request.signal.removeEventListener('abort', onAbort)
+    reader.releaseLock()
+  }
+}
+
 async function fetchViaDesktop(request: Request): Promise<Response> {
-  const desktopFetch = window.imageStudioDesktop?.fetch
-  if (!desktopFetch) return window.fetch(request)
+  const desktop = window.imageStudioDesktop
+  if (!desktop?.fetch) return window.fetch(request)
 
-  const body =
-    request.method === 'GET' || request.method === 'HEAD'
-      ? undefined
-      : Array.from(new Uint8Array(await request.clone().arrayBuffer()))
-
-  const result = await desktopFetch({
-    url: request.url,
-    method: request.method,
-    headers: headersToRecord(request.headers),
-    body,
-    allowedHosts: extraAllowedHostsProvider(),
+  const { signal } = request
+  signal.throwIfAborted()
+  const requestId = crypto.randomUUID()
+  let dispatched = false
+  let rejectAbort: (reason: unknown) => void = () => {}
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject
   })
+  const onAbort = () => {
+    // Settle locally even when IPC/network teardown is delayed. The main process
+    // registers the ID synchronously before its first await, so a subsequent
+    // cancel cannot overtake registration on the same renderer's IPC stream.
+    rejectAbort(signal.reason)
+    if (dispatched) {
+      try {
+        void desktop.cancelFetch?.(requestId).catch(() => {})
+      } catch {
+        // The renderer may be shutting down; its original abort reason wins.
+      }
+    }
+  }
+  signal.addEventListener('abort', onAbort, { once: true })
 
-  return new Response(new Uint8Array(result.body), {
-    status: result.status,
-    statusText: result.statusText,
-    headers: result.headers,
-  })
+  try {
+    const operation = async () => {
+      const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await readRequestBody(request)
+      // Cancellation while serializing a body must not enqueue a network request.
+      signal.throwIfAborted()
+      const payload = {
+        requestId,
+        url: request.url,
+        method: request.method,
+        headers: headersToRecord(request.headers),
+        body,
+        allowedHosts: extraAllowedHostsProvider(),
+      }
+      signal.throwIfAborted()
+      dispatched = true
+      const result = await desktop.fetch!(payload)
+      signal.throwIfAborted()
+      return new Response([204, 205, 304].includes(result.status) ? null : new Uint8Array(result.body), {
+        status: result.status,
+        statusText: result.statusText,
+        headers: result.headers,
+      })
+    }
+    return await Promise.race([aborted, operation()])
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
 }
 
 export function installDesktopFetch() {

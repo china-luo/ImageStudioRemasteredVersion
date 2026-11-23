@@ -139,10 +139,16 @@ export function readSessionSecrets(): AppSecrets {
 export function writeSessionSecrets(secrets: AppSecrets) {
   const storage = getSessionStorage()
   if (!storage) return
-  storage.setItem(SESSION_SECRETS_KEY, JSON.stringify(normalizeSecrets(secrets)))
+  try {
+    storage.setItem(SESSION_SECRETS_KEY, JSON.stringify(normalizeSecrets(secrets)))
+  } catch {
+    // Restricted or full session storage must not prevent saving to the OS vault.
+  }
 }
 
 let cachedSecrets = readSessionSecrets()
+let desktopSecretsLoaded = false
+let pendingSecretWrite = Promise.resolve()
 
 export function getCachedSecrets(): AppSecrets {
   return cachedSecrets
@@ -154,6 +160,8 @@ export function rememberSecrets(secrets: AppSecrets) {
 
 export function resetSecretStoreForTests() {
   cachedSecrets = emptySecrets()
+  desktopSecretsLoaded = false
+  pendingSecretWrite = Promise.resolve()
   const storage = getSessionStorage()
   storage?.removeItem(SESSION_SECRETS_KEY)
 }
@@ -169,23 +177,31 @@ function isDesktopSecretsRuntime() {
 
 export async function loadPersistedSecrets(): Promise<AppSecrets> {
   if (isDesktopSecretsRuntime()) {
-    try {
-      return normalizeSecrets(await window.imageStudioDesktop!.getSecrets!())
-    } catch {
-      return readSessionSecrets()
-    }
+    // Let the caller retain its pending edits and retry hydration on failure.
+    // A session fallback must not be mistaken for a successfully read vault.
+    const secrets = normalizeSecrets(await window.imageStudioDesktop!.getSecrets!())
+    desktopSecretsLoaded = true
+    return secrets
   }
   return readSessionSecrets()
 }
 
-export async function persistSecrets(secrets: AppSecrets): Promise<void> {
+export async function persistSecrets(secrets: AppSecrets): Promise<boolean> {
   const normalized = normalizeSecrets(secrets)
   rememberSecrets(normalized)
   writeSessionSecrets(normalized)
-  if (!isDesktopSecretsRuntime()) return
-  try {
-    await window.imageStudioDesktop!.setSecrets!(normalized)
-  } catch {
-    // Keep the in-memory and session copies even if OS storage is unavailable.
-  }
+  if (!isDesktopSecretsRuntime()) return true
+  // Never overwrite a vault that has not been read successfully. In particular,
+  // a failed IPC read must not turn an empty renderer snapshot into a vault reset.
+  if (!desktopSecretsLoaded) return false
+  const write = pendingSecretWrite.then(async () => {
+    try {
+      return (await window.imageStudioDesktop!.setSecrets!(normalized)) !== false
+    } catch {
+      // Keep the in-memory and session copies even if OS storage is unavailable.
+      return false
+    }
+  })
+  pendingSecretWrite = write.then(() => {})
+  return write
 }

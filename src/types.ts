@@ -200,6 +200,8 @@ export interface TaskRecord {
   customTaskId?: string
   /** 自定义异步任务是否等待自动恢复 */
   customRecoverable?: boolean
+  /** 本地查询暂停原因；远端 ID 与原账号身份保留，可继续查询而非重新生成。 */
+  recoveryPausedReason?: 'missing-profile' | 'missing-poll' | 'timeout'
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */
   actualParams?: Partial<TaskParams>
   /** 输出图片对应的实际生效参数，key 为 outputImages 中的图片 id */
@@ -607,6 +609,8 @@ export interface TaskImageEditContext {
   engine?: ImageEditorEngine
   sourceImageId: string
   visualGuideImageId?: string | null
+  /** 提交时标注内容的确定性指纹，用于判断草稿是否仍匹配历史重试。 */
+  annotationFingerprint?: string
   referenceImageIds: string[]
   userInstruction: string
 }

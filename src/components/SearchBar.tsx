@@ -8,7 +8,7 @@ import {
 } from '../lib/taskHistory'
 import type { HistoryAspectFilter, HistoryWorkflowFilter } from '../types'
 import Select from './Select'
-import { TrashIcon } from './icons'
+import { SearchIcon, TrashIcon } from './icons'
 
 export default function SearchBar() {
   const tasks = useStore((s) => s.tasks)
@@ -114,19 +114,19 @@ export default function SearchBar() {
   }, [clearLabel, filterProductTitle, filteredTasks, hasActiveFilters, productFilterActive, setConfirmDialog])
 
   return (
-    <div data-no-drag-select className="mt-6 mb-4 flex flex-col gap-2 lg:flex-row lg:items-center">
-      <div className="flex flex-wrap gap-2 flex-shrink-0 z-20">
+    <div data-no-drag-select className="ui-inset mt-5 mb-4 flex flex-col gap-2.5 p-3 lg:flex-row lg:items-center">
+      <div className="z-20 flex flex-shrink-0 flex-wrap gap-2">
         <button
           onClick={() => setFilterFavorite(!filterFavorite)}
-          className={`p-2.5 rounded-xl border transition-all ${
+          className={`flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] border transition-all ${
             filterFavorite
-              ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-500/10 text-yellow-500'
-              : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+              ? 'border-amber-400/70 bg-amber-500/15 text-amber-500 shadow-sm'
+              : 'border-[var(--line-strong)] bg-[var(--surface-solid)] text-[var(--text-3)] hover:text-[var(--text-1)]'
           }`}
           title={filterFavorite ? '取消只看收藏' : '只看收藏'}
         >
           <svg
-            className="w-5 h-5"
+            className="h-[18px] w-[18px]"
             fill={filterFavorite ? 'currentColor' : 'none'}
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -149,7 +149,7 @@ export default function SearchBar() {
               { label: '生成中', value: 'running' },
               { label: '失败', value: 'error' },
             ]}
-            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+            className="ui-input h-10 text-xs font-medium"
           />
         </div>
         <div className="relative w-40 sm:w-48">
@@ -157,7 +157,7 @@ export default function SearchBar() {
             value={filterProductTitle}
             onChange={(val) => setFilterProductTitle(String(val))}
             options={productOptions}
-            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+            className="ui-input h-10 text-xs font-medium"
           />
         </div>
         <div className="relative w-40 sm:w-44">
@@ -165,7 +165,7 @@ export default function SearchBar() {
             value={filterWorkflow}
             onChange={(val) => setFilterWorkflow(val as HistoryWorkflowFilter)}
             options={workflowOptions}
-            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+            className="ui-input h-10 text-xs font-medium"
           />
         </div>
         <div className="relative w-28">
@@ -178,30 +178,18 @@ export default function SearchBar() {
               { label: '横幅图', value: 'landscape' },
               { label: '竖图', value: 'portrait' },
             ]}
-            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+            className="ui-input h-10 text-xs font-medium"
           />
         </div>
       </div>
-      <div className="relative flex-1 z-10 min-w-[14rem]">
-        <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
+      <div className="relative z-10 min-w-[14rem] flex-1">
+        <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-3)]" />
         <input
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           type="text"
           placeholder="搜索提示词、参数..."
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+          className="ui-input h-10 pl-9"
         />
       </div>
       <button
@@ -209,11 +197,7 @@ export default function SearchBar() {
         onClick={handleClearHistory}
         disabled={!filteredTasks.length}
         title={filteredTasks.length ? `删除当前范围内的 ${filteredTasks.length} 条历史记录` : '没有可清空的记录'}
-        className={`inline-flex h-[42px] shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3 text-sm font-medium transition ${
-          filteredTasks.length
-            ? 'border-red-200 bg-white text-red-600 hover:bg-red-50 dark:border-red-400/20 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-400/10'
-            : 'cursor-not-allowed border-gray-100 bg-gray-100 text-gray-300 dark:border-white/[0.04] dark:bg-white/[0.04] dark:text-gray-600'
-        }`}
+        className="ui-btn ui-btn-danger-soft h-10 shrink-0"
       >
         <TrashIcon className="h-4 w-4" />
         <span className="whitespace-nowrap">{clearLabel}</span>

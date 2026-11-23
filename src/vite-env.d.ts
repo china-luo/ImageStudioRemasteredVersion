@@ -10,7 +10,9 @@ interface Window {
     readonly selectImageSaveDirectory?: () => Promise<boolean>
     readonly saveImageFile?: (file: { fileName: string; data: Uint8Array }) => Promise<string>
     readonly finishImageSave?: () => Promise<void>
+    readonly cancelFetch?: (requestId: string) => Promise<boolean>
     readonly fetch?: (payload: {
+      requestId: string
       url: string
       method?: string
       headers?: Record<string, string>

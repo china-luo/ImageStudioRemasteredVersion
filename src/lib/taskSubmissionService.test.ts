@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
-import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
+import { createDefaultOpenAIProfile, createDefaultVolcengineProfile, DEFAULT_SETTINGS } from './apiProfiles'
 import { createTaskSubmissionService } from './taskSubmissionService'
 
 function createState() {
@@ -14,6 +14,144 @@ function createState() {
     setPrompt: vi.fn(),
   }
 }
+
+function retryFixture(isCurrent?: () => boolean) {
+  const state = createState()
+  const seedream = createDefaultVolcengineProfile({ id: 'seedream-original', apiKey: 'seedream-key' })
+  state.settings.profiles.push(seedream)
+  const putTask = vi.fn(async (_task: TaskRecord) => undefined)
+  const executeTask = vi.fn()
+  const service = createTaskSubmissionService({
+    getState: () => state,
+    createId: () => 'retry',
+    isCurrent,
+    ensureImageCached: async () => null,
+    getImage: async () => undefined,
+    putImage: async () => undefined,
+    storeInputImage: async () => undefined,
+    cacheImage: () => undefined,
+    putTask,
+    executeTask,
+  })
+  const task: TaskRecord = {
+    id: 'original',
+    prompt: 'edit prompt',
+    params: { ...DEFAULT_PARAMS, size: '4K' },
+    apiProfileId: seedream.id,
+    apiProvider: seedream.provider,
+    apiMode: seedream.apiMode,
+    apiModel: seedream.model,
+    inputImageIds: ['source', 'guide', 'reference'],
+    maskImageId: 'mask',
+    maskTargetImageId: 'source',
+    outputImages: [],
+    status: 'error',
+    error: 'temporary',
+    createdAt: 1,
+    finishedAt: 2,
+    elapsed: 1,
+    category: { workflow: 'seedream-edit' },
+    imageEditContext: {
+      engine: 'seedream',
+      sourceImageId: 'source',
+      visualGuideImageId: 'guide',
+      referenceImageIds: ['reference'],
+      userInstruction: 'remove text',
+    },
+  }
+  return { state, seedream, task, putTask, executeTask, service }
+}
+
+it('不发布在落盘期间因清空而失效的重试任务', async () => {
+  let current = true
+  const { service, task, state, putTask, executeTask } = retryFixture(() => current)
+  let finish!: () => void
+  putTask.mockReturnValueOnce(
+    new Promise<undefined>((resolve) => {
+      finish = () => resolve(undefined)
+    }),
+  )
+  const result = service.retry(task)
+  expect(putTask).toHaveBeenCalledTimes(1)
+  current = false
+  finish()
+  await expect(result).resolves.toEqual({ status: 'cancelled' })
+  expect(state.setTasks).not.toHaveBeenCalled()
+  expect(executeTask).not.toHaveBeenCalled()
+})
+
+describe('editor retry configuration', () => {
+  it('keeps the original Seedream profile and complete edit context after switching the active profile', async () => {
+    const { service, task, putTask, seedream } = retryFixture()
+    await expect(service.retry(task)).resolves.toEqual({ status: 'submitted', taskId: 'retry' })
+    expect(putTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiProfileId: seedream.id,
+        apiProvider: 'volcengine',
+        apiModel: seedream.model,
+        params: expect.objectContaining({ size: '4K' }),
+        imageEditContext: task.imageEditContext,
+        inputImageIds: task.inputImageIds,
+        maskImageId: 'mask',
+        maskTargetImageId: 'source',
+      }),
+    )
+  })
+
+  it.each(['missing', 'wrong-provider', 'wrong-model', 'incomplete', 'missing-id'] as const)(
+    'rejects %s original editor configuration without dispatching or falling back',
+    async (reason) => {
+      const { service, state, task, seedream, putTask, executeTask } = retryFixture()
+      if (reason === 'missing') state.settings.profiles = [state.settings.profiles[0]]
+      if (reason === 'wrong-provider')
+        state.settings.profiles[1] = createDefaultOpenAIProfile({ id: seedream.id, apiKey: 'other-key' })
+      if (reason === 'wrong-model') state.settings.profiles[1] = { ...seedream, model: 'doubao-seedream-4-0-250828' }
+      if (reason === 'incomplete') state.settings.profiles[1] = { ...seedream, apiKey: '' }
+      if (reason === 'missing-id') task.apiProfileId = undefined
+      await expect(service.retry(task)).resolves.toMatchObject({
+        status: 'original-profile-error',
+        message: expect.any(String),
+      })
+      expect(putTask).not.toHaveBeenCalled()
+      expect(executeTask).not.toHaveBeenCalled()
+      expect(state.setTasks).not.toHaveBeenCalled()
+    },
+  )
+
+  it('keeps ordinary gallery retries on the current image configuration', async () => {
+    const { service, task, state, putTask } = retryFixture()
+    await service.retry({ ...task, category: { workflow: 'gallery' }, imageEditContext: undefined })
+    expect(putTask).toHaveBeenCalledWith(
+      expect.objectContaining({ apiProfileId: state.settings.activeProfileId, apiProvider: 'openai' }),
+    )
+  })
+
+  it('also pins home-engine editor retries to the original profile', async () => {
+    const { service, task, state, putTask, seedream } = retryFixture()
+    const original = state.settings.profiles[0]
+    state.settings.activeProfileId = seedream.id
+    await service.retry({
+      ...task,
+      apiProfileId: original.id,
+      apiProvider: original.provider,
+      imageEditContext: { ...task.imageEditContext!, engine: 'home' },
+    })
+    expect(putTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiProfileId: original.id,
+        imageEditContext: expect.objectContaining({ engine: 'home' }),
+      }),
+    )
+  })
+
+  it('pins legacy categorized editor tasks even without edit context', async () => {
+    const { service, task, putTask, seedream } = retryFixture()
+    await service.retry({ ...task, imageEditContext: undefined })
+    expect(putTask).toHaveBeenCalledWith(
+      expect.objectContaining({ apiProfileId: seedream.id, apiProvider: 'volcengine' }),
+    )
+  })
+})
 
 describe('task submission service', () => {
   it('rejects an empty editor prompt before accessing storage', async () => {
@@ -114,6 +252,55 @@ describe('task submission service', () => {
     expect(state.clearInputImages).toHaveBeenCalledOnce()
     expect(state.setPrompt).toHaveBeenCalledWith('')
   })
+
+  it.each(['editor', 'gallery'] as const)(
+    'retains concurrent task updates while %s images are stored',
+    async (mode) => {
+      const state = createState()
+      const running = { id: 'running', status: 'running', outputImages: [] } as unknown as TaskRecord
+      const done: TaskRecord = { ...running, status: 'done', outputImages: ['output'] }
+      const other = { ...running, id: 'new-task' }
+      let tasks = [running]
+      let finishImage!: () => void
+      const imageReady = new Promise<void>((resolve) => {
+        finishImage = resolve
+      })
+      const service = createTaskSubmissionService({
+        getState: () => ({
+          ...state,
+          tasks,
+          setTasks: (next) => {
+            tasks = next
+          },
+        }),
+        createId: () => 'submission',
+        ensureImageCached: async () => null,
+        getImage: async () => undefined,
+        putImage: () => imageReady,
+        storeInputImage: () => imageReady,
+        cacheImage: () => undefined,
+        putTask: async () => undefined,
+        executeTask: () => undefined,
+      })
+      const input = { prompt: 'edit image', inputImages: [{ id: 'input', dataUrl: 'image' }], params: DEFAULT_PARAMS }
+      const pending =
+        mode === 'editor'
+          ? service.submitWithInput({ ...input, apiProfileId: 'profile-1' })
+          : service.submitPrepared({
+              ...input,
+              profile: state.settings.profiles[0],
+              requestSettings: state.settings,
+              category: { workflow: 'gallery' },
+              maskTargetImageId: null,
+              maskImageId: null,
+              clearInputAfterSubmit: false,
+            })
+      tasks = [other, done]
+      finishImage()
+      await pending
+      expect(tasks).toEqual([expect.objectContaining({ id: 'submission' }), other, done])
+    },
+  )
 
   it('preserves project reference inputs and project/slot identity through submit and retry', async () => {
     const state = createState()

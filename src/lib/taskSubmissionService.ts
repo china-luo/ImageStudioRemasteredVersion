@@ -5,6 +5,7 @@ import {
   getActiveApiProfile,
   getImageGenerationProfile,
   getHomeApiProfile,
+  isVolcengineSeedreamProModel,
   normalizeSettings,
   validateApiProfile,
 } from './apiProfiles'
@@ -43,11 +44,15 @@ export interface TaskSubmissionServiceDependencies {
   cacheImage: (imageId: string, dataUrl: string) => void
   putTask: (task: TaskRecord) => Promise<unknown>
   executeTask: (taskId: string) => void
+  isCurrent?: () => boolean
   now?: () => number
 }
 
 export type RetryTaskResult =
-  { status: 'submitted'; taskId: string } | { status: 'unsupported-profile'; profile: ApiProfile }
+  | { status: 'submitted'; taskId: string }
+  | { status: 'cancelled' }
+  | { status: 'unsupported-profile'; profile: ApiProfile }
+  | { status: 'original-profile-error'; message: string }
 
 export interface PreparedTaskSubmissionOptions {
   profile: ApiProfile
@@ -64,6 +69,21 @@ export interface PreparedTaskSubmissionOptions {
 /** Creates editor-originated tasks without depending on Zustand, React, or the DOM. */
 export function createTaskSubmissionService(deps: TaskSubmissionServiceDependencies) {
   const now = deps.now ?? Date.now
+  const isCurrent = deps.isCurrent ?? (() => true)
+  const persistTask = async (task: TaskRecord) => {
+    if (!isCurrent()) return false
+    try {
+      await deps.putTask(task)
+    } catch (error) {
+      if (!isCurrent() || (error instanceof Error && error.name === 'AbortError')) return false
+      deps.getState().showToast('任务未能保存到本地，未提交生成。', 'error')
+      return false
+    }
+    if (!isCurrent()) return false
+    const state = deps.getState()
+    state.setTasks([task, ...state.tasks])
+    return true
+  }
 
   const submitWithInput = async (options: SubmitTaskWithInputOptions): Promise<string | null> => {
     const state = deps.getState()
@@ -102,16 +122,23 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
     const storedImages: InputImage[] = []
     try {
       for (const image of options.inputImages) {
+        if (!isCurrent()) return null
         const dataUrl = image.dataUrl || (await deps.ensureImageCached(image.id))
+        if (!isCurrent()) return null
         if (!dataUrl) throw new Error('输入图片已不存在')
-        if (!(await deps.getImage(image.id))) {
+        const storedImage = await deps.getImage(image.id)
+        if (!isCurrent()) return null
+        if (!storedImage) {
           await deps.putImage({ id: image.id, dataUrl, source: 'upload', createdAt: now() })
         }
+        if (!isCurrent()) return null
         deps.cacheImage(image.id, dataUrl)
         storedImages.push({ id: image.id, dataUrl })
       }
     } catch (error) {
-      state.showToast(error instanceof Error ? error.message : String(error), 'error')
+      if (isCurrent() && !(error instanceof Error && error.name === 'AbortError')) {
+        state.showToast(error instanceof Error ? error.message : String(error), 'error')
+      }
       return null
     }
 
@@ -137,8 +164,7 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
       category: options.category ?? { workflow: 'seedream-edit' },
       imageEditContext: options.imageEditContext,
     }
-    state.setTasks([task, ...state.tasks])
-    await deps.putTask(task)
+    if (!(await persistTask(task)) || !isCurrent()) return null
     state.showToast('任务已提交', 'success')
     deps.executeTask(taskId)
     return taskId
@@ -147,8 +173,32 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
   const retry = async (task: TaskRecord): Promise<RetryTaskResult> => {
     const state = deps.getState()
     const settings = normalizeSettings(state.settings)
-    const profile = getImageGenerationProfile(settings) ?? getActiveApiProfile(settings)
-    if (!canApiProfileGenerateImages(profile)) return { status: 'unsupported-profile', profile }
+    const isEditorTask = task.category?.workflow === 'seedream-edit' || Boolean(task.imageEditContext)
+    const profile = isEditorTask
+      ? settings.profiles.find((item) => item.id === task.apiProfileId)
+      : (getImageGenerationProfile(settings) ?? getActiveApiProfile(settings))
+    if (!profile) {
+      return {
+        status: 'original-profile-error',
+        message: '原编辑任务的 API 配置已不存在，请恢复原配置后重试，或在编辑器中重新提交。',
+      }
+    }
+    if (isEditorTask) {
+      const engine = task.imageEditContext?.engine ?? (task.apiProvider === 'volcengine' ? 'seedream' : 'home')
+      if (
+        !canApiProfileGenerateImages(profile) ||
+        (task.apiProvider != null && profile.provider !== task.apiProvider) ||
+        (engine === 'seedream' && (profile.provider !== 'volcengine' || !isVolcengineSeedreamProModel(profile.model)))
+      ) {
+        return {
+          status: 'original-profile-error',
+          message: `原编辑配置「${profile.name}」的类型或模型已不兼容，不能切换账号重试，请在编辑器中重新提交。`,
+        }
+      }
+      const profileError = validateApiProfile(profile)
+      if (profileError)
+        return { status: 'original-profile-error', message: `原编辑配置「${profile.name}」不完整：${profileError}` }
+    } else if (!canApiProfileGenerateImages(profile)) return { status: 'unsupported-profile', profile }
 
     const taskId = deps.createId()
     const retryTask: TaskRecord = {
@@ -172,16 +222,29 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
       finishedAt: null,
       elapsed: null,
       category: task.category,
+      imageEditContext: task.imageEditContext
+        ? { ...task.imageEditContext, referenceImageIds: [...task.imageEditContext.referenceImageIds] }
+        : undefined,
     }
-    state.setTasks([retryTask, ...state.tasks])
-    await deps.putTask(retryTask)
+    if (!(await persistTask(retryTask)) || !isCurrent()) return { status: 'cancelled' }
     deps.executeTask(taskId)
     return { status: 'submitted', taskId }
   }
 
   const submitPrepared = async (options: PreparedTaskSubmissionOptions): Promise<boolean> => {
     const state = deps.getState()
-    for (const image of options.inputImages) await deps.storeInputImage(image.dataUrl)
+    try {
+      for (const image of options.inputImages) {
+        if (!isCurrent()) return false
+        await deps.storeInputImage(image.dataUrl)
+      }
+    } catch (error) {
+      if (isCurrent() && !(error instanceof Error && error.name === 'AbortError')) {
+        state.showToast(error instanceof Error ? error.message : String(error), 'error')
+      }
+      return false
+    }
+    if (!isCurrent()) return false
     const normalizedParams = normalizeParamsForSettings(options.params, options.requestSettings, {
       hasInputImages: options.inputImages.length > 0,
     })
@@ -209,8 +272,7 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
       elapsed: null,
       category: options.category,
     }
-    state.setTasks([task, ...state.tasks])
-    await deps.putTask(task)
+    if (!(await persistTask(task)) || !isCurrent()) return false
     state.showToast('任务已提交', 'success')
     if (options.clearInputAfterSubmit && !options.category.projectId) {
       state.setPrompt?.('')

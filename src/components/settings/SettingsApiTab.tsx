@@ -473,7 +473,13 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
                       data-selectable-text
                       className="mt-1.5 min-h-[22px] flex items-center text-xs text-gray-500 dark:text-gray-500"
                     >
-                      {apiProxyEnabled ? (
+                      {activeCustomProvider ? (
+                        <span>
+                          {window.imageStudioDesktop?.isDesktop
+                            ? '桌面版使用内置网络通道；自定义接口仍须满足原生公共目标与接口路径策略。'
+                            : '仅向你授权的此 API URL 发送请求。未主动开启代理时，标准预设路径保留本地代理，其他自定义路径由浏览器直连（需服务商支持 CORS）。'}
+                        </span>
+                      ) : apiProxyEnabled ? (
                         apiProxyUsesDynamicTarget ? (
                           <span className="text-blue-600 dark:text-blue-400">
                             已开启代理，请求会通过本地服务转发到此 API URL。
@@ -527,14 +533,18 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
                       {!apiProxyAvailable
                         ? window.imageStudioDesktop?.isDesktop
                           ? '桌面版已使用内置网络通道，无需开启浏览器 API 代理。'
-                          : '当前页面未提供代理服务。请使用本地启动方式（npm run dev 或 npm run preview）或桌面版；已保存的代理偏好会保留。'
-                        : apiProxyUsesDynamicTarget
-                          ? apiProxyLocked
-                            ? '当前部署已锁定 API 代理为开启；API URL 仍可修改，代理会按该地址转发。'
-                            : '开启后通过同源代理访问上方 API URL，用于解决浏览器跨域限制。'
-                          : apiProxyLocked
-                            ? '当前部署已锁定 API 代理为开启，API URL 设置会被忽略。'
-                            : '当前部署提供同源代理时默认开启，可手动关闭。开启后用于解决浏览器跨域限制，API URL 设置会被忽略。'}
+                          : activeCustomProvider
+                            ? '当前没有可用的本地动态代理，自定义接口使用浏览器直连（需服务商支持 CORS）；不会使用部署端的固定 OpenAI 代理。'
+                            : '当前页面未提供代理服务。请使用本地启动方式（npm run dev 或 npm run preview）或桌面版；已保存的代理偏好会保留。'
+                        : activeCustomProvider
+                          ? '开启表示主动要求使用本地 API 代理；不支持的自定义路径会明确报错，不会自动切换通道或携带密钥重发。关闭后，非预设路径使用浏览器直连（需 CORS），标准路径仍保留默认代理。'
+                          : apiProxyUsesDynamicTarget
+                            ? apiProxyLocked
+                              ? '当前部署已锁定 API 代理为开启；API URL 仍可修改，代理会按该地址转发。'
+                              : '开启后通过同源代理访问上方 API URL，用于解决浏览器跨域限制。'
+                            : apiProxyLocked
+                              ? '当前部署已锁定 API 代理为开启，API URL 设置会被忽略。'
+                              : '当前部署提供同源代理时默认开启，可手动关闭。开启后用于解决浏览器跨域限制，API URL 设置会被忽略。'}
                     </div>
                   </div>
                 )}

@@ -14,6 +14,19 @@ describe('Electron IPC network guard', () => {
     expect(electronGuard.DEFAULT_PROXY_ALLOWED_HOSTS).toEqual(DEFAULT_PROXY_ALLOWED_HOSTS)
   })
 
+  it('still rejects unsupported custom POST paths even for an authorized public API host', () => {
+    expect(
+      electronGuard.evaluateDesktopFetchRequest({
+        origin: 'file://',
+        method: 'POST',
+        hostname: 'api.partner.example',
+        pathname: '/v1/jobs/submit',
+        protocol: 'https:',
+        extraAllowedHosts: ['api.partner.example'],
+      }),
+    ).toMatchObject({ ok: false, error: 'Forbidden API path' })
+  })
+
   it('blocks private POST targets and allows a user-configured API host', () => {
     expect(
       electronGuard.evaluateProxyRequest({

@@ -30,17 +30,17 @@ try {
 
   Assert-CommandAvailable `
     -Name 'node' `
-    -InstallMessage 'Node.js was not found. Please install Node.js 20 LTS or newer first.'
+    -InstallMessage 'Node.js was not found. Please install Node.js 24 LTS or newer first.'
 
   Assert-CommandAvailable `
     -Name 'npm' `
-    -InstallMessage 'npm was not found. Please install Node.js 20 LTS or newer first.'
+    -InstallMessage 'npm was not found. Please install Node.js 24 LTS or newer first.'
 
   $nodeVersionText = (& node --version).Trim()
   $nodeVersion = [Version]($nodeVersionText.TrimStart('v'))
 
-  if ($nodeVersion.Major -lt 20) {
-    throw "Node.js 20 LTS or newer is required. Current version: $nodeVersionText."
+  if ($nodeVersion.Major -lt 24) {
+    throw "Node.js 24 LTS or newer is required. Current version: $nodeVersionText."
   }
 
   $lockFile = Join-Path $project 'package-lock.json'

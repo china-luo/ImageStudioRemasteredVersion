@@ -167,7 +167,7 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
 
       {isOpen && (
         <div
-          className={`absolute z-50 w-full overflow-hidden overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 custom-scrollbar ${
+          className={`ui-menu custom-scrollbar absolute z-50 w-full overflow-hidden overflow-y-auto ${
             placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'
           }`}
           style={{ maxHeight: menuMaxHeight }}
@@ -337,16 +337,16 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 onChange(option.value)
                 setIsOpen(false)
               }}
-              className={`relative flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${
+              className={`relative flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-xs transition-colors ${
                 draggedValue === option.value
-                  ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]'
+                  ? 'bg-[var(--surface-inset)] opacity-40'
                   : option.variant === 'action'
-                    ? 'font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10'
+                    ? 'font-semibold text-[var(--accent)] hover:bg-[var(--accent-soft)]'
                     : option.variant === 'danger'
-                      ? 'font-semibold text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
+                      ? 'font-semibold text-red-500 hover:bg-red-500/10 dark:text-red-400'
                       : option.value === value
-                        ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                        ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent)]'
+                        : 'text-[var(--text-1)] hover:bg-[var(--surface-hover)]'
               }`}
             >
               {dragOverValue === option.value && dragDropPosition === 'before' && draggedValue !== option.value && (

@@ -5,6 +5,7 @@ import {
   canSelectProjectFinal,
   collectProjectImageIds,
   createGenerationProject,
+  createProjectId,
   persistableProjectWorkspace,
   projectFinalEntries,
   projectSlotId,
@@ -39,6 +40,21 @@ const task = (projectId: string, overrides: Partial<TaskRecord> = {}): TaskRecor
 
 describe('generation projects', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('uses the native UUID API when available', () => {
+    const randomUUID = vi.fn(() => 'native-project-id')
+    vi.stubGlobal('crypto', { randomUUID })
+    expect(createProjectId()).toBe('native-project-id')
+    expect(randomUUID).toHaveBeenCalledOnce()
+  })
+
+  it('creates independent project and writer UUIDs without secure-context APIs', () => {
+    const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto)
+    vi.stubGlobal('crypto', { getRandomValues })
+    const ids = [createProjectId(), createGenerationProject().id, createGenerationProject().id]
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const id of ids) expect(id).toMatch(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/)
+  })
 
   it('restores the desktop project after a new session and clears it on reset', () => {
     const durable = new Map<string, string>(),

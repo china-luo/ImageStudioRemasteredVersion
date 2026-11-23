@@ -1,5 +1,6 @@
 import type { ApiProfile, TaskParams } from '../types'
 import { getAliyunQwenImageModel } from './apiProfiles'
+import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import {
   assertImageInputPayloadSize,
   createLinkedAbortController,
@@ -261,24 +262,33 @@ export async function callAliyunQwenImageApi(opts: CallApiOptions, profile: ApiP
     opts.inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlEncodedByteSize(dataUrl), 0),
   )
 
+  const endpoint = createAliyunQwenImageEndpoint(profile.baseUrl)
+  const nativeBaseUrl = endpoint.slice(0, -NATIVE_GENERATION_PATH.length)
+  const proxyConfig = readClientDevProxyConfig()
+  // Docker's fixed proxy only supports OpenAI-compatible routes; native Qwen
+  // needs the local target-aware proxy to preserve its /api/v1 base path.
+  const useApiProxy = Boolean(proxyConfig?.enabled) && shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
   const abortController = createLinkedAbortController(profile.timeout, opts.signal)
   const controller = abortController.controller
 
   try {
-    const response = await fetch(createAliyunQwenImageEndpoint(profile.baseUrl), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${profile.apiKey}`,
-        'Content-Type': 'application/json',
+    const response = await fetch(
+      buildApiUrl(nativeBaseUrl, NATIVE_GENERATION_PATH, proxyConfig, useApiProxy, { prefixV1: false }),
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${profile.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        body: JSON.stringify(createAliyunQwenImageRequestBody(opts, profile)),
+        signal: controller.signal,
       },
-      cache: 'no-store',
-      body: JSON.stringify(createAliyunQwenImageRequestBody(opts, profile)),
-      signal: controller.signal,
-    })
+    )
 
     if (!response.ok) throw new Error(await getApiErrorMessage(response))
 
-    return parseAliyunQwenImageResponse(await response.json(), opts.params, controller.signal)
+    return await parseAliyunQwenImageResponse(await response.json(), opts.params, controller.signal)
   } finally {
     abortController.cleanup()
   }

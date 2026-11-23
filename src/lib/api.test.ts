@@ -1,12 +1,41 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PARAMS } from '../types'
-import { DEFAULT_SETTINGS } from './apiProfiles'
+import { DEFAULT_PARAMS, type CustomProviderDefinition } from '../types'
+import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
+import { callOpenAICompatibleImageApi, getCustomQueuedImageResult } from './openaiCompatibleImageApi'
+import { callAliyunQwenImageApi } from './aliyunQwenImageApi'
+import { callVolcengineImageApi } from './volcengineImageApi'
+import * as devProxy from './devProxy'
 
 const RESOLUTION_REQUIREMENT_1024 =
   'Technical output requirement (not visible text): expected image resolution 1024x1024 px.'
 const RESOLUTION_REQUIREMENT_2048 =
   'Technical output requirement (not visible text): expected image resolution 2048x2048 px.'
+
+const CUSTOM_ASYNC_PROVIDER: CustomProviderDefinition = {
+  id: 'custom-async',
+  name: 'Custom Async',
+  template: 'http-image',
+  submit: {
+    path: 'images/generations',
+    method: 'POST',
+    query: { async: 'true' },
+    body: { prompt: '$prompt' },
+    taskIdPath: 'task_id',
+  },
+  poll: {
+    path: 'images/tasks/{task_id}',
+    intervalSeconds: 1,
+    statusPath: 'status',
+    successValues: ['SUCCESS'],
+    failureValues: ['FAILURE'],
+    result: { imageUrlPaths: ['url'], b64JsonPaths: ['b64_json'] },
+  },
+}
+
+function jsonResponse(payload: unknown): Response {
+  return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
+}
 
 describe('callImageApi', () => {
   afterEach(() => {
@@ -821,6 +850,325 @@ describe('callImageApi', () => {
       images: ['data:image/jpeg;base64,aW1hZ2U='],
     })
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it.each(['enabled', 'locked', 'local', 'configured', 'disabled', 'unavailable'] as const)(
+    'uses a local proxy for custom submit/poll without regressing fixed Docker deployments (%s)',
+    async (mode) => {
+      vi.stubEnv('VITE_API_PROXY_AVAILABLE', mode === 'unavailable' ? 'false' : 'true')
+      vi.stubEnv('VITE_API_PROXY_LOCKED', mode === 'locked' ? 'true' : 'false')
+      vi.spyOn(devProxy, 'readClientDevProxyConfig').mockReturnValue(
+        mode === 'local' || mode === 'configured' || mode === 'disabled'
+          ? {
+              enabled: mode !== 'disabled',
+              prefix: '/api-proxy',
+              target: mode === 'local' ? devProxy.LOCAL_DYNAMIC_PROXY_TARGET : 'https://api.example.com/v1',
+              changeOrigin: true,
+              secure: true,
+            }
+          : null,
+      )
+      const profile = createDefaultOpenAIProfile({
+        apiKey: 'test-key',
+        baseUrl: 'https://api.example.com/v1',
+        apiProxy: mode === 'enabled' || mode === 'unavailable',
+      })
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(jsonResponse({ task_id: 'task-1' }))
+        .mockImplementation(async () => jsonResponse({ status: 'SUCCESS', b64_json: 'aW1hZ2U=' }))
+
+      await callOpenAICompatibleImageApi(
+        {
+          settings: DEFAULT_SETTINGS,
+          prompt: 'prompt',
+          params: { ...DEFAULT_PARAMS },
+          inputImageDataUrls: [],
+        },
+        profile,
+        CUSTOM_ASYNC_PROVIDER,
+      )
+      // Recovered tasks use the same policy as freshly submitted tasks.
+      await getCustomQueuedImageResult(profile, CUSTOM_ASYNC_PROVIDER, 'task-1', DEFAULT_PARAMS)
+
+      // Runtime available/locked flags alone describe Docker's fixed OpenAI proxy,
+      // which must not receive custom/native endpoints it would reject.
+      const base =
+        mode === 'local' || mode === 'configured'
+          ? `/api-proxy/${encodeURIComponent(profile.baseUrl)}`
+          : profile.baseUrl
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        `${base}/images/generations?async=true`,
+        `${base}/images/tasks/task-1`,
+        `${base}/images/tasks/task-1`,
+      ])
+    },
+  )
+
+  it.each([
+    ['jobs/submit', 'jobs/{task_id}', false, false],
+    ['images/generations', 'jobs/{task_id}', true, false],
+    ['jobs/submit', 'images/tasks/{task_id}', false, true],
+  ] as const)(
+    'routes custom submit %s and poll %s independently without forcing unsupported paths through the local proxy',
+    async (submitPath, pollPath, submitProxied, pollProxied) => {
+      vi.spyOn(devProxy, 'readClientDevProxyConfig').mockReturnValue({
+        enabled: true,
+        prefix: '/api-proxy',
+        target: devProxy.LOCAL_DYNAMIC_PROXY_TARGET,
+        changeOrigin: true,
+        secure: true,
+      })
+      const profile = createDefaultOpenAIProfile({
+        apiKey: 'test-key',
+        baseUrl: 'https://api.example.com/v1',
+        apiProxy: false,
+      })
+      const provider: CustomProviderDefinition = {
+        ...CUSTOM_ASYNC_PROVIDER,
+        submit: { ...CUSTOM_ASYNC_PROVIDER.submit, path: submitPath },
+        poll: { ...CUSTOM_ASYNC_PROVIDER.poll!, path: pollPath },
+      }
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(jsonResponse({ task_id: 'task-1' }))
+        .mockImplementation(async () => jsonResponse({ status: 'SUCCESS', b64_json: 'aW1hZ2U=' }))
+      await callOpenAICompatibleImageApi(
+        { settings: DEFAULT_SETTINGS, prompt: 'prompt', params: { ...DEFAULT_PARAMS }, inputImageDataUrls: [] },
+        profile,
+        provider,
+      )
+      await getCustomQueuedImageResult(profile, provider, 'task-1', DEFAULT_PARAMS)
+      const proxyBase = `/api-proxy/${encodeURIComponent(profile.baseUrl)}`
+      const submitBase = submitProxied ? proxyBase : profile.baseUrl
+      const pollBase = pollProxied ? proxyBase : profile.baseUrl
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        `${submitBase}/${submitPath}?async=true`,
+        `${pollBase}/${pollPath.replace('{task_id}', 'task-1')}`,
+        `${pollBase}/${pollPath.replace('{task_id}', 'task-1')}`,
+      ])
+      expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ Authorization: 'Bearer test-key' })
+    },
+  )
+
+  it.each(['submit', 'poll'] as const)(
+    'rejects unsupported custom %s before sending when the user explicitly enables the local proxy',
+    async (phase) => {
+      vi.spyOn(devProxy, 'readClientDevProxyConfig').mockReturnValue({
+        enabled: true,
+        prefix: '/api-proxy',
+        target: devProxy.LOCAL_DYNAMIC_PROXY_TARGET,
+        changeOrigin: true,
+        secure: true,
+      })
+      const profile = createDefaultOpenAIProfile({
+        apiKey: 'test-key',
+        baseUrl: 'https://api.example.com/v1',
+        apiProxy: true,
+      })
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('must not send'))
+      const provider: CustomProviderDefinition = {
+        ...CUSTOM_ASYNC_PROVIDER,
+        submit: { ...CUSTOM_ASYNC_PROVIDER.submit, path: 'jobs/submit' },
+        poll: { ...CUSTOM_ASYNC_PROVIDER.poll!, path: 'jobs/{task_id}' },
+      }
+      const request =
+        phase === 'submit'
+          ? callOpenAICompatibleImageApi(
+              { settings: DEFAULT_SETTINGS, prompt: 'prompt', params: { ...DEFAULT_PARAMS }, inputImageDataUrls: [] },
+              profile,
+              provider,
+            )
+          : getCustomQueuedImageResult(profile, provider, 'task-1', DEFAULT_PARAMS)
+      await expect(request).rejects.toThrow('本地 API 代理不支持此自定义接口路径')
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('does not resend a direct custom request through the proxy after a browser CORS/network failure', async () => {
+    vi.spyOn(devProxy, 'readClientDevProxyConfig').mockReturnValue({
+      enabled: true,
+      prefix: '/api-proxy',
+      target: devProxy.LOCAL_DYNAMIC_PROXY_TARGET,
+      changeOrigin: true,
+      secure: true,
+    })
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.example.com/v1',
+      apiProxy: false,
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+    await expect(
+      callOpenAICompatibleImageApi(
+        { settings: DEFAULT_SETTINGS, prompt: 'prompt', params: { ...DEFAULT_PARAMS }, inputImageDataUrls: [] },
+        profile,
+        { ...CUSTOM_ASYNC_PROVIDER, submit: { ...CUSTOM_ASYNC_PROVIDER.submit, path: 'jobs/submit' } },
+      ),
+    ).rejects.toThrow()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.com/v1/jobs/submit?async=true')
+  })
+
+  it('stops custom polling at its independent overall deadline while preserving cancellability', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ status: 'PENDING' }))
+    const promise = getCustomQueuedImageResult(
+      createDefaultOpenAIProfile({ apiKey: 'key', timeout: 1 }),
+      CUSTOM_ASYNC_PROVIDER,
+      'remote-1',
+      DEFAULT_PARAMS,
+    )
+    const rejected = expect(promise).rejects.toMatchObject({ name: 'TimeoutError' })
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
+    await rejected
+    const calls = fetchMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fetchMock).toHaveBeenCalledTimes(calls)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('aborts a hung custom poll request at its single-round deadline and keeps the overall scope cancellable', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const signals: AbortSignal[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      signals.push(init!.signal as AbortSignal)
+      return new Promise(() => undefined)
+    })
+    const promise = getCustomQueuedImageResult(
+      createDefaultOpenAIProfile({ apiKey: 'key', timeout: 1 }),
+      CUSTOM_ASYNC_PROVIDER,
+      'remote-1',
+      DEFAULT_PARAMS,
+      controller.signal,
+    )
+    const rejected = expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(signals[0].aborted).toBe(true)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(signals).toHaveLength(2)
+    controller.abort()
+    await rejected
+    expect(signals[1].aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['request', 'interval', 'download'] as const)(
+    'keeps custom polling cancellable during a poll %s',
+    async (phase) => {
+      vi.useFakeTimers()
+      const controller = new AbortController()
+      const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+      let pollSignal: AbortSignal | undefined
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(jsonResponse({ task_id: 'task-1' }))
+        .mockImplementation(async (input, init) => {
+          pollSignal = init?.signal as AbortSignal
+          if (phase === 'interval') return jsonResponse({ status: 'PENDING' })
+          if (phase === 'download' && String(input).includes('/images/tasks/')) {
+            return jsonResponse({ status: 'SUCCESS', url: 'https://images.example.com/result.png' })
+          }
+          return new Promise<Response>((_resolve, reject) => {
+            pollSignal?.addEventListener('abort', () => reject(pollSignal?.reason), { once: true })
+          })
+        })
+      const promise = callOpenAICompatibleImageApi(
+        {
+          settings: DEFAULT_SETTINGS,
+          prompt: 'prompt',
+          params: { ...DEFAULT_PARAMS },
+          inputImageDataUrls: [],
+          signal: controller.signal,
+        },
+        createDefaultOpenAIProfile({ apiKey: 'test-key', timeout: 1 }),
+        CUSTOM_ASYNC_PROVIDER,
+      )
+      const rejected = expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+      const expectedCalls = phase === 'download' ? 3 : 2
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(expectedCalls))
+      await vi.advanceTimersByTimeAsync(100)
+      expect(removeListener).not.toHaveBeenCalled()
+
+      controller.abort(new DOMException('用户停止', 'AbortError'))
+      await rejected
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(pollSignal?.aborted).toBe(true)
+      expect(fetchMock).toHaveBeenCalledTimes(expectedCalls)
+      expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  it.each([
+    ['openai', 'timeout'],
+    ['openai', 'caller'],
+    ['openrouter', 'timeout'],
+    ['openrouter', 'caller'],
+    ['custom', 'timeout'],
+    ['custom', 'caller'],
+    ['qwen', 'timeout'],
+    ['qwen', 'caller'],
+    ['volcengine', 'timeout'],
+    ['volcengine', 'caller'],
+  ] as const)('keeps %s result image downloads cancellable by %s', async (provider, cancellation) => {
+    vi.useFakeTimers()
+    const resultUrl = 'https://images.example.com/result.png'
+    const payload =
+      provider === 'openrouter'
+        ? { choices: [{ message: { images: [{ image_url: { url: resultUrl } }] } }] }
+        : provider === 'qwen'
+          ? { output: { choices: [{ message: { content: [{ image: resultUrl }] } }] } }
+          : provider === 'custom'
+            ? { url: resultUrl }
+            : { data: [{ url: resultUrl }] }
+    const controller = new AbortController()
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+    let downloadSignal: AbortSignal | undefined
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse(payload))
+      .mockImplementation(async (_input, init) => {
+        downloadSignal = init?.signal as AbortSignal
+        return new Promise<Response>((_resolve, reject) => {
+          downloadSignal?.addEventListener('abort', () => reject(downloadSignal?.reason), { once: true })
+        })
+      })
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      timeout: 1,
+      ...(provider === 'openrouter'
+        ? { baseUrl: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.5-flash-image' }
+        : {}),
+    })
+    const opts = {
+      settings: DEFAULT_SETTINGS,
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+      signal: controller.signal,
+    }
+    const customProvider: CustomProviderDefinition = {
+      ...CUSTOM_ASYNC_PROVIDER,
+      submit: { path: 'images/generations', result: { imageUrlPaths: ['url'] } },
+    }
+    const promise =
+      provider === 'qwen'
+        ? callAliyunQwenImageApi(opts, profile)
+        : provider === 'volcengine'
+          ? callVolcengineImageApi(opts, profile)
+          : callOpenAICompatibleImageApi(opts, profile, provider === 'custom' ? customProvider : undefined)
+    const rejected = expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(removeListener).not.toHaveBeenCalled()
+    if (cancellation === 'caller') controller.abort(new DOMException('用户停止', 'AbortError'))
+    else await vi.advanceTimersByTimeAsync(1000)
+    await rejected
+    expect(downloadSignal?.aborted).toBe(true)
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('does not apply submit timeout to custom async polling after receiving a task id', async () => {

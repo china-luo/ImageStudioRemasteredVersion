@@ -14,7 +14,7 @@ jobs:
         env:
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
         run: |
-          curl -X POST "$VERCEL_DEPLOY_HOOK"
+          curl --fail-with-body --silent --show-error -X POST "$VERCEL_DEPLOY_HOOK"
           echo "Vercel deploy hook triggered."
       - name: Skip if Hook URL is missing
         if: ${{ env.VERCEL_DEPLOY_HOOK == '' }}

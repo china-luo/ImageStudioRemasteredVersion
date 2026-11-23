@@ -9,7 +9,7 @@ import {
   type TaskParams,
 } from '../types'
 import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob } from './canvasImage'
-import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
+import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy, shouldUseCustomProviderApiProxy } from './devProxy'
 import { isOpenRouterImageGenerationProfile } from './apiProfiles'
 import {
   assertImageInputPayloadSize,
@@ -28,6 +28,13 @@ import {
   normalizeBase64Image,
   pickActualParams,
 } from './imageApiShared'
+
+import {
+  ASYNC_POLL_TIMEOUT_SECONDS,
+  ASYNC_POLL_REQUEST_TIMEOUT_SECONDS,
+  awaitTaskWork,
+  createPollingTimeoutError,
+} from './taskRecovery'
 
 const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
 const OPENROUTER_MODALITY_RETRY_RE = /modalit|unsupported.*text|text.*unsupported/i
@@ -576,7 +583,7 @@ async function callOpenRouterChatImageApiSingle(
       throw new Error(message)
     }
 
-    return parseOpenRouterChatImageResponse(
+    return await parseOpenRouterChatImageResponse(
       (await response.json()) as OpenRouterChatCompletionResponse,
       mime,
       controller.signal,
@@ -698,7 +705,7 @@ async function callImagesApiSingle(
       throw new Error(await getApiErrorMessage(response))
     }
 
-    return parseImagesApiResponse((await response.json()) as ImageApiResponse, mime, controller.signal)
+    return await parseImagesApiResponse((await response.json()) as ImageApiResponse, mime, controller.signal)
   } finally {
     abortController.cleanup()
   }
@@ -710,15 +717,15 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       reject(new DOMException('Aborted', 'AbortError'))
       return
     }
-    const timer = setTimeout(resolve, ms)
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer)
-        reject(new DOMException('Aborted', 'AbortError'))
-      },
-      { once: true },
-    )
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -883,6 +890,7 @@ async function submitCustomRequest(
   controller: AbortController,
 ): Promise<unknown> {
   const proxyConfig = readClientDevProxyConfig()
+  const useApiProxy = shouldUseCustomProviderApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl, mapping.path)
   const requestHeaders = createRequestHeaders(profile)
   const context = createCustomProviderContext(opts, profile)
   const method = mapping.method ?? 'POST'
@@ -912,7 +920,7 @@ async function submitCustomRequest(
     }
   }
 
-  const response = await fetch(buildApiUrl(profile.baseUrl, path, proxyConfig, false), {
+  const response = await fetch(buildApiUrl(profile.baseUrl, path, proxyConfig, useApiProxy), {
     method,
     headers,
     cache: 'no-store',
@@ -931,57 +939,99 @@ async function pollCustomTaskResult(
   mime: string,
   signal?: AbortSignal,
 ): Promise<CallApiResult> {
+  const scope = createLinkedAbortController(ASYNC_POLL_TIMEOUT_SECONDS, signal)
+  try {
+    return await awaitTaskWork(
+      pollCustomTaskWithinDeadline(profile, poll, taskId, mime, scope.controller.signal),
+      scope.controller.signal,
+    )
+  } catch (error) {
+    if (!signal?.aborted && scope.controller.signal.aborted) throw createPollingTimeoutError()
+    throw error
+  } finally {
+    scope.cleanup()
+  }
+}
+
+async function pollCustomTaskWithinDeadline(
+  profile: ApiProfile,
+  poll: CustomProviderPollMapping,
+  taskId: string,
+  mime: string,
+  signal: AbortSignal,
+): Promise<CallApiResult> {
   const proxyConfig = readClientDevProxyConfig()
+  const useApiProxy = shouldUseCustomProviderApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl, poll.path)
   const requestHeaders = createRequestHeaders(profile)
   let isFirstPoll = true
+  let previousRound: ReturnType<typeof createLinkedAbortController> | undefined
 
-  while (true) {
-    if (isFirstPoll) {
-      isFirstPoll = false
-    } else if (signal) {
-      await sleep((poll.intervalSeconds ?? 5) * 1000, signal)
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, (poll.intervalSeconds ?? 5) * 1000))
-    }
-
-    const taskPath = appendQuery(buildTaskPath(poll.path, taskId), poll.query)
-    let taskPayload: unknown
-    try {
-      const taskResponse = await fetch(buildApiUrl(profile.baseUrl, taskPath, proxyConfig, false), {
-        method: poll.method ?? 'GET',
-        headers: requestHeaders,
-        cache: 'no-store',
-        signal,
-      })
-
-      if (!taskResponse.ok) {
-        if (isRetryablePollingStatus(taskResponse.status)) continue
-        throw new Error(await getApiErrorMessage(taskResponse))
+  try {
+    while (true) {
+      signal.throwIfAborted()
+      if (isFirstPoll) {
+        isFirstPoll = false
+      } else {
+        await sleep((poll.intervalSeconds ?? 5) * 1000, signal)
       }
 
-      taskPayload = await taskResponse.json()
-    } catch (err) {
-      if (!signal?.aborted && isRecoverablePollingError(err)) continue
-      throw err
-    }
-
-    const state = getTaskState(taskPayload, poll)
-    if (state === 'failure') {
-      const message =
-        getByPath(taskPayload, poll.errorPath) ||
-        getByPath(taskPayload, 'message') ||
-        getByPath(taskPayload, 'data.fail_reason') ||
-        getByPath(taskPayload, 'error.message')
-      throw new Error(typeof message === 'string' && message.trim() ? message : '异步任务失败')
-    }
-    if (state === 'success') {
+      previousRound?.cleanup()
+      const round = createLinkedAbortController(ASYNC_POLL_REQUEST_TIMEOUT_SECONDS, signal)
+      previousRound = round
+      const taskPath = appendQuery(buildTaskPath(poll.path, taskId), poll.query)
+      let taskPayload: unknown
       try {
-        return await extractCustomImages(taskPayload, poll.result, mime, signal)
+        taskPayload = await awaitTaskWork(
+          (async () => {
+            const taskResponse = await fetch(buildApiUrl(profile.baseUrl, taskPath, proxyConfig, useApiProxy), {
+              method: poll.method ?? 'GET',
+              headers: requestHeaders,
+              cache: 'no-store',
+              signal: round.controller.signal,
+            })
+            if (!taskResponse.ok) {
+              if (isRetryablePollingStatus(taskResponse.status)) return null
+              throw new Error(await getApiErrorMessage(taskResponse))
+            }
+            return taskResponse.json()
+          })(),
+          round.controller.signal,
+        )
+        if (taskPayload === null) continue
       } catch (err) {
-        if (!signal?.aborted && isRecoverablePollingError(err)) continue
+        if (!signal.aborted && isRecoverablePollingError(err)) continue
         throw err
+      } finally {
+        // Keep the completed round linked during the interval, but stop its request timer.
+        round.clearTimeout()
+      }
+
+      const state = getTaskState(taskPayload, poll)
+      if (state === 'failure') {
+        const message =
+          getByPath(taskPayload, poll.errorPath) ||
+          getByPath(taskPayload, 'message') ||
+          getByPath(taskPayload, 'data.fail_reason') ||
+          getByPath(taskPayload, 'error.message')
+        throw new Error(typeof message === 'string' && message.trim() ? message : '异步任务失败')
+      }
+      if (state === 'success') {
+        const download = createLinkedAbortController(ASYNC_POLL_REQUEST_TIMEOUT_SECONDS, signal)
+        try {
+          return await awaitTaskWork(
+            extractCustomImages(taskPayload, poll.result, mime, download.controller.signal),
+            download.controller.signal,
+          )
+        } catch (err) {
+          if (!signal.aborted && isRecoverablePollingError(err)) continue
+          throw err
+        } finally {
+          download.cleanup()
+        }
       }
     }
+  } finally {
+    previousRound?.cleanup()
   }
 }
 
@@ -990,10 +1040,11 @@ export async function getCustomQueuedImageResult(
   customProvider: CustomProviderDefinition,
   taskId: string,
   params: TaskParams,
+  signal?: AbortSignal,
 ): Promise<CallApiResult> {
   if (!customProvider.poll) throw new Error('自定义异步任务缺少 poll 配置')
   const mime = MIME_MAP[params.output_format] || 'image/png'
-  return pollCustomTaskResult(profile, customProvider.poll, taskId, mime)
+  return pollCustomTaskResult(profile, customProvider.poll, taskId, mime, signal)
 }
 
 async function callCustomHttpImageApi(
@@ -1020,14 +1071,15 @@ async function callCustomHttpImageApi(
       ;(err as Error & ApiErrorMetadata).rawResponsePayload = JSON.stringify(submitPayload, null, 2)
       throw err
     }
-    if (!taskId) return extractCustomImages(submitPayload, submitMapping.result ?? {}, mime, controller.signal)
-    if (!customProvider.poll) throw new Error('异步接口返回了 task_id，但服务商配置缺少 poll')
+    if (!taskId) return await extractCustomImages(submitPayload, submitMapping.result ?? {}, mime, controller.signal)
     opts.onCustomTaskEnqueued?.({ taskId })
+    if (!customProvider.poll) throw new Error('异步接口返回了 task_id，但服务商配置缺少 poll')
     if (submitTimeoutActive) {
       abortController.clearTimeout()
       submitTimeoutActive = false
     }
-    return pollCustomTaskResult(profile, customProvider.poll, taskId, mime, controller.signal)
+    // Keep the caller's abort listener linked until polling and result downloads finish.
+    return await pollCustomTaskResult(profile, customProvider.poll, taskId, mime, controller.signal)
   } finally {
     abortController.cleanup()
   }

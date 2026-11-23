@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PARAMS, type TaskRecord } from '../types'
+import { DEFAULT_PARAMS, type SeedreamEditorDraft, type TaskRecord } from '../types'
 import {
   appendSeedreamQuickAction,
   buildSeedreamEditPrompt,
@@ -7,6 +7,8 @@ import {
   createSeedreamEditorParams,
   findLatestImageEditorTask,
   findSeedreamAnnotationAtPoint,
+  getSeedreamAnnotationFingerprint,
+  shouldFollowImageEditorRetry,
   translateSeedreamAnnotation,
 } from './seedreamEditor'
 
@@ -98,6 +100,97 @@ describe('Seedream editor params', () => {
   it('adds quick actions without overwriting the existing requirement', () => {
     expect(appendSeedreamQuickAction('保留产品', '改色')).toBe('保留产品；改色：')
     expect(appendSeedreamQuickAction('', '删除')).toBe('删除：')
+  })
+})
+
+describe('editor retry result selection', () => {
+  const task = editorTask({})
+  const draft: SeedreamEditorDraft = {
+    engine: 'home',
+    sourceImageId: 'source',
+    referenceImageIds: [],
+    instruction: 'edit image',
+    annotations: [],
+    resolution: '2k',
+    latestTaskId: task.id,
+    updatedAt: 1,
+  }
+
+  it('follows the retry instead of leaving the editor pinned to the failed task', () => {
+    expect(shouldFollowImageEditorRetry(task, draft)).toBe(true)
+    const retry = editorTask({ id: 'retry', createdAt: 3 })
+    expect(findLatestImageEditorTask([retry, task], draft.engine, retry.id)?.id).toBe('retry')
+  })
+
+  const annotation: SeedreamEditorDraft['annotations'][number] = {
+    id: 'arrow-1',
+    kind: 'arrow',
+    color: '#ef4444',
+    width: 0.006,
+    points: [
+      { x: 0.1, y: 0.2 },
+      { x: 0.7, y: 0.8 },
+    ],
+  }
+  const annotatedTask = editorTask({
+    status: 'error',
+    imageEditContext: {
+      ...task.imageEditContext!,
+      visualGuideImageId: 'old-guide',
+      annotationFingerprint: getSeedreamAnnotationFingerprint([annotation]),
+    },
+  })
+
+  it('标注内容未变时继续跟随失败任务的重试，忽略临时 ID 和对象字段顺序', () => {
+    const copied = {
+      points: annotation.points.map(({ x, y }) => ({ y, x })),
+      width: annotation.width,
+      color: annotation.color,
+      kind: annotation.kind,
+      id: 'restored-id',
+    }
+    expect(getSeedreamAnnotationFingerprint([copied])).toBe(getSeedreamAnnotationFingerprint([annotation]))
+    expect(shouldFollowImageEditorRetry(annotatedTask, { ...draft, annotations: [copied] })).toBe(true)
+  })
+
+  it.each([
+    [],
+    [annotation, { ...annotation, id: 'another' }],
+    [{ ...annotation, kind: 'rectangle' as const }],
+    [{ ...annotation, color: '#2563eb' }],
+    [{ ...annotation, width: 0.012 }],
+    [translateSeedreamAnnotation(annotation, { x: 0.1, y: 0 })],
+  ])('删除、添加或修改标注后不跟随使用旧视觉定位图的重试（%j）', (...annotations) => {
+    expect(shouldFollowImageEditorRetry(annotatedTask, { ...draft, annotations })).toBe(false)
+  })
+
+  it('从无标注提交添加标注后不跟随历史重试，撤销回原内容后可以跟随', () => {
+    const unannotatedTask = editorTask({
+      imageEditContext: { ...task.imageEditContext!, annotationFingerprint: getSeedreamAnnotationFingerprint([]) },
+    })
+    expect(shouldFollowImageEditorRetry(unannotatedTask, { ...draft, annotations: [annotation] })).toBe(false)
+    expect(shouldFollowImageEditorRetry(unannotatedTask, draft)).toBe(true)
+    expect(shouldFollowImageEditorRetry(annotatedTask, { ...draft, annotations: [annotation] })).toBe(true)
+  })
+
+  it('旧任务仅在没有视觉定位图且当前无标注时保守保留跟随行为', () => {
+    expect(shouldFollowImageEditorRetry(task, draft)).toBe(true)
+    expect(shouldFollowImageEditorRetry(task, { ...draft, annotations: [annotation] })).toBe(false)
+    const legacyWithGuide = editorTask({
+      imageEditContext: { ...task.imageEditContext!, visualGuideImageId: 'legacy-guide' },
+    })
+    expect(shouldFollowImageEditorRetry(legacyWithGuide, draft)).toBe(false)
+    expect(shouldFollowImageEditorRetry(legacyWithGuide, { ...draft, annotations: [annotation] })).toBe(false)
+  })
+
+  it.each([
+    { latestTaskId: 'other-task' },
+    { engine: 'seedream' as const },
+    { sourceImageId: 'new-source' },
+    { instruction: 'new edit' },
+    { referenceImageIds: ['new-reference'] },
+  ])('does not replace another task or a changed draft (%j)', (patch) => {
+    expect(shouldFollowImageEditorRetry(task, { ...draft, ...patch })).toBe(false)
   })
 })
 

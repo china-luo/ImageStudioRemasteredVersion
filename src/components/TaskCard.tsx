@@ -8,11 +8,13 @@ import {
   subscribeImageThumbnail,
   updateTaskInStore,
   retryTask,
+  resumeTaskRecovery,
 } from '../store'
 import { formatImageRatio } from '../lib/size'
 import { getParamDisplay, ActualValueBadge } from '../lib/paramDisplay'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_FAL_MODEL } from '../lib/apiProfiles'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
+import { canResumeTaskRecovery, isTaskReconnecting } from '../lib/taskRecovery'
 import { CodeIcon } from './icons'
 import ViewportTooltip from './ViewportTooltip'
 
@@ -251,12 +253,11 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
 
   // 定时更新运行中任务的计时
   useEffect(() => {
-    if (task.status !== 'running' && !(task.status === 'error' && (task.falRecoverable || task.customRecoverable)))
-      return
+    if (task.status !== 'running' && !isTaskReconnecting(task)) return
     const id = setInterval(() => setNow(Date.now()), 1000)
     setNow(Date.now())
     return () => clearInterval(id)
-  }, [task.customRecoverable, task.falRecoverable, task.status])
+  }, [task.customRecoverable, task.falRecoverable, task.recoveryPausedReason, task.status])
 
   // 加载缩略图
   useEffect(() => {
@@ -315,7 +316,7 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
 
   const duration = (() => {
     let seconds: number
-    if (task.status === 'running' || task.falRecoverable || task.customRecoverable) {
+    if (task.status === 'running' || isTaskReconnecting(task)) {
       seconds = Math.floor((now - task.createdAt) / 1000)
     } else if (task.elapsed != null) {
       seconds = Math.floor(task.elapsed / 1000)
@@ -327,9 +328,10 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
     return `${mm}:${ss}`
   })()
   const showSwipeAction = swipeActionActive
-  const isFalReconnecting = task.status === 'error' && task.falRecoverable
-  const isCustomReconnecting = task.status === 'error' && task.customRecoverable
-  const showRunningTimer = task.status === 'running' || isFalReconnecting || isCustomReconnecting
+  const isReconnecting = isTaskReconnecting(task)
+  const canContinueQuery = canResumeTaskRecovery(task)
+  const isRecoveryPaused = task.status === 'error' && Boolean(task.recoveryPausedReason)
+  const showRunningTimer = task.status === 'running' || isReconnecting
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
       ? 'bg-gray-500 dark:bg-gray-600'
@@ -390,8 +392,8 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
 
       <div
         ref={cardRef}
-        className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${
-          isSwiping ? '!bg-white dark:!bg-gray-900' : ''
+        className={`relative cursor-pointer touch-pan-y overflow-hidden rounded-2xl border bg-[var(--surface-panel-strong)] will-change-transform duration-200 hover:shadow-[0_12px_28px_-12px_rgb(15_23_42/0.2)] ${
+          isSwiping ? '!bg-[var(--surface-solid)]' : ''
         } ${
           !isSwiping
             ? 'transition-[box-shadow,border-color,background-color,transform]'
@@ -401,7 +403,7 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
             ? 'border-blue-400 generating'
             : isSelected
               ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50'
-              : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'
+              : 'border-[var(--line)] hover:border-[var(--line-strong)]'
         }`}
         onClick={(e) => {
           if (Date.now() < suppressClickUntilRef.current) {
@@ -456,7 +458,7 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
                 <span className="agent-web-search-running-text text-xs">生成中</span>
               </div>
             )}
-            {task.status === 'error' && isFalReconnecting && (
+            {task.status === 'error' && isReconnecting && (
               <div className="flex flex-col items-center gap-1 px-2">
                 <svg className="w-7 h-7 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
@@ -469,10 +471,10 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
                 <span className="text-xs text-yellow-500 text-center leading-tight">重连中</span>
               </div>
             )}
-            {task.status === 'error' && !isFalReconnecting && (
+            {task.status === 'error' && !isReconnecting && (
               <div className="flex flex-col items-center gap-1 px-2">
                 <svg
-                  className={`w-7 h-7 ${isInterrupted ? 'text-yellow-400' : 'text-red-400'}`}
+                  className={`w-7 h-7 ${isInterrupted || isRecoveryPaused ? 'text-yellow-400' : 'text-red-400'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -485,10 +487,18 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
                   />
                 </svg>
                 <span
-                  className={`text-xs text-center leading-tight ${isInterrupted ? 'text-yellow-500' : 'text-red-400'}`}
+                  className={`text-xs text-center leading-tight ${isInterrupted || isRecoveryPaused ? 'text-yellow-500' : 'text-red-400'}`}
                 >
-                  {isInterrupted ? '已停止' : '失败'}
+                  {isRecoveryPaused ? '查询已暂停' : isInterrupted ? '已停止' : '失败'}
                 </span>
+                {isRecoveryPaused && task.error && (
+                  <span
+                    className="line-clamp-3 text-[10px] text-yellow-600 dark:text-yellow-400 text-center break-all"
+                    title={task.error}
+                  >
+                    {task.error}
+                  </span>
+                )}
               </div>
             )}
             {task.status === 'done' && thumbSrc && (
@@ -667,11 +677,11 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
                 onTouchEnd={(e) => e.stopPropagation()}
                 onTouchCancel={(e) => e.stopPropagation()}
               >
-                {((task.status === 'error' && !isFalReconnecting) || settings.alwaysShowRetryButton) && (
+                {((task.status === 'error' && !isReconnecting) || settings.alwaysShowRetryButton) && (
                   <TaskActionButton
-                    tooltip="重试任务"
-                    onClick={() => retryTask(task)}
-                    className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
+                    tooltip={canContinueQuery ? '继续查询（原远端任务，不重新生成）' : '重试任务（重新生成）'}
+                    onClick={() => (canContinueQuery ? resumeTaskRecovery(task.id) : retryTask(task))}
+                    className="inline-flex items-center p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
@@ -681,6 +691,7 @@ export default function TaskCard({ task, onReuse, onEditOutputs, onDelete, onCli
                         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                       />
                     </svg>
+                    {canContinueQuery && <span className="ml-1 text-xs">继续查询</span>}
                   </TaskActionButton>
                 )}
                 <TaskActionButton

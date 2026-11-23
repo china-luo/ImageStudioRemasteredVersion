@@ -8,9 +8,11 @@ import { installMobileViewportGuards } from './lib/viewport'
 import { installDesktopFetch } from './lib/desktopFetch'
 import { initializeLocalProxyConfig } from './lib/devProxy'
 import { applySiteBackground } from './lib/siteBackground'
+import { installThemeSync } from './lib/theme'
 
 installDesktopFetch()
 installMobileViewportGuards()
+installThemeSync()
 applySiteBackground()
 
 if (!window.imageStudioDesktop?.isDesktop && 'serviceWorker' in navigator) {

@@ -500,7 +500,7 @@ export function switchApiProfileProvider(
         savedDraft?.model ?? (shouldUseOpenAIDefaults ? DEFAULT_IMAGES_MODEL : profile.model || DEFAULT_IMAGES_MODEL),
       apiMode: savedDraft?.apiMode ?? 'images',
       codexCli: false,
-      apiProxy: false,
+      apiProxy: savedDraft?.apiProxy ?? false,
       responseFormatB64Json: savedDraft?.responseFormatB64Json,
       providerDrafts,
     }

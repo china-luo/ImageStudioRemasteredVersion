@@ -239,14 +239,21 @@ export default function SettingsModal() {
     editorProfileCandidates[0] ??
     activeProfile
   const hasEditorProfile = editorProfileCandidates.length > 0
-  const activeProviderSupportsApiProxy = editorProfile.provider === 'openai' || editorProfile.provider === 'volcengine'
-  const apiProxyChecked = activeProviderSupportsApiProxy && (apiProxyLocked || editorProfile.apiProxy)
-  const apiProxyEnabled = apiProxyAvailable && activeProviderSupportsApiProxy && apiProxyChecked
+  const activeCustomProvider = draft.customProviders.find((provider) => provider.id === editorProfile.provider)
+  const activeProviderSupportsApiProxy =
+    editorProfile.provider === 'openai' || editorProfile.provider === 'volcengine' || Boolean(activeCustomProvider)
+  // Custom providers may opt into the local target-aware proxy, never Docker's fixed proxy.
+  // The local default lock applies to preset APIs, not arbitrary custom routes.
+  const editorApiProxyAvailable = activeCustomProvider
+    ? apiProxyUsesDynamicTarget && !window.imageStudioDesktop?.isDesktop
+    : apiProxyAvailable
+  const editorApiProxyLocked = activeCustomProvider ? false : apiProxyLocked
+  const apiProxyChecked = activeProviderSupportsApiProxy && (editorApiProxyLocked || editorProfile.apiProxy)
+  const apiProxyEnabled = editorApiProxyAvailable && activeProviderSupportsApiProxy && apiProxyChecked
   const apiProxyUrlLocked = apiProxyEnabled && !apiProxyUsesDynamicTarget
   const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, editorProfile.provider)
   const activeProviderUsesApiUrl =
     activeProviderIsOpenAICompatible || editorProfile.provider === 'fal' || editorProfile.provider === 'volcengine'
-  const activeCustomProvider = draft.customProviders.find((provider) => provider.id === editorProfile.provider)
   const getEditorProfileForDraft = (nextDraft: AppSettings, preferredId = apiEditorProfileId) => {
     const candidates =
       apiConfigView === 'analysis'
@@ -286,7 +293,7 @@ export default function SettingsModal() {
         apiProxy:
           profile.provider === 'openai' || profile.provider === 'volcengine'
             ? apiProxyLocked || profile.apiProxy
-            : false,
+            : displaySettings.customProviders.some((provider) => provider.id === profile.provider) && profile.apiProxy,
       })),
     })
     setDraft(nextDraft)
@@ -423,7 +430,7 @@ export default function SettingsModal() {
         apiProxy:
           profile.provider === 'openai' || profile.provider === 'volcengine'
             ? apiProxyLocked || profile.apiProxy
-            : false,
+            : draft.customProviders.some((provider) => provider.id === profile.provider) && profile.apiProxy,
         codexCli: profile.provider === 'openai' ? profile.codexCli : false,
       }
     })
@@ -1095,48 +1102,53 @@ export default function SettingsModal() {
 
   return (
     <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" onClick={handleClose} />
+      <div className="ui-backdrop animate-overlay-in absolute inset-0" onClick={handleClose} />
       <div
         ref={settingsScrollBoundaryRef}
-        className="relative z-10 flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 sm:h-[720px]"
+        className="ui-modal animate-modal-in relative z-10 flex h-[88vh] w-full max-w-6xl flex-col sm:h-[720px]"
       >
         {/* Header */}
-        <div className="flex items-center justify-between shrink-0 p-5 border-b border-gray-100 dark:border-white/[0.08]">
-          <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-            <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-              />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--line)] px-6 py-4">
+          <h3 className="flex items-center gap-2.5 text-lg font-bold text-[var(--text-1)]">
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+              <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+              </svg>
+            </span>
             设置
           </h3>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">
-              v{getAppVersionLabel()}
-            </span>
-            <button
-              onClick={handleClose}
-              className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-              aria-label="关闭"
-            >
-              <CloseIcon className="h-5 w-5" />
+            <span className="ui-badge font-mono select-none">v{getAppVersionLabel()}</span>
+            <button onClick={handleClose} className="ui-icon-btn ui-icon-btn-sm" aria-label="关闭">
+              <CloseIcon className="h-[18px] w-[18px]" />
             </button>
           </div>
         </div>
 
-        <div className="flex flex-1 min-h-0 flex-col sm:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           {/* Sidebar */}
-          <div className="w-full sm:w-48 shrink-0 flex flex-col border-b sm:border-b-0 sm:border-r border-gray-100 dark:border-white/[0.08] bg-gray-50/50 dark:bg-white/[0.02]">
-            <nav className="flex-1 overflow-x-auto sm:overflow-y-auto custom-scrollbar p-3 space-x-1 sm:space-x-0 sm:space-y-1 flex sm:flex-col">
+          <div className="flex w-full shrink-0 flex-col border-b border-[var(--line)] bg-[var(--surface-inset)] sm:w-52 sm:border-b-0 sm:border-r">
+            <nav className="custom-scrollbar flex flex-1 space-x-1 overflow-x-auto p-3 sm:flex-col sm:space-x-0 sm:space-y-1 sm:overflow-y-auto">
               <button
                 onClick={() => setActiveTab('api')}
-                className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'api' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
+                className={`flex flex-shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-sm transition-all ${
+                  activeTab === 'api'
+                    ? 'bg-[var(--surface-solid)] font-semibold text-[var(--accent)] shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgb(15_23_42/0.12)]'
+                    : 'text-[var(--text-2)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-1)]'
+                }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -1148,9 +1160,13 @@ export default function SettingsModal() {
               </button>
               <button
                 onClick={() => setActiveTab('general')}
-                className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'general' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
+                className={`flex flex-shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-sm transition-all ${
+                  activeTab === 'general'
+                    ? 'bg-[var(--surface-solid)] font-semibold text-[var(--accent)] shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgb(15_23_42/0.12)]'
+                    : 'text-[var(--text-2)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-1)]'
+                }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -1162,9 +1178,13 @@ export default function SettingsModal() {
               </button>
               <button
                 onClick={() => setActiveTab('data')}
-                className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'data' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
+                className={`flex flex-shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-sm transition-all ${
+                  activeTab === 'data'
+                    ? 'bg-[var(--surface-solid)] font-semibold text-[var(--accent)] shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgb(15_23_42/0.12)]'
+                    : 'text-[var(--text-2)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-1)]'
+                }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -1176,9 +1196,13 @@ export default function SettingsModal() {
               </button>
               <button
                 onClick={() => setActiveTab('about')}
-                className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'about' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
+                className={`flex flex-shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-sm transition-all ${
+                  activeTab === 'about'
+                    ? 'bg-[var(--surface-solid)] font-semibold text-[var(--accent)] shadow-[0_0_0_1px_var(--line),0_2px_8px_-4px_rgb(15_23_42/0.12)]'
+                    : 'text-[var(--text-2)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-1)]'
+                }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -1229,8 +1253,8 @@ export default function SettingsModal() {
                     activeProviderUsesApiUrl,
                     activeProviderIsOpenAICompatible,
                     activeProviderSupportsApiProxy,
-                    apiProxyAvailable,
-                    apiProxyLocked,
+                    apiProxyAvailable: editorApiProxyAvailable,
+                    apiProxyLocked: editorApiProxyLocked,
                     apiProxyEnabled,
                     apiProxyUrlLocked,
                     apiProxyUsesDynamicTarget,
@@ -1292,6 +1316,7 @@ export default function SettingsModal() {
                     setConfirmDialog({
                       title: '清空所选数据',
                       message: '确定要清空所选的数据吗？此操作不可恢复。',
+                      confirmText: '确认清空',
                       action: () => void handleClearAllData(),
                     })
                   }

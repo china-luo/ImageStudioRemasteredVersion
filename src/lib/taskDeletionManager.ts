@@ -11,9 +11,11 @@ export interface TaskDeletionState {
 
 export interface TaskDeletionManagerDependencies {
   getState: () => TaskDeletionState
+  cancelTaskWork?: (taskId: string) => void
   deleteTask: (taskId: string) => Promise<unknown>
+  putTask: (task: TaskRecord) => Promise<unknown>
   deleteUnreferencedImages: (imageIds: Iterable<string>) => Promise<unknown>
-  scrubDeletedTasks: (deletedTasks: TaskRecord[], remainingTasks: TaskRecord[]) => Promise<TaskRecord[]>
+  scrubDeletedTasks: (deletedTasks: TaskRecord[], remainingTasks: TaskRecord[]) => TaskRecord[]
 }
 
 /**
@@ -21,41 +23,36 @@ export interface TaskDeletionManagerDependencies {
  * scrubbing stays injectable because it is legacy state behavior, not persistence behavior.
  */
 export function createTaskDeletionManager(deps: TaskDeletionManagerDependencies) {
-  const removeMany = async (taskIds: string[]): Promise<void> => {
-    if (!taskIds.length) return
+  const remove = async (taskIds: string[], message: string) => {
     const state = deps.getState()
     const toDelete = new Set(taskIds)
     const deletedTasks = state.tasks.filter((task) => toDelete.has(task.id))
-    const remaining = await deps.scrubDeletedTasks(
-      deletedTasks,
-      state.tasks.filter((task) => !toDelete.has(task.id)),
-    )
+    const remaining = state.tasks.filter((task) => !toDelete.has(task.id))
+    const scrubbed = deps.scrubDeletedTasks(deletedTasks, remaining)
+    const originalById = new Map(remaining.map((task) => [task.id, task]))
     const deletedImageIds = new Set<string>()
     for (const task of deletedTasks) addTaskImageReferences(deletedImageIds, task)
 
-    state.setTasks(remaining)
-    await Promise.all(taskIds.map((taskId) => deps.deleteTask(taskId)))
-    await deps.deleteUnreferencedImages(deletedImageIds)
-
+    // 整体更新在等待磁盘前完成，避免用旧列表覆盖并发提交或完成的任务。
+    state.setTasks(scrubbed)
+    // Stop local polling before awaiting disk deletion. This does not cancel upstream billing.
+    for (const taskId of toDelete) deps.cancelTaskWork?.(taskId)
     const nextSelection = state.selectedTaskIds.filter((taskId) => !toDelete.has(taskId))
     if (nextSelection.length !== state.selectedTaskIds.length) state.setSelectedTaskIds(nextSelection)
-    state.showToast(`已删除 ${taskIds.length} 条记录`, 'success')
+    await Promise.all([
+      ...Array.from(toDelete, (taskId) => deps.deleteTask(taskId)),
+      ...scrubbed.filter((task) => task !== originalById.get(task.id)).map(deps.putTask),
+    ])
+    await deps.deleteUnreferencedImages(deletedImageIds)
+    state.showToast(message, 'success')
   }
 
-  const removeOne = async (task: TaskRecord): Promise<void> => {
-    const state = deps.getState()
-    const remaining = await deps.scrubDeletedTasks(
-      [task],
-      state.tasks.filter((item) => item.id !== task.id),
-    )
-    const imageIds = new Set<string>()
-    addTaskImageReferences(imageIds, task)
-
-    state.setTasks(remaining)
-    await deps.deleteTask(task.id)
-    await deps.deleteUnreferencedImages(imageIds)
-    state.showToast('记录已删除', 'success')
+  return {
+    async removeMany(taskIds: string[]) {
+      if (taskIds.length) await remove(taskIds, `已删除 ${new Set(taskIds).size} 条记录`)
+    },
+    async removeOne(task: TaskRecord) {
+      await remove([task.id], '记录已删除')
+    },
   }
-
-  return { removeMany, removeOne }
 }

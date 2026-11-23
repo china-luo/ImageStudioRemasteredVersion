@@ -8,7 +8,13 @@ import {
 import { IMAGE_FETCH_CORS_HINT } from './imageApiShared'
 import { replaceImageMentionsForApi } from './promptImageMentions'
 import { prepareReferenceImageAndMaskPayload } from './referenceImagePayload'
-import { firstActualParams, mapActualParamsByImage } from './taskRecovery'
+import {
+  ASYNC_POLL_TIMEOUT_SECONDS,
+  awaitTaskWork,
+  createPollingTimeoutError,
+  firstActualParams,
+  mapActualParamsByImage,
+} from './taskRecovery'
 import type { ApiProfile, AppSettings, MaskDraft, TaskParams, TaskRecord } from '../types'
 
 type ExecutionState = {
@@ -29,6 +35,7 @@ export type TaskExecutionDependencies = {
   forgetCachedImage: (imageId: string) => void
   scheduleWatchdog: (taskId: string, timeoutSeconds: number) => void
   clearWatchdog: (taskId: string) => void
+  releaseSubmissionSlot?: (taskId: string) => void
   scheduleFalRecovery: (taskId: string) => void
   scheduleCustomRecovery: (taskId: string) => void
   resolveImageSizeParamsList: (
@@ -67,12 +74,32 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
   const requestImage = dependencies.callImageApi ?? callImageApi
   const preparePayload = dependencies.preparePayload ?? prepareReferenceImageAndMaskPayload
   const now = dependencies.now ?? Date.now
+  const executions = new Map<string, AbortController>()
+  const cancel = (taskId: string) => {
+    const controller = executions.get(taskId)
+    executions.delete(taskId)
+    controller?.abort()
+    dependencies.clearWatchdog(taskId)
+  }
 
   return {
+    cancel,
+    cancelAll() {
+      for (const taskId of executions.keys()) cancel(taskId)
+    },
     async execute(taskId: string): Promise<void> {
       const initialState = dependencies.getState()
       const task = initialState.tasks.find((item) => item.id === taskId)
-      if (!task) return
+      if (!task || task.status !== 'running' || executions.has(taskId)) return
+      // A known remote identity is a query operation, never another paid submission.
+      if (task.apiProvider === 'fal' && task.falRequestId && task.falEndpoint) {
+        dependencies.scheduleFalRecovery(taskId)
+        return
+      }
+      if (task.customTaskId) {
+        dependencies.scheduleCustomRecovery(taskId)
+        return
+      }
 
       const taskProfile = getTaskApiProfile(initialState.settings, task)
       if (!taskProfile && task.apiProfileId) {
@@ -90,66 +117,102 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
       const activeProfile = taskProfile ?? getActiveApiProfile(initialState.settings)
       const requestSettings = createSettingsForApiProfile(initialState.settings, activeProfile)
       const taskProvider = task.apiProvider ?? activeProfile.provider
+      const controller = new AbortController()
+      executions.set(taskId, controller)
+      const isCurrent = () =>
+        executions.get(taskId) === controller &&
+        !controller.signal.aborted &&
+        dependencies.getState().tasks.some((item) => item.id === taskId && item.status === 'running')
+      let pollTimer: ReturnType<typeof setTimeout> | undefined
+      const detachPolling = () => {
+        if (!isCurrent()) return
+        dependencies.clearWatchdog(taskId)
+        dependencies.releaseSubmissionSlot?.(taskId)
+        if (!pollTimer) {
+          pollTimer = setTimeout(() => controller.abort(createPollingTimeoutError()), ASYNC_POLL_TIMEOUT_SECONDS * 1000)
+        }
+      }
+      // Pin legacy tasks to the account actually used; never recover with the current account.
+      dependencies.updateTask(taskId, {
+        apiProfileId: task.apiProfileId ?? activeProfile.id,
+        apiProvider: taskProvider,
+      })
       let falRequestInfo =
         task.falRequestId && task.falEndpoint ? { requestId: task.falRequestId, endpoint: task.falEndpoint } : null
       let customTaskInfo = task.customTaskId ? { taskId: task.customTaskId } : null
 
-      if (
-        taskProvider !== 'fal' &&
-        !isAsyncCustomProviderTask(requestSettings, taskProvider, task.inputImageIds.length > 0)
-      ) {
-        dependencies.scheduleWatchdog(taskId, activeProfile.timeout)
-      }
-
       try {
         const inputDataUrls: string[] = []
         for (const imageId of task.inputImageIds) {
-          const dataUrl = await dependencies.ensureImageCached(imageId)
+          const dataUrl = await awaitTaskWork(dependencies.ensureImageCached(imageId), controller.signal)
+          if (!isCurrent()) return
           if (!dataUrl) throw new Error('输入图片已不存在')
           inputDataUrls.push(dataUrl)
         }
         let maskDataUrl: string | undefined
         if (task.maskImageId) {
-          maskDataUrl = (await dependencies.ensureImageCached(task.maskImageId)) ?? undefined
+          maskDataUrl =
+            (await awaitTaskWork(dependencies.ensureImageCached(task.maskImageId), controller.signal)) ?? undefined
+          if (!isCurrent()) return
           if (!maskDataUrl) throw new Error('遮罩图片已不存在')
         }
-        const prepared = await preparePayload(inputDataUrls, maskDataUrl)
-        const result = await requestImage({
-          settings: requestSettings,
-          prompt: replaceImageMentionsForApi(task.prompt, inputDataUrls.length),
-          params: task.params,
-          inputImageDataUrls: prepared.dataUrls,
-          maskDataUrl: prepared.maskDataUrl,
-          onFalRequestEnqueued: (request) => {
-            falRequestInfo = request
-            dependencies.updateTask(taskId, {
-              falRequestId: request.requestId,
-              falEndpoint: request.endpoint,
-              falRecoverable: false,
-            })
-          },
-          onCustomTaskEnqueued: (request) => {
-            customTaskInfo = request
-            dependencies.updateTask(taskId, { customTaskId: request.taskId, customRecoverable: false })
-          },
-        })
+        const prepared = await awaitTaskWork(preparePayload(inputDataUrls, maskDataUrl), controller.signal)
+        if (!isCurrent()) return
+        if (
+          taskProvider !== 'fal' &&
+          !isAsyncCustomProviderTask(requestSettings, taskProvider, task.inputImageIds.length > 0)
+        ) {
+          dependencies.scheduleWatchdog(taskId, activeProfile.timeout)
+        }
+        const result = await awaitTaskWork(
+          requestImage({
+            signal: controller.signal,
+            settings: requestSettings,
+            prompt: replaceImageMentionsForApi(task.prompt, inputDataUrls.length),
+            params: task.params,
+            inputImageDataUrls: prepared.dataUrls,
+            maskDataUrl: prepared.maskDataUrl,
+            onFalRequestEnqueued: (request) => {
+              if (!isCurrent()) return
+              falRequestInfo = request
+              dependencies.updateTask(taskId, {
+                falRequestId: request.requestId,
+                falEndpoint: request.endpoint,
+                falRecoverable: false,
+              })
+              detachPolling()
+            },
+            onCustomTaskEnqueued: (request) => {
+              if (!isCurrent()) return
+              customTaskInfo = request
+              dependencies.updateTask(taskId, { customTaskId: request.taskId, customRecoverable: false })
+              detachPolling()
+            },
+          }),
+          controller.signal,
+        )
 
-        const latest = dependencies.getState().tasks.find((item) => item.id === taskId)
-        if (!latest || latest.status !== 'running') return
+        if (!isCurrent()) return
 
         const outputIds: string[] = []
         for (const dataUrl of result.images) {
-          const imageId = await dependencies.storeGeneratedImage(dataUrl)
+          if (!isCurrent()) return
+          const imageId = await awaitTaskWork(dependencies.storeGeneratedImage(dataUrl), controller.signal)
+          if (!isCurrent()) return
           dependencies.cacheImage(imageId, dataUrl)
           outputIds.push(imageId)
         }
         const isAsyncCustomTask = taskProvider !== 'fal' && taskProvider !== 'openai' && Boolean(customTaskInfo)
         const actualParamsList =
           taskProvider === 'fal'
-            ? await dependencies.resolveImageSizeParamsList(result.images, result.actualParamsList)
+            ? await awaitTaskWork(
+                dependencies.resolveImageSizeParamsList(result.images, result.actualParamsList),
+                controller.signal,
+              )
             : isAsyncCustomTask
-              ? await dependencies.readImageSizeParamsList(result.images)
+              ? await awaitTaskWork(dependencies.readImageSizeParamsList(result.images), controller.signal)
               : result.actualParamsList
+        if (!isCurrent()) return
         const actualParams =
           taskProvider === 'fal' || isAsyncCustomTask
             ? firstActualParams(actualParamsList)
@@ -171,8 +234,7 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
           else if (!hasRevisedPrompt) dependencies.showCodexCliPrompt(false, '接口没有返回官方 API 会返回的部分信息')
         }
 
-        const latestBeforeUpdate = dependencies.getState().tasks.find((item) => item.id === taskId)
-        if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') return
+        if (!isCurrent()) return
         dependencies.clearWatchdog(taskId)
         dependencies.updateTask(taskId, {
           outputImages: outputIds,
@@ -182,6 +244,7 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
           revisedPromptByImage:
             revisedPromptByImage && Object.keys(revisedPromptByImage).length ? revisedPromptByImage : undefined,
           status: 'done',
+          recoveryPausedReason: undefined,
           finishedAt: now(),
           elapsed: now() - task.createdAt,
           falRecoverable: false,
@@ -198,9 +261,11 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
           dependencies.getState().clearMaskDraft()
         }
       } catch (error) {
+        if (executions.get(taskId) !== controller) return
         dependencies.clearWatchdog(taskId)
-        const latestTask = dependencies.getState().tasks.find((item) => item.id === taskId) ?? task
-        if (latestTask.status !== 'running') return
+        const latestTask = dependencies.getState().tasks.find((item) => item.id === taskId)
+        if (!latestTask || latestTask.status !== 'running') return
+        const pollingTimedOut = error instanceof DOMException && error.name === 'TimeoutError'
         const latestFalRequestInfo =
           falRequestInfo ??
           (latestTask.falRequestId && latestTask.falEndpoint
@@ -208,31 +273,45 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
             : null)
         const latestCustomTaskInfo =
           customTaskInfo ?? (latestTask.customTaskId ? { taskId: latestTask.customTaskId } : null)
+        const missingCustomPoll = Boolean(
+          latestCustomTaskInfo && !getCustomProviderDefinition(dependencies.getState().settings, taskProvider)?.poll,
+        )
         if (
           latestTask.apiProvider === 'fal' &&
           latestFalRequestInfo &&
-          dependencies.isRecoverableConnectionError(error)
+          (pollingTimedOut || dependencies.isRecoverableConnectionError(error))
         ) {
           dependencies.updateTask(taskId, {
             status: 'error',
-            error: '与 fal.ai 的连接已断开，之后会继续查询任务结果。',
+            recoveryPausedReason: pollingTimedOut ? 'timeout' : undefined,
+            error: pollingTimedOut
+              ? String((error as Error).message)
+              : '与 fal.ai 的连接已断开，之后会继续查询任务结果。',
             falRequestId: latestFalRequestInfo.requestId,
             falEndpoint: latestFalRequestInfo.endpoint,
             falRecoverable: true,
             finishedAt: now(),
             elapsed: now() - task.createdAt,
           })
-          dependencies.scheduleFalRecovery(taskId)
-        } else if (latestCustomTaskInfo && dependencies.isRecoverableConnectionError(error)) {
+          if (!pollingTimedOut) dependencies.scheduleFalRecovery(taskId)
+        } else if (
+          latestCustomTaskInfo &&
+          (pollingTimedOut || dependencies.isRecoverableConnectionError(error) || missingCustomPoll)
+        ) {
           dependencies.updateTask(taskId, {
             status: 'error',
-            error: '与自定义异步任务的连接已断开，之后会继续查询任务结果。',
+            recoveryPausedReason: pollingTimedOut ? 'timeout' : missingCustomPoll ? 'missing-poll' : undefined,
+            error: pollingTimedOut
+              ? String((error as Error).message)
+              : missingCustomPoll
+                ? '恢复已暂停：原服务商缺少 poll 配置，请补全后继续查询。'
+                : '与自定义异步任务的连接已断开，之后会继续查询任务结果。',
             customTaskId: latestCustomTaskInfo.taskId,
             customRecoverable: true,
             finishedAt: now(),
             elapsed: now() - task.createdAt,
           })
-          dependencies.scheduleCustomRecovery(taskId)
+          if (!pollingTimedOut) dependencies.scheduleCustomRecovery(taskId)
         } else {
           let message = error instanceof Error ? error.message : String(error)
           const currentSettings = dependencies.getState().settings
@@ -261,7 +340,11 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
           dependencies.getState().setDetailTaskId(taskId)
         }
       } finally {
-        task.inputImageIds.forEach(dependencies.forgetCachedImage)
+        if (pollTimer) clearTimeout(pollTimer)
+        if (executions.get(taskId) === controller) {
+          executions.delete(taskId)
+          task.inputImageIds.forEach(dependencies.forgetCachedImage)
+        }
       }
     },
   }

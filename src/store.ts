@@ -32,15 +32,16 @@ import {
   collectApiHostnamesFromSettings,
   extractSecretsFromSettings,
   getCachedSecrets,
-  hasSecretValues,
   loadPersistedSecrets,
   mergeSecretRecords,
   mergeSecretsIntoSettings,
   persistSecrets,
   rememberSecrets,
   stripSecretsFromSettings,
+  type AppSecrets,
 } from './lib/secretStore'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
+import { shouldFollowImageEditorRetry } from './lib/seedreamEditor'
 
 const DEFAULT_SEEDREAM_EDITOR_DRAFT: SeedreamEditorDraft = {
   engine: 'home',
@@ -63,6 +64,8 @@ import {
   putImage,
   deleteImage,
   storeImage,
+  refreshTaskDataEpoch,
+  subscribeTaskDataReset,
 } from './lib/db'
 import {
   collectAgentRoundOutputImageSlots,
@@ -78,8 +81,6 @@ import { migrateLegacyTaskStreamFields } from './lib/legacyTaskMigration'
 import { shouldOpenSupportPromptForTaskCompletion } from './lib/supportPrompt'
 import { isAmazonListingMainSlot } from './lib/listingPlanner'
 import {
-  collectAmazonPlannerSessionImageIds,
-  collectSopDraftImageIds,
   DEFAULT_SOP_DRAFT,
   DEFAULT_VOC_DRAFT,
   normalizeSopDraft,
@@ -104,15 +105,15 @@ import {
   getAgentSiblingRounds,
 } from './lib/agentConversationGraph'
 import { isEmptyAgentConversation, normalizeAgentConversations } from './lib/agentConversationNormalize'
-import { isRunningOpenAITask } from './lib/taskBootstrap'
-import { prepareStartupTasks, pruneUnreferencedImageIds } from './lib/storeBootstrap'
-import { hasActualParams } from './lib/taskRecovery'
+import { isRunningOpenAITask, markInterruptedOpenAIRunningTasks } from './lib/taskBootstrap'
+import { getRecoveryTaskIds, prepareStartupTasks, pruneUnreferencedImageIds } from './lib/storeBootstrap'
+import { canResumeTaskRecovery, hasActualParams } from './lib/taskRecovery'
 import { createTaskRecoveryManager } from './lib/taskRecoveryManager'
 import { createTaskSubmissionService, type SubmitTaskWithInputOptions } from './lib/taskSubmissionService'
 import { createTaskExecutionService, getTaskApiProfile } from './lib/taskExecutionService'
 import { taskExecutionQueue } from './lib/taskExecutionQueue'
-import { collectReferencedImageIdsFromState } from './lib/taskImageReferences'
 import {
+  collectStateImageReferences,
   deleteImageIfUnreferenced as deleteImageIfUnreferencedFromService,
   deleteUnreferencedImageCandidates,
 } from './lib/imageReferenceCleanup'
@@ -139,6 +140,7 @@ function createImageReferenceState() {
     tasks: state.tasks,
     inputImages: state.inputImages,
     galleryInputDraft: state.galleryInputDraft,
+    seedreamEditorDraft: state.seedreamEditorDraft,
     sopDraft: state.sopDraft,
     agentConversations: state.agentConversations,
     agentInputDrafts: Object.values(state.agentInputDrafts),
@@ -157,7 +159,9 @@ function getTaskDeletionManager() {
         showToast: state.showToast,
       }
     },
+    cancelTaskWork,
     deleteTask: dbDeleteTask,
+    putTask,
     deleteUnreferencedImages: deleteUnreferencedImageIds,
     scrubDeletedTasks: scrubAgentOutputPayloadsForDeletedTasks,
   })
@@ -314,17 +318,91 @@ function getLatestAgentConversation(conversations: AgentConversation[]) {
   }, null)
 }
 
-function syncSettingsSecrets(settings: AppSettings) {
-  const secrets = extractSecretsFromSettings(settings)
-  rememberSecrets(secrets)
-  void persistSecrets(secrets)
+let settingsSecretsReady: Promise<void> | undefined
+let settingsSecretsHydrated = false
+let settingsSecretsDirty = false
+let settingsSecretsWriteVersion = 0
+const pendingSecretChanges: Array<(secrets: AppSecrets) => AppSecrets> = []
+const secretWarningTimes = new Map<'read' | 'write', number>()
+
+function warnSecretsFailure(operation: 'read' | 'write') {
+  const now = Date.now()
+  const lastWarning = secretWarningTimes.get(operation)
+  if (lastWarning !== undefined && now - lastWarning < 30_000) return
+  secretWarningTimes.set(operation, now)
+  useStore
+    .getState()
+    .showToast(
+      operation === 'read'
+        ? '桌面凭据读取失败，原有凭据未被覆盖；修改凭据时将重试，请稍后重试或重启应用。'
+        : '桌面凭据保存失败，修改暂存于当前会话；请稍后重试，重启前请确认已保存。',
+      'error',
+    )
+}
+
+async function saveSettingsSecrets(secrets: AppSecrets) {
+  const version = ++settingsSecretsWriteVersion
+  settingsSecretsDirty = true
+  const saved = await persistSecrets(secrets)
+  // 旧写入成功不能清除更新快照的待保存状态；失败后保留最新缓存供下次保存重试。
+  if (saved && version === settingsSecretsWriteVersion) settingsSecretsDirty = false
+  if (!saved) warnSecretsFailure('write')
+}
+
+function syncSettingsSecrets(previous: AppSettings, settings: AppSettings, incoming: Partial<AppSettings>) {
+  const before = extractSecretsFromSettings(previous)
+  const after = extractSecretsFromSettings(settings)
+  // 完整设置可能仍含未读取凭据的占位值；只有定向凭据修改才能显式清空未读取的密钥。
+  const explicitApiKey = incoming.apiKey !== undefined && incoming.profiles === undefined
+  const explicitVocApiKey = incoming.vocApiKey !== undefined && incoming.profiles === undefined
+  const resetSecrets = JSON.stringify(incoming) === JSON.stringify(DEFAULT_SETTINGS)
+  const removedProfileIds = previous.profiles
+    .filter((profile) => !settings.profiles.some((item) => item.id === profile.id))
+    .map((profile) => profile.id)
+  if (
+    JSON.stringify(before) === JSON.stringify(after) &&
+    !explicitApiKey &&
+    !explicitVocApiKey &&
+    !resetSecrets &&
+    removedProfileIds.length === 0
+  ) {
+    // 同值保存也要重试未完成的读取或写入，不能要求用户再次修改密钥。
+    if (!settingsSecretsHydrated) {
+      if (pendingSecretChanges.length > 0) void initSettingsSecrets()
+    } else if (settingsSecretsDirty) {
+      void saveSettingsSecrets(getCachedSecrets())
+    }
+    return
+  }
+
+  const applyChange = (secrets: AppSecrets): AppSecrets => {
+    if (resetSecrets) return after
+    const next = { ...secrets, profiles: { ...secrets.profiles } }
+    if (before.apiKey !== after.apiKey || explicitApiKey) next.apiKey = after.apiKey
+    if (before.vocApiKey !== after.vocApiKey || explicitVocApiKey) next.vocApiKey = after.vocApiKey
+    for (const id of new Set([...Object.keys(before.profiles), ...Object.keys(after.profiles)])) {
+      if (before.profiles[id] === after.profiles[id]) continue
+      if (after.profiles[id]) next.profiles[id] = after.profiles[id]
+      else delete next.profiles[id]
+    }
+    if (explicitApiKey && !settingsSecretsHydrated) next.profiles[settings.activeProfileId] = after.apiKey
+    for (const id of removedProfileIds) delete next.profiles[id]
+    return next
+  }
+  if (!settingsSecretsHydrated) {
+    // Preserve the edit log until the vault really loads, including explicit clears.
+    pendingSecretChanges.push(applyChange)
+    void initSettingsSecrets()
+    return
+  }
+  // Apply a delta rather than dropping saved keys absent from the settings snapshot.
+  void saveSettingsSecrets(applyChange(getCachedSecrets()))
 }
 
 function hydrateSettingsWithSecrets(settings: AppSettings) {
   const leftover = extractSecretsFromSettings(settings)
   const secrets = mergeSecretRecords(getCachedSecrets(), leftover)
   rememberSecrets(secrets)
-  if (hasSecretValues(leftover)) void persistSecrets(secrets)
   return mergeSecretsIntoSettings(stripSecretsFromSettings(settings), secrets)
 }
 
@@ -332,10 +410,36 @@ async function hydratePersistedSecretsIntoStore() {
   const loaded = await loadPersistedSecrets()
   const current = useStore.getState().settings
   const leftover = extractSecretsFromSettings(current)
-  const secrets = mergeSecretRecords(loaded, leftover)
+  let secrets = mergeSecretRecords(loaded, getCachedSecrets(), leftover)
+  for (const applyChange of pendingSecretChanges.splice(0)) secrets = applyChange(secrets)
   rememberSecrets(secrets)
-  if (hasSecretValues(leftover) || hasSecretValues(loaded)) await persistSecrets(secrets)
+  settingsSecretsHydrated = true
   useStore.setState({ settings: mergeSecretsIntoSettings(stripSecretsFromSettings(current), secrets) })
+  if (JSON.stringify(loaded) !== JSON.stringify(secrets)) await saveSettingsSecrets(secrets)
+}
+
+export function initSettingsSecrets(): Promise<void> {
+  return (settingsSecretsReady ??= hydratePersistedSecretsIntoStore()
+    .catch(() => warnSecretsFailure('read'))
+    .finally(() => {
+      if (!settingsSecretsHydrated) settingsSecretsReady = undefined
+    }))
+}
+
+const CODEX_CLI_PROMPT_KEY_PREFIX = 'codex-cli-profile-v2:'
+
+function sanitizeDismissedCodexCliPrompts(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  // Legacy entries contain the literal API key. Drop them, never carry them into a
+  // migration identifier or write them back to localStorage.
+  return [
+    ...new Set(
+      value.filter(
+        (key): key is string =>
+          typeof key === 'string' && key.startsWith(CODEX_CLI_PROMPT_KEY_PREFIX) && !/[\r\n]/.test(key),
+      ),
+    ),
+  ]
 }
 
 export function getPersistedState(state: AppState) {
@@ -351,7 +455,7 @@ export function getPersistedState(state: AppState) {
           inputImages: galleryInputDraft?.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) ?? [],
         }
       : {}),
-    dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
+    dismissedCodexCliPrompts: sanitizeDismissedCodexCliPrompts(state.dismissedCodexCliPrompts),
     appMode: state.appMode,
     galleryInputDraft:
       settings.persistInputOnRestart && galleryInputDraft
@@ -421,6 +525,7 @@ export function mergePersistedState(persistedState: unknown, currentState: AppSt
   return {
     ...currentState,
     ...persisted,
+    dismissedCodexCliPrompts: sanitizeDismissedCodexCliPrompts(persisted.dismissedCodexCliPrompts),
     settings,
     params,
     appMode,
@@ -853,7 +958,7 @@ export const useStore = create<AppState>()(
             )
           }
           const settings = normalizeSettings(merged)
-          syncSettingsSecrets(settings)
+          syncSettingsSecrets(previous, settings, incoming)
           const shouldClearReusedProfile =
             st.reusedTaskApiProfileId && settings.activeProfileId === st.reusedTaskApiProfileId
           return {
@@ -866,9 +971,7 @@ export const useStore = create<AppState>()(
       dismissedCodexCliPrompts: [],
       dismissCodexCliPrompt: (key) =>
         set((st) => ({
-          dismissedCodexCliPrompts: st.dismissedCodexCliPrompts.includes(key)
-            ? st.dismissedCodexCliPrompts
-            : [...st.dismissedCodexCliPrompts, key],
+          dismissedCodexCliPrompts: sanitizeDismissedCodexCliPrompts([...st.dismissedCodexCliPrompts, key]),
         })),
 
       // Input
@@ -1188,7 +1291,7 @@ export const useStore = create<AppState>()(
       onRehydrateStorage: () => {
         return () => {
           queueMicrotask(() => {
-            void hydratePersistedSecretsIntoStore()
+            void initSettingsSecrets()
           })
         }
       },
@@ -1205,8 +1308,9 @@ function genId(): string {
   return Date.now().toString(36) + (++uid).toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
-function getTaskSubmissionService() {
+function getTaskSubmissionService(generation = taskWorkGeneration) {
   return createTaskSubmissionService({
+    isCurrent: () => generation === taskWorkGeneration,
     getState: () => {
       const state = useStore.getState()
       return {
@@ -1234,7 +1338,7 @@ function getTaskSubmissionService() {
 
 export function getCodexCliPromptKey(settings: AppSettings): string {
   const profile = getActiveApiProfile(settings)
-  return `${profile.baseUrl}\n${profile.apiKey}`
+  return `${CODEX_CLI_PROMPT_KEY_PREFIX}${encodeURIComponent(profile.id)}`
 }
 
 export { markInterruptedOpenAIRunningTasks } from './lib/taskBootstrap'
@@ -1265,12 +1369,11 @@ function scheduleOpenAIWatchdog(taskId: string, timeoutSeconds: number) {
   if (!task || !isRunningOpenAITask(task)) return
 
   const timeoutMs = Math.max(0, timeoutSeconds * 1000)
-  const remainingMs = Math.max(0, timeoutMs - (Date.now() - task.createdAt))
   const timer = setTimeout(() => {
     openAIWatchdogTimers.delete(taskId)
     const failed = failOpenAITaskIfStillRunning(taskId, createOpenAITimeoutError(timeoutSeconds))
     if (failed) useStore.getState().showToast('OpenAI 任务请求超时', 'error')
-  }, remainingMs)
+  }, timeoutMs)
   openAIWatchdogTimers.set(taskId, timer)
 }
 
@@ -1389,11 +1492,11 @@ function getTaskRecoveryManager() {
     getRawErrorPayload,
     readImageSizeParamsList,
     resolveImageSizeParamsList,
-    storeGeneratedImage: async (dataUrl) => {
-      const imageId = await storeImage(dataUrl, 'generated')
-      cacheImage(imageId, dataUrl)
-      return imageId
-    },
+    storeGeneratedImage: async (dataUrl) => storeImage(dataUrl, 'generated'),
+    cacheImage,
+  })
+  useStore.subscribe((state, previous) => {
+    if (state.settings !== previous.settings) taskRecoveryManager?.resumeBlocked()
   })
   return taskRecoveryManager
 }
@@ -1440,16 +1543,39 @@ async function resolveImageSizeParamsList(
 }
 
 /** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并在后台清理孤立图片 */
-export async function initStore() {
+let storeInitialization: Promise<void> | undefined
+let taskWorkGeneration = 0
+let subscribedToTaskDataReset = false
+
+export function initStore(): Promise<void> {
+  // 严格模式或重复挂载共享同一次启动，避免两轮图片清理与恢复交错。
+  return (storeInitialization ??= restoreStoreAtStartup().catch((error) => {
+    storeInitialization = undefined
+    throw error
+  }))
+}
+
+async function restoreStoreAtStartup() {
+  if (typeof indexedDB !== 'undefined') {
+    if (!subscribedToTaskDataReset) {
+      subscribeTaskDataReset(async () => (await import('./lib/dataBackup')).applyExternalTaskDataReset())
+      subscribedToTaskDataReset = true
+    }
+    await refreshTaskDataEpoch()
+  }
+  const workGeneration = taskWorkGeneration
+  const isCurrent = () => workGeneration === taskWorkGeneration
+  const storedTasks = await getAllTasks()
+  if (!isCurrent()) return
   const { tasks, recoveryTaskIds } = await prepareStartupTasks({
-    storedTasks: await getAllTasks(),
+    storedTasks,
     migrateTask: migrateLegacyTaskStreamFields,
-    putTask,
+    putTask: async (task) => {
+      if (isCurrent()) await putTask(task)
+    },
   })
+  if (!isCurrent()) return
   useStore.getState().setTasks(tasks)
-  const recoveryManager = getTaskRecoveryManager()
-  for (const taskId of recoveryTaskIds.fal) recoveryManager.scheduleFal(taskId, 0)
-  for (const taskId of recoveryTaskIds.custom) recoveryManager.scheduleCustom(taskId, 0)
 
   const state = useStore.getState()
   const persistedInputImages = state.inputImages
@@ -1463,6 +1589,7 @@ export async function initStore() {
       continue
     }
     const storedImage = await getImage(img.id)
+    if (!isCurrent()) return
     if (storedImage?.dataUrl) {
       restoredInputImages.push({ ...img, dataUrl: storedImage.dataUrl })
       cacheImage(img.id, storedImage.dataUrl)
@@ -1484,6 +1611,7 @@ export async function initStore() {
         continue
       }
       const storedImage = await getImage(img.id)
+      if (!isCurrent()) return
       if (storedImage?.dataUrl) {
         restoredGalleryImages.push({ ...img, dataUrl: storedImage.dataUrl })
         cacheImage(img.id, storedImage.dataUrl)
@@ -1527,6 +1655,7 @@ export async function initStore() {
         continue
       }
       const storedImage = await getImage(img.id)
+      if (!isCurrent()) return
       if (storedImage?.dataUrl) {
         restoredDraftImages.push({ ...img, dataUrl: storedImage.dataUrl })
         cacheImage(img.id, storedImage.dataUrl)
@@ -1569,6 +1698,7 @@ export async function initStore() {
       continue
     }
     const storedImage = await getImage(image.id)
+    if (!isCurrent()) return
     if (storedImage?.dataUrl) {
       restoredSopImages.push({ ...image, dataUrl: storedImage.dataUrl })
       cacheImage(image.id, storedImage.dataUrl)
@@ -1586,29 +1716,38 @@ export async function initStore() {
     })
   }
 
-  // 保持首屏响应：孤立图片清理可能扫描并删除大量记录，放到数据恢复后后台执行。
+  // 先确定清理候选，再读取最新引用；本次任务恢复等清理结束后启动，避免删到刚写入、尚未关联的结果。
   void (async () => {
-    const referencedIds = collectReferencedImageIdsFromState({
-      tasks,
-      inputImages: useStore.getState().inputImages,
-      galleryInputDraft: useStore.getState().galleryInputDraft,
-      sopDraftImageIds: collectSopDraftImageIds(useStore.getState().sopDraft),
-      agentConversations: useStore.getState().agentConversations,
-      agentInputDrafts: Object.values(useStore.getState().agentInputDrafts),
-      plannerSessions: await getAllAmazonPlannerSessions(),
-      generationProjects: [
-        ...(await getAllGenerationProjects()),
-        ...[readProjectJournal()].filter((project) => project != null),
-      ],
-      collectPlannerSessionImageIds: collectAmazonPlannerSessionImageIds,
-    })
+    const imageIds = await getAllImageIds()
+    const [storedTasks, plannerSessions, generationProjects] = await Promise.all([
+      getAllTasks(),
+      getAllAmazonPlannerSessions(),
+      getAllGenerationProjects(),
+    ])
+    if (!isCurrent()) return
+    const journal = readProjectJournal()
+    const referenceState = createImageReferenceState()
+    const referencedIds = collectStateImageReferences(
+      { ...referenceState, tasks: [...referenceState.tasks, ...storedTasks] },
+      plannerSessions,
+      journal ? [...generationProjects, journal] : generationProjects,
+    )
     const referencedImageIds = await pruneUnreferencedImageIds({
-      imageIds: await getAllImageIds(),
+      imageIds,
       referencedIds,
-      deleteImage,
+      deleteImage: async (id) => {
+        if (isCurrent()) await deleteImage(id)
+      },
     })
-    scheduleThumbnailBackfill(referencedImageIds)
-  })().catch((error) => console.warn('后台图片清理失败:', error))
+    if (isCurrent()) scheduleThumbnailBackfill(referencedImageIds)
+  })()
+    .catch((error) => console.warn('后台图片清理失败:', error))
+    .finally(() => {
+      if (workGeneration !== taskWorkGeneration) return
+      const recoveryManager = getTaskRecoveryManager()
+      for (const taskId of recoveryTaskIds.fal) recoveryManager.scheduleFal(taskId, 0)
+      for (const taskId of recoveryTaskIds.custom) recoveryManager.scheduleCustom(taskId, 0)
+    })
 }
 
 /** 提交新任务 */
@@ -1616,8 +1755,10 @@ export async function submitTask(
   options: { allowFullMask?: boolean; useCurrentApiProfileWhenReusedMissing?: boolean } = {},
 ): Promise<boolean> {
   const state = useStore.getState()
+  const generation = taskWorkGeneration
   return submitGalleryTask(
     {
+      isCurrent: () => generation === taskWorkGeneration,
       getState: () => ({
         settings: state.settings,
         prompt: state.prompt,
@@ -1637,7 +1778,7 @@ export async function submitTask(
       ensureImageCached: async (id) => (await ensureImageCached(id)) ?? null,
       storeImage: async (dataUrl, source) => storeImage(dataUrl, source),
       cacheImage,
-      submitPrepared: (prepared) => getTaskSubmissionService().submitPrepared(prepared),
+      submitPrepared: (prepared) => getTaskSubmissionService(generation).submitPrepared(prepared),
     },
     options,
   )
@@ -2017,7 +2158,7 @@ function scrubTaskRawResponsePayloadForDeletedTasks(
   }
 }
 
-async function scrubAgentOutputPayloadsForDeletedTasks(deletedTasks: TaskRecord[], remainingTasks: TaskRecord[]) {
+function scrubAgentOutputPayloadsForDeletedTasks(deletedTasks: TaskRecord[], remainingTasks: TaskRecord[]) {
   if (deletedTasks.length === 0) return remainingTasks
 
   const conversations = scrubAgentConversationsForDeletedTasks(useStore.getState().agentConversations, deletedTasks)
@@ -2025,12 +2166,6 @@ async function scrubAgentOutputPayloadsForDeletedTasks(deletedTasks: TaskRecord[
     scrubTaskRawResponsePayloadForDeletedTasks(task, conversations, deletedTasks),
   )
   useStore.setState({ agentConversations: conversations })
-
-  for (const task of scrubbedTasks) {
-    const previous = remainingTasks.find((item) => item.id === task.id)
-    if (previous?.rawResponsePayload !== task.rawResponsePayload) await putTask(task)
-  }
-
   return scrubbedTasks
 }
 
@@ -2293,6 +2428,7 @@ function getTaskExecutionService() {
     forgetCachedImage,
     scheduleWatchdog: scheduleOpenAIWatchdog,
     clearWatchdog: clearOpenAIWatchdogTimer,
+    releaseSubmissionSlot: (taskId) => taskExecutionQueue.release(taskId),
     scheduleFalRecovery: (taskId) => getTaskRecoveryManager().scheduleFal(taskId),
     scheduleCustomRecovery: (taskId) => getTaskRecoveryManager().scheduleCustom(taskId),
     resolveImageSizeParamsList,
@@ -2305,12 +2441,78 @@ function getTaskExecutionService() {
   return taskExecutionService
 }
 
+function cancelTaskWork(taskId: string) {
+  taskExecutionService?.cancel(taskId)
+  taskRecoveryManager?.cancel(taskId)
+  clearOpenAIWatchdogTimer(taskId)
+  taskExecutionQueue.cancel(taskId)
+}
+
+/** Synchronously retires all local work; remote IDs remain available for later recovery. */
+export function cancelAllTaskWork() {
+  taskWorkGeneration++
+  taskExecutionQueue.cancelAll()
+  taskExecutionService?.cancelAll()
+  taskRecoveryManager?.cancelAll()
+  for (const taskId of openAIWatchdogTimers.keys()) clearOpenAIWatchdogTimer(taskId)
+  return taskWorkGeneration
+}
+
+/** 仅查询已有远端 ID，不重新提交生图。 */
+export function scheduleTaskRecordRecovery(tasks: TaskRecord[]) {
+  const { fal, custom } = getRecoveryTaskIds(tasks)
+  if (!fal.length && !custom.length) return
+  const recovery = getTaskRecoveryManager()
+  for (const id of fal) recovery.scheduleFal(id, 0)
+  for (const id of custom) recovery.scheduleCustom(id, 0)
+}
+
+/** 清空已回滚，但先前取消的本地工作不会随事务恢复。 */
+export async function restoreInterruptedTaskWork(previousTasks: TaskRecord[], generation: number) {
+  const isCurrent = () => generation === taskWorkGeneration
+  // 如果其他标签已成功清空，fence 会先清理旧视图并使此代次失效。
+  if (typeof indexedDB !== 'undefined') await refreshTaskDataEpoch()
+  if (!isCurrent()) return
+  const previousIds = new Set(previousTasks.map(({ id }) => id))
+  let storedTasks: TaskRecord[]
+  try {
+    storedTasks = await getAllTasks()
+  } catch (error) {
+    if (isCurrent() && !(error instanceof Error && error.name === 'AbortError')) {
+      useStore.getState().setTasks(markInterruptedOpenAIRunningTasks(previousTasks).tasks)
+    }
+    throw error
+  }
+  if (!isCurrent()) return
+  const { tasks, interruptedTasks } = markInterruptedOpenAIRunningTasks(
+    storedTasks.filter(({ id }) => previousIds.has(id)),
+  )
+  useStore.getState().setTasks(tasks)
+  const writes = await Promise.allSettled(interruptedTasks.map(putTask))
+  if (!isCurrent()) return
+  scheduleTaskRecordRecovery(tasks)
+  const failure = writes.find((result) => result.status === 'rejected')
+  if (failure) throw failure.reason
+}
+
+/** Query the original remote task again; unlike retryTask, this never submits a new generation. */
+export function resumeTaskRecovery(taskId: string) {
+  const task = useStore.getState().tasks.find((item) => item.id === taskId)
+  if (!task || !canResumeTaskRecovery(task)) return
+  cancelTaskWork(taskId)
+  updateTaskInStore(taskId, { recoveryPausedReason: undefined, error: null })
+  const recovery = getTaskRecoveryManager()
+  if (task.apiProvider === 'fal') recovery.scheduleFal(taskId, 0)
+  else recovery.scheduleCustom(taskId, 0)
+}
+
 function executeTask(taskId: string) {
   return getTaskExecutionService().execute(taskId)
 }
 
 export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   const { tasks, setTasks } = useStore.getState()
+  if (!tasks.some((task) => task.id === taskId)) return
   const updated = tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t))
   const shouldOpenSupportPrompt = shouldOpenSupportPromptForTaskCompletion(tasks, updated, taskId)
   setTasks(updated)
@@ -2321,13 +2523,27 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
     }
   }
   const task = updated.find((t) => t.id === taskId)
-  if (task) putTask(task)
+  if (task) {
+    void putTask(task).catch((error: unknown) => {
+      if (error instanceof Error && error.name === 'AbortError') return
+      console.error('保存任务失败:', error)
+      useStore.getState().showToast('任务更新未能保存到本地，请检查存储空间或稍后重试', 'error')
+    })
+  }
 }
 
 /** 重试失败的任务：创建新任务并执行 */
 export async function retryTask(task: TaskRecord) {
+  const draft = useStore.getState().seedreamEditorDraft
   const result = await getTaskSubmissionService().retry(task)
-  if (result.status === 'unsupported-profile') {
+  if (result.status === 'submitted') {
+    const state = useStore.getState()
+    if (state.seedreamEditorDraft === draft && shouldFollowImageEditorRetry(task, draft)) {
+      state.setSeedreamEditorDraft({ latestTaskId: result.taskId })
+    }
+  } else if (result.status === 'original-profile-error') {
+    useStore.getState().showToast(result.message, 'error')
+  } else if (result.status === 'unsupported-profile') {
     const { setConfirmDialog } = useStore.getState()
     const { profile } = result
     setConfirmDialog({
@@ -2494,6 +2710,9 @@ export async function removeTask(task: TaskRecord) {
 export type { ClearOptions, ExportOptions, ImportOptions } from './lib/dataBackup'
 
 export async function clearData(options?: import('./lib/dataBackup').ClearOptions) {
+  // A reset must operate on hydrated credentials, not placeholder empty keys.
+  // Otherwise the pending vault read could restore secrets after the clear.
+  if (options?.clearConfig ?? true) await initSettingsSecrets()
   return (await import('./lib/dataBackup')).clearData(options)
 }
 
@@ -2527,25 +2746,7 @@ export async function createInputImageFromDataUrl(dataUrl: string): Promise<Inpu
 }
 
 export async function submitTaskWithInput(options: SubmitTaskWithInputOptions): Promise<string | null> {
-  return createTaskSubmissionService({
-    getState: () => {
-      const state = useStore.getState()
-      return {
-        settings: state.settings,
-        tasks: state.tasks,
-        setTasks: state.setTasks,
-        showToast: state.showToast,
-      }
-    },
-    createId: genId,
-    ensureImageCached: async (imageId) => (await ensureImageCached(imageId)) ?? null,
-    getImage,
-    putImage: async (image) => putImage(image),
-    storeInputImage: async (dataUrl) => storeImage(dataUrl),
-    cacheImage,
-    putTask,
-    executeTask: (taskId) => taskExecutionQueue.enqueue(taskId, () => executeTask(taskId)),
-  }).submitWithInput(options)
+  return getTaskSubmissionService().submitWithInput(options)
 }
 
 /** 添加图片到输入（右键菜单）—— 支持 data/blob/http URL */

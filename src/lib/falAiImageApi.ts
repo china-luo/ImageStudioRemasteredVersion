@@ -1,4 +1,4 @@
-import { fal } from '@fal-ai/client'
+import { createFalClient } from '@fal-ai/client'
 import type { ApiProfile, FalApiResponse, TaskParams } from '../types'
 import { DEFAULT_FAL_BASE_URL } from './apiProfiles'
 import {
@@ -36,15 +36,14 @@ function mapFalQuality(quality: TaskParams['quality']): 'low' | 'medium' | 'high
   return quality === 'auto' ? 'high' : quality
 }
 
-function configureFal(profile: ApiProfile) {
+function makeFalClient(profile: ApiProfile) {
   const baseUrl = profile.baseUrl.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
-  const config: Parameters<typeof fal.config>[0] = {
+  return createFalClient({
     credentials: profile.apiKey,
     suppressLocalCredentialsWarning: true,
     fetch,
-  }
-  if (baseUrl !== DEFAULT_FAL_BASE_URL) config.proxyUrl = baseUrl
-  fal.config(config)
+    ...(baseUrl !== DEFAULT_FAL_BASE_URL ? { proxyUrl: baseUrl } : {}),
+  })
 }
 
 async function createFalRequestInput(opts: CallApiOptions): Promise<Record<string, unknown>> {
@@ -198,11 +197,14 @@ export async function getFalQueuedImageResult(
   endpoint: string,
   requestId: string,
   params: TaskParams,
+  signal?: AbortSignal,
 ): Promise<CallApiResult> {
-  configureFal(profile)
-  await fal.queue.subscribeToStatus(endpoint, { requestId, logs: true })
-  const result = await fal.queue.result(endpoint, { requestId })
-  return parseFalResult(result.data as FalApiResponse, params, getFalCustomBaseUrlLabel(profile))
+  signal?.throwIfAborted()
+  const fal = makeFalClient(profile)
+  await fal.queue.subscribeToStatus(endpoint, { requestId, logs: true, abortSignal: signal })
+  signal?.throwIfAborted()
+  const result = await fal.queue.result(endpoint, { requestId, abortSignal: signal })
+  return parseFalResult(result.data as FalApiResponse, params, getFalCustomBaseUrlLabel(profile), signal)
 }
 
 export async function callFalAiImageApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
@@ -216,8 +218,8 @@ export async function callFalAiImageApi(opts: CallApiOptions, profile: ApiProfil
         (opts.maskDataUrl ? getDataUrlEncodedByteSize(opts.maskDataUrl) : 0),
     )
 
-    // 使用当前配置保存的 API Key，避免 fal SDK 额外输出前端凭据警告。
-    configureFal(profile)
+    // 每个任务使用独立客户端，避免并发请求互相覆盖凭据或代理。
+    const fal = makeFalClient(profile)
 
     const isEdit = opts.inputImageDataUrls.length > 0
     const endpoint = mapFalEndpoint(profile.model, isEdit)

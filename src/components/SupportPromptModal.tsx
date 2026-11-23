@@ -38,12 +38,12 @@ export default function SupportPromptModal() {
       className="fixed inset-0 z-[70] flex items-center justify-center p-4"
       onClick={dismissSupportPrompt}
     >
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" />
+      <div className="ui-backdrop animate-overlay-in absolute inset-0" />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="support-prompt-title"
-        className="relative z-10 flex max-h-[92vh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl border border-white/50 bg-white/95 p-6 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
+        className="ui-modal animate-modal-in relative z-10 flex max-h-[92vh] w-full max-w-sm flex-col overflow-y-auto p-6"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="absolute right-4 top-4">

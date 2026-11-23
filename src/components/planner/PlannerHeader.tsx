@@ -17,6 +17,11 @@ interface PlannerHeaderProps {
   onToggleHistory: () => void
 }
 
+const SEGMENT_GROUP_CLASS =
+  'inline-flex rounded-[9px] bg-[var(--surface-inset)] p-[3px] shadow-[inset_0_0_0_1px_var(--line)]'
+const SEGMENT_ACTIVE_CLASS = 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+const SEGMENT_IDLE_CLASS = 'text-[var(--text-2)] hover:text-[var(--text-1)]'
+
 export default function PlannerHeader({
   platform,
   mode,
@@ -32,40 +37,42 @@ export default function PlannerHeader({
   onToggleHistory,
 }: PlannerHeaderProps) {
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-50">
-          {platform === 'tiktok' ? 'TikTok 商品图设计工作台' : AMAZON_WORKBENCH_NAME}
-        </h2>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          <span>OpenAI gpt-image-2</span>
-          <span className="h-1 w-1 rounded-full bg-gray-300 dark:bg-gray-600" />
-          <span>2K / 4K</span>
-          <span className="h-1 w-1 rounded-full bg-gray-300 dark:bg-gray-600" />
-          <span>{platform === 'tiktok' ? '商品主图与商品详情图策划' : '主图、附图与 A+ 策划'}</span>
+    <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+          <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--text-1)]">
+            {platform === 'tiktok' ? 'TikTok 商品图设计工作台' : AMAZON_WORKBENCH_NAME}
+          </h2>
+          <span className="text-xs text-[var(--text-3)]">
+            {platform === 'tiktok' ? '商品主图与详情图策划 · 2K / 4K' : '主图、附图与 A+ 策划 · 2K / 4K'}
+          </span>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
-            {(
-              [
-                ['amazon', 'Amazon'],
-                ['tiktok', 'TikTok'],
-              ] as const
-            ).map(([item, label]) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => onPlatformChange(item)}
-                disabled={disabled}
-                className={`h-8 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${platform === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className={SEGMENT_GROUP_CLASS}>
+          {(
+            [
+              ['amazon', 'Amazon'],
+              ['tiktok', 'TikTok'],
+            ] as const
+          ).map(([item, label]) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => onPlatformChange(item)}
+              disabled={disabled}
+              className={`h-7 rounded-[6px] px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                platform === item ? SEGMENT_ACTIVE_CLASS : SEGMENT_IDLE_CLASS
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
+
         {platform === 'amazon' && (
-          <div className="mt-2 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+          <div className={SEGMENT_GROUP_CLASS}>
             {(
               [
                 ['listing', 'Listing 图'],
@@ -77,15 +84,18 @@ export default function PlannerHeader({
                 type="button"
                 onClick={() => onModeChange(item)}
                 disabled={disabled}
-                className={`h-8 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${mode === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                className={`h-7 rounded-[6px] px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  mode === item ? SEGMENT_ACTIVE_CLASS : SEGMENT_IDLE_CLASS
+                }`}
               >
                 {label}
               </button>
             ))}
           </div>
         )}
+
         {platform === 'tiktok' && (
-          <div className="mt-2 inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+          <div className={SEGMENT_GROUP_CLASS}>
             {(
               [
                 ['main', '商品主图'],
@@ -97,38 +107,44 @@ export default function PlannerHeader({
                 type="button"
                 onClick={() => onTiktokDesignTypeChange(item)}
                 disabled={disabled}
-                className={`h-8 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${tiktokDesignType === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                className={`h-7 rounded-[6px] px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  tiktokDesignType === item ? SEGMENT_ACTIVE_CLASS : SEGMENT_IDLE_CLASS
+                }`}
               >
                 {label}
               </button>
             ))}
           </div>
         )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+
+        <span className="hidden h-4 w-px bg-[var(--line-strong)] sm:inline-block" aria-hidden="true" />
+
+        <div className={SEGMENT_GROUP_CLASS}>
           {(['2k', '4k'] as const).map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => onResolutionChange(item)}
               disabled={disabled}
-              className={`h-8 min-w-14 rounded-lg px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${resolution === item ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`h-7 min-w-10 rounded-[6px] px-2.5 text-xs font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                resolution === item ? SEGMENT_ACTIVE_CLASS : SEGMENT_IDLE_CLASS
+              }`}
             >
               {item.toUpperCase()}
             </button>
           ))}
         </div>
+
         <button
           type="button"
           onClick={onToggleHistory}
           disabled={disabled}
-          className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${historyOpen ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-200' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/[0.06]'}`}
+          className={`ui-btn ui-btn-sm h-[34px] ${historyOpen ? 'ui-btn-soft ring-1 ring-[var(--accent-ring)]' : ''}`}
         >
-          <HistoryIcon className="h-4 w-4" />
-          策划历史
+          <HistoryIcon className="h-3.5 w-3.5" />
+          <span>策划历史</span>
           {historyCount > 0 && (
-            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 dark:bg-white/[0.08] dark:text-gray-300">
+            <span className="rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-[var(--accent)]">
               {historyCount}
             </span>
           )}

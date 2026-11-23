@@ -4,6 +4,7 @@ import {
   createSettingsForApiProfile,
   getActiveApiProfile,
   getImageGenerationProfile,
+  isAliyunQwenImageProfile,
   normalizeSettings,
   validateApiProfile,
 } from './apiProfiles'
@@ -26,6 +27,7 @@ type ConfirmDialog = {
 }
 
 export type GallerySubmissionDependencies = {
+  isCurrent?: () => boolean
   getState: () => {
     settings: AppSettings
     prompt: string
@@ -95,6 +97,8 @@ export async function submitGalleryTask(
   deps: GallerySubmissionDependencies,
   options: { allowFullMask?: boolean; useCurrentApiProfileWhenReusedMissing?: boolean } = {},
 ): Promise<boolean> {
+  const isCurrent = deps.isCurrent ?? (() => true)
+  if (!isCurrent()) return false
   const state = deps.getState()
   const normalizedSettings = normalizeSettings(state.settings)
   const currentProfile = getActiveApiProfile(state.settings)
@@ -164,12 +168,23 @@ export async function submitGalleryTask(
     return false
   }
 
+  const styleReferenceImageId = category.styleReferenceImageId?.trim()
+  const needsStyleReference = Boolean(
+    styleReferenceImageId && !orderedInputImages.some((image) => image.id === styleReferenceImageId),
+  )
+  // 16 张是通用上传上限；Qwen 的 3 张是上游请求的总图数上限。
+  if (needsStyleReference && isAliyunQwenImageProfile(activeProfile) && orderedInputImages.length >= inputImageLimit) {
+    deps.showToast(`参考图和风格板合计不能超过 ${inputImageLimit} 张，请删除一张参考图或取消选择风格板。`, 'error')
+    return false
+  }
+
   let maskImageId: string | null = null
   let maskTargetImageId: string | null = null
   if (state.maskDraft) {
     try {
       orderedInputImages = orderInputImagesForMask(state.inputImages, state.maskDraft.targetImageId)
       const coverage = await validateMaskMatchesImage(state.maskDraft.maskDataUrl, orderedInputImages[0].dataUrl)
+      if (!isCurrent()) return false
       if (coverage === 'full' && !options.allowFullMask) {
         deps.setConfirmDialog({
           title: '确认编辑整张图片？',
@@ -181,18 +196,20 @@ export async function submitGalleryTask(
         return false
       }
       maskImageId = await deps.storeImage(state.maskDraft.maskDataUrl, 'mask')
+      if (!isCurrent()) return false
       deps.cacheImage(maskImageId, state.maskDraft.maskDataUrl)
       maskTargetImageId = state.maskDraft.targetImageId
     } catch (error) {
+      if (!isCurrent() || (error instanceof Error && error.name === 'AbortError')) return false
       if (!state.inputImages.some((image) => image.id === state.maskDraft?.targetImageId)) deps.clearMaskDraft()
       deps.showToast(error instanceof Error ? error.message : String(error), 'error')
       return false
     }
   }
 
-  const styleReferenceImageId = category.styleReferenceImageId?.trim()
-  if (styleReferenceImageId && !orderedInputImages.some((image) => image.id === styleReferenceImageId)) {
+  if (needsStyleReference && styleReferenceImageId) {
     const dataUrl = await deps.ensureImageCached(styleReferenceImageId)
+    if (!isCurrent()) return false
     if (!dataUrl) {
       deps.showToast('已选择的风格参考板不存在，请重新生成并选择风格板。', 'error')
       return false
