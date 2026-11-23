@@ -27,6 +27,7 @@ test('stage navigation preserves mounted inputs and keeps generation explicit', 
 
 test('快捷面板 Enter 激活获得焦点的按钮，搜索框仍可用方向键选择', async ({ page }) => {
   await page.goto('/#/')
+  await expect(page.getByRole('textbox', { name: '项目名称', exact: true })).toBeVisible()
   const palette = page.getByRole('dialog', { name: '快捷命令面板' })
   const search = palette.getByRole('textbox')
   const editor = palette.getByRole('button', { name: /^图片编辑/ })
