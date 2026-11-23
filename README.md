@@ -35,6 +35,10 @@
 
 ![跨境Image工作台：图片制作界面](./docs/images/workbench-overview.png)
 
+## v2.0.3 更新
+
+修复「习惯配置」里默认背景预览与工作台实际背景不一致的问题。默认预览会跟随主题变化，已有自定义图片仍可继续使用。
+
 ## v2.0.2 更新亮点
 
 - **更清晰的制作流程**：按「商品资料 → 策划与风格 → 图片制作 → 筛选与导出」推进，桌面与移动端均可使用；支持浅色、深色和跟随系统主题。
@@ -106,7 +110,7 @@
 
 从 [GitHub Releases](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest) 下载最新 x64 安装包。桌面版通过 Electron 主进程使用受控网络通道，更适合日常生产、跨域受限接口和本地文件交付。
 
-本次版本：[**v2.0.2**](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v2.0.2)
+本次版本：[**v2.0.3**](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v2.0.3)
 
 ### 静态部署
 

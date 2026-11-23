@@ -1,5 +1,3 @@
-import { getPublicAssetUrl } from './publicAsset'
-
 export const SITE_BACKGROUND_STORAGE_KEY = 'image-studio-site-background'
 export const SITE_BACKGROUND_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 export const SITE_BACKGROUND_MAX_DATA_URL_LENGTH = 1_600_000
@@ -22,11 +20,14 @@ export function getStoredSiteBackground(): string | null {
 }
 
 export function applySiteBackground(dataUrl: string | null = getStoredSiteBackground()) {
-  const isCustom = isValidSiteBackgroundDataUrl(dataUrl)
-  const imageUrl = isCustom ? dataUrl : getPublicAssetUrl('site-background.png')
-  document.documentElement.style.setProperty('--site-background-image', `url(${JSON.stringify(imageUrl)})`)
-  if (isCustom) document.documentElement.dataset.customBackground = 'true'
-  else delete document.documentElement.dataset.customBackground
+  const root = document.documentElement
+  if (isValidSiteBackgroundDataUrl(dataUrl)) {
+    root.style.setProperty('--site-background-image', `url(${JSON.stringify(dataUrl)})`)
+    root.dataset.customBackground = 'true'
+  } else {
+    root.style.removeProperty('--site-background-image')
+    delete root.dataset.customBackground
+  }
 }
 
 export function saveSiteBackground(dataUrl: string) {

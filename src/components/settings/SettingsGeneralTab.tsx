@@ -6,7 +6,6 @@ import {
   resetSiteBackground,
   saveSiteBackground,
 } from '../../lib/siteBackground'
-import { getPublicAssetUrl } from '../../lib/publicAsset'
 import { readThemePreference, setThemePreference, THEME_CHANGE_EVENT, type ThemePreference } from '../../lib/theme'
 import { MonitorIcon, MoonIcon, PhotoIcon, RefreshIcon, SunIcon } from '../icons'
 import Select from '../Select'
@@ -131,7 +130,9 @@ export default function SettingsGeneralTab({ draft, onCommit }: SettingsGeneralT
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className="text-sm font-bold text-[var(--text-1)]">工作台背景</div>
-            <div className="mt-0.5 text-xs text-[var(--text-3)]">图片会自动缩放压缩，并只保存在当前设备。</div>
+            <div className="mt-0.5 text-xs text-[var(--text-3)]">
+              默认背景随外观主题变化。自定义图片会自动缩放压缩，仅保存在当前设备。
+            </div>
           </div>
           <span className={`ui-badge ${backgroundPreview ? 'ui-badge-accent' : ''}`}>
             {backgroundPreview ? '自定义' : '默认'}
@@ -142,7 +143,8 @@ export default function SettingsGeneralTab({ draft, onCommit }: SettingsGeneralT
           aria-label="当前工作台背景预览"
           className="h-32 w-full rounded-xl border border-[var(--line)] bg-cover bg-center shadow-inner"
           style={{
-            backgroundImage: `url(${JSON.stringify(backgroundPreview || getPublicAssetUrl('site-background.png'))})`,
+            backgroundColor: 'var(--app-bg)',
+            backgroundImage: backgroundPreview ? `url(${JSON.stringify(backgroundPreview)})` : 'var(--app-ambient)',
           }}
         />
         <input
