@@ -17,7 +17,7 @@
 npm run deploy:cf
 ```
 
-**没有 Worker 去转发 OpenAI / fal / Shulex。** 线上 Cloudflare 环境与 GitHub Pages 一样，属于静态托管。若上游 API 拒绝浏览器 CORS，请使用桌面版或自备同源代理。
+**没有 Worker 去转发图片或文本 API。** 线上 Cloudflare 环境与 GitHub Pages 一样，属于静态托管。若上游 API 拒绝浏览器 CORS，请使用桌面版或自备同源代理。
 
 ## Vercel
 

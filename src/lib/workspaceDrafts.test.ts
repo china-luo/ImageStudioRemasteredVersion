@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertVocHasValidReviews, extractEnglishImagePrompt, VOC_NO_VALID_REVIEWS_ERROR } from './workspaceDrafts'
+import { extractEnglishImagePrompt, normalizeVocDraft } from './workspaceDrafts'
 
 describe('SOP / VOC workspace guards', () => {
   it('returns empty when the English prompt chapter is missing', () => {
@@ -18,9 +18,28 @@ describe('SOP / VOC workspace guards', () => {
     expect(extractEnglishImagePrompt(text)).toBe('A white-background product photo of a travel mug.')
   })
 
-  it('rejects empty VOC review envelopes before AI analysis', () => {
-    expect(() => assertVocHasValidReviews(null)).toThrow(VOC_NO_VALID_REVIEWS_ERROR)
-    expect(() => assertVocHasValidReviews({ reviews: [] })).toThrow(VOC_NO_VALID_REVIEWS_ERROR)
-    expect(() => assertVocHasValidReviews({ reviews: [{ body: 'Great bottle, no leaks.' }] })).not.toThrow()
+  it('keeps existing VOC reviews and reports but ignores old online request state', () => {
+    const reviewsEnvelope = {
+      meta: { source: 'shulex', asin: 'B012345678' },
+      reviews: [{ body: 'Good quality', rating: 5, title: '' }],
+    }
+    const draft = normalizeVocDraft({
+      sourceMode: 'asin',
+      limit: 100,
+      analysisStatus: 'running',
+      analysisOperation: 'fetch',
+      analysisRequestId: 'old-request',
+      error: '旧接口失败',
+      aiReport: '旧报告',
+      reviewsEnvelope,
+    })
+    expect(draft).toEqual({
+      productName: '',
+      csvText: '',
+      archivedReport: '旧报告',
+      reviewsEnvelope,
+      error: '',
+      updatedAt: 0,
+    })
   })
 })

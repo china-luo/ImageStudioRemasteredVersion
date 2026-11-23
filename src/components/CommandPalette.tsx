@@ -101,8 +101,8 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenHelp }
         id: 'nav-voc',
         group: '工作空间',
         label: 'VOC 评论分析',
-        description: '拉取或导入 Amazon 评论，提炼痛点、卖点与看板',
-        keywords: 'voc review asin shulex 评论 痛点 卖点',
+        description: '导入 Amazon 评论，在本地统计星级和常见主题',
+        keywords: 'voc review csv xlsx 评论 星级 主题',
         icon: <ChartBarIcon className="h-4 w-4" />,
         action: () => {
           setAppMode('voc')

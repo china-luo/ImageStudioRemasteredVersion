@@ -2,7 +2,7 @@ const path = require('node:path')
 const { evaluateDesktopFetchRequest, isBlockedIpAddress } = require('./networkGuard.cjs')
 
 function emptySecrets() {
-  return { vocApiKey: '', apiKey: '', profiles: {} }
+  return { apiKey: '', profiles: {} }
 }
 
 function readOriginFromSender(sender) {
@@ -192,7 +192,6 @@ function createIpcHandlers({ app, fs, safeStorage, fetchImpl = fetch, lookupHost
       try {
         const parsed = JSON.parse(safeStorage.decryptString(encrypted))
         return {
-          vocApiKey: typeof parsed.vocApiKey === 'string' ? parsed.vocApiKey : '',
           apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
           profiles: parsed.profiles && typeof parsed.profiles === 'object' ? parsed.profiles : {},
         }
@@ -204,7 +203,6 @@ function createIpcHandlers({ app, fs, safeStorage, fetchImpl = fetch, lookupHost
     async setSecrets(_event, payload) {
       if (!safeStorage.isEncryptionAvailable()) return false
       const next = {
-        vocApiKey: typeof payload?.vocApiKey === 'string' ? payload.vocApiKey : '',
         apiKey: typeof payload?.apiKey === 'string' ? payload.apiKey : '',
         profiles: payload?.profiles && typeof payload.profiles === 'object' ? payload.profiles : {},
       }

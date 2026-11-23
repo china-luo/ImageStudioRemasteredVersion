@@ -27,6 +27,22 @@ describe('networkGuard', () => {
     expect(isAllowedProxyHost('192.168.0.10', ['192.168.0.10'])).toBe(false)
   })
 
+  it('no longer allowlists Shulex hosts or realtime task paths', () => {
+    expect(isAllowedProxyHost('openapi.shulex.com')).toBe(false)
+    for (const task of ['RtTask01', 'RtQry01']) {
+      expect(isAllowedProxyApiPath(`/v1/api/${task}`)).toBe(false)
+      expect(
+        evaluateProxyRequest({
+          origin: localOrigin,
+          method: 'POST',
+          hostname: 'api.openai.com',
+          pathname: `/v1/api/${task}`,
+          protocol: 'https:',
+        }).error,
+      ).toBe('Forbidden API path')
+    }
+  })
+
   it('allows known API paths and fal queue paths', () => {
     expect(isAllowedProxyApiPath('/v1/chat/completions')).toBe(true)
     expect(isAllowedProxyApiPath('/v1/models')).toBe(true)

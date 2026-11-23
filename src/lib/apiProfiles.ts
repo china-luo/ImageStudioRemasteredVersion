@@ -640,10 +640,6 @@ function resolveSopReverseProfileId(profiles: ApiProfile[], value: unknown, fall
   return profiles.find(isAmazonPlannerProfile)?.id ?? ''
 }
 
-function resolveVocProfileId(profiles: ApiProfile[], value: unknown, fallbackId: string): string {
-  return resolveSopReverseProfileId(profiles, value, fallbackId)
-}
-
 function createDefaultProfilePair(overrides: Partial<ApiProfile> = {}): ApiProfile[] {
   return [createDefaultImageProfile(overrides), createDefaultAmazonPlannerProfile(overrides)]
 }
@@ -822,7 +818,6 @@ export function normalizeSettings(
       : profiles[0].id
   const amazonPlannerProfileId = resolveAmazonPlannerProfileId(profiles, record.amazonPlannerProfileId)
   const sopReverseProfileId = resolveSopReverseProfileId(profiles, record.sopReverseProfileId, amazonPlannerProfileId)
-  const vocProfileId = resolveVocProfileId(profiles, record.vocProfileId, amazonPlannerProfileId)
   const seedreamEditorProfileId =
     typeof record.seedreamEditorProfileId === 'string' &&
     profiles.some((profile) => profile.id === record.seedreamEditorProfileId)
@@ -855,8 +850,6 @@ export function normalizeSettings(
     activeProfileId,
     amazonPlannerProfileId,
     sopReverseProfileId,
-    vocProfileId,
-    vocApiKey: typeof record.vocApiKey === 'string' ? record.vocApiKey : '',
     seedreamEditorProfileId,
   }
 }
@@ -981,14 +974,6 @@ export function getSopReverseProfile(settings: Partial<AppSettings> | unknown): 
     normalized.profiles.find(
       (profile) => profile.id === normalized.sopReverseProfileId && isAmazonPlannerProfile(profile),
     ) ?? null
-  )
-}
-
-export function getVocAnalysisProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
-  const normalized = normalizeSettings(settings)
-  return (
-    normalized.profiles.find((profile) => profile.id === normalized.vocProfileId && isAmazonPlannerProfile(profile)) ??
-    null
   )
 }
 
@@ -1266,7 +1251,5 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   activeProfileId: DEFAULT_OPENAI_PROFILE_ID,
   amazonPlannerProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
   sopReverseProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
-  vocProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
-  vocApiKey: '',
   seedreamEditorProfileId: '',
 })

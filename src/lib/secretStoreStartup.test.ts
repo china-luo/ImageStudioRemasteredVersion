@@ -61,13 +61,43 @@ async function setupStore() {
   const profileId = store.useStore.getState().settings.activeProfileId
   const saved: AppSecrets = {
     apiKey: 'saved-image-secret',
-    vocApiKey: 'saved-voc-secret',
     profiles: { [profileId]: 'saved-image-secret', 'other-profile': 'saved-other-secret' },
   }
   return { ...store, profileId, saved }
 }
 
 describe('credential startup and settings writes', () => {
+  it('ignores legacy VOC vault credentials without losing other saved keys', async () => {
+    const { useStore, initSettingsSecrets, saved } = await setupStore()
+    const legacy = { ...saved, vocApiKey: 'retired-vault-voc-secret' }
+    read.resolve(legacy)
+    await initSettingsSecrets()
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
+    expect(useStore.getState().settings.apiKey).toBe(saved.apiKey)
+    expect(setSecrets).not.toHaveBeenCalled()
+
+    useStore.getState().setSettings({ apiKey: 'updated-image-secret' })
+    await vi.waitFor(() => expect(setSecrets).toHaveBeenCalledTimes(1))
+    expect(setSecrets.mock.calls[0][0]).not.toHaveProperty('vocApiKey')
+    expect(setSecrets.mock.calls[0][0].profiles['other-profile']).toBe(saved.profiles['other-profile'])
+    expect(session.getItem('amazon-image-studio-secrets')).not.toContain(legacy.vocApiKey)
+  })
+
+  it('ignores legacy session VOC credentials on read and never writes them back', async () => {
+    const { readSessionSecrets, writeSessionSecrets, SESSION_SECRETS_KEY } = await import('./secretStore')
+    const legacy = {
+      apiKey: 'session-image-secret',
+      vocApiKey: 'retired-session-voc-secret',
+      profiles: { 'voc-profile': 'retained-general-profile-secret' },
+    }
+    session.setItem(SESSION_SECRETS_KEY, JSON.stringify(legacy))
+    expect(readSessionSecrets()).toEqual({ apiKey: legacy.apiKey, profiles: legacy.profiles })
+    writeSessionSecrets(legacy)
+    expect(JSON.parse(session.getItem(SESSION_SECRETS_KEY)!)).toEqual({
+      apiKey: legacy.apiKey,
+      profiles: legacy.profiles,
+    })
+  })
   it('does not write an empty vault on startup or after unrelated settings edits', async () => {
     const { useStore, initSettingsSecrets, saved, profileId } = await setupStore()
     useStore.getState().setSettings({ ...useStore.getState().settings, enterSubmit: true })
@@ -77,7 +107,7 @@ describe('credential startup and settings writes', () => {
 
     expect(getSecrets).toHaveBeenCalledTimes(1)
     expect(useStore.getState().settings.apiKey).toBe(saved.apiKey)
-    expect(useStore.getState().settings.vocApiKey).toBe(saved.vocApiKey)
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
     expect(useStore.getState().settings.profiles.find((profile) => profile.id === profileId)?.apiKey).toBe(saved.apiKey)
     expect(useStore.getState().settings.enterSubmit).toBe(true)
     expect(setSecrets).not.toHaveBeenCalled()
@@ -95,7 +125,7 @@ describe('credential startup and settings writes', () => {
     await initSettingsSecrets()
 
     expect(useStore.getState().settings.apiKey).toBe('early-edited-secret')
-    expect(useStore.getState().settings.vocApiKey).toBe(saved.vocApiKey)
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
     expect(setSecrets).toHaveBeenLastCalledWith({
       ...saved,
       apiKey: 'early-edited-secret',
@@ -105,16 +135,15 @@ describe('credential startup and settings writes', () => {
 
   it('honors explicit early clears while preserving other saved keys', async () => {
     const { useStore, initSettingsSecrets, saved, profileId } = await setupStore()
-    useStore.getState().setSettings({ apiKey: '', vocApiKey: '' })
+    useStore.getState().setSettings({ apiKey: '' })
     expect(setSecrets).not.toHaveBeenCalled()
     read.resolve(saved)
     await initSettingsSecrets()
 
     expect(useStore.getState().settings.apiKey).toBe('')
-    expect(useStore.getState().settings.vocApiKey).toBe('')
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
     expect(setSecrets).toHaveBeenLastCalledWith({
       apiKey: '',
-      vocApiKey: '',
       profiles: { ...saved.profiles, [profileId]: '' },
     })
   })
@@ -136,11 +165,10 @@ describe('credential startup and settings writes', () => {
     await initSettingsSecrets()
     await Promise.resolve()
     expect(useStore.getState().settings.apiKey).toBe('')
-    expect(useStore.getState().settings.vocApiKey).toBe('')
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
     expect(useStore.getState().settings.profiles.every((profile) => !profile.apiKey)).toBe(true)
-    expect(setSecrets).toHaveBeenLastCalledWith({ apiKey: '', vocApiKey: '', profiles: {} })
+    expect(setSecrets).toHaveBeenLastCalledWith({ apiKey: '', profiles: {} })
     expect(session.getItem('amazon-image-studio-secrets')).not.toContain(saved.apiKey)
-    expect(session.getItem('amazon-image-studio-secrets')).not.toContain(saved.vocApiKey)
   })
 
   it('applies URL settings after hydration with URL key precedence and retained existing keys', async () => {
@@ -164,11 +192,10 @@ describe('credential startup and settings writes', () => {
     expect(settings.apiKey).toBe('url-secret')
     expect(settings.activeProfileId).not.toBe(profileId)
     expect(settings.profiles.find((profile) => profile.id === profileId)?.apiKey).toBe(saved.apiKey)
-    expect(settings.vocApiKey).toBe(saved.vocApiKey)
+    expect(settings).not.toHaveProperty('vocApiKey')
     expect(setSecrets).toHaveBeenLastCalledWith(
       expect.objectContaining({
         apiKey: 'url-secret',
-        vocApiKey: saved.vocApiKey,
         profiles: expect.objectContaining({ [profileId]: saved.apiKey, [settings.activeProfileId]: 'url-secret' }),
       }),
     )
@@ -180,13 +207,13 @@ describe('credential startup and settings writes', () => {
     const { useStore, initSettingsSecrets, saved, profileId } = await setupStore()
     read.resolve(saved)
     await initSettingsSecrets()
-    useStore.getState().setSettings({ apiKey: '', vocApiKey: '' })
+    useStore.getState().setSettings({ apiKey: '' })
     await Promise.resolve()
     expect(useStore.getState().settings.apiKey).toBe('')
-    expect(useStore.getState().settings.vocApiKey).toBe('')
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
     const written = setSecrets.mock.calls.at(-1)?.[0] as AppSecrets
     expect(written.apiKey).toBe('')
-    expect(written.vocApiKey).toBe('')
+    expect(written).not.toHaveProperty('vocApiKey')
     expect(written.profiles[profileId]).toBeUndefined()
   })
 
@@ -305,7 +332,7 @@ describe('credential startup and settings writes', () => {
       apiKey: 'pending-full-snapshot-secret',
       profiles: { ...saved.profiles, [profileId]: 'pending-full-snapshot-secret' },
     })
-    expect(useStore.getState().settings.vocApiKey).toBe(saved.vocApiKey)
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
   })
 
   it('读取前删除占位配置会移除对应的已保存密钥，同时保留其他未加载配置的密钥', async () => {
@@ -374,7 +401,7 @@ describe('credential startup and settings writes', () => {
     await initSettingsSecrets()
     expect(getSecrets).toHaveBeenCalledTimes(2)
     expect(useStore.getState().settings.apiKey).toBe(saved.apiKey)
-    expect(useStore.getState().settings.vocApiKey).toBe(saved.vocApiKey)
+    expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
     expect(setSecrets).not.toHaveBeenCalled()
   })
 
@@ -382,7 +409,7 @@ describe('credential startup and settings writes', () => {
     'retries on a credential edit and replays %j over unread keys',
     async (apiKey) => {
       const { useStore, initSettingsSecrets, saved, profileId } = await setupStore()
-      useStore.getState().setSettings({ apiKey: 'edited-before-failure', vocApiKey: '' })
+      useStore.getState().setSettings({ apiKey: 'edited-before-failure' })
       read.reject(new Error('temporary IPC failure'))
       await initSettingsSecrets()
       expect(setSecrets).not.toHaveBeenCalled()
@@ -397,13 +424,12 @@ describe('credential startup and settings writes', () => {
       await ready
 
       expect(useStore.getState().settings.apiKey).toBe(apiKey)
-      expect(useStore.getState().settings.vocApiKey).toBe('')
+      expect(useStore.getState().settings).not.toHaveProperty('vocApiKey')
       expect(setSecrets).toHaveBeenLastCalledWith({
         apiKey,
-        vocApiKey: '',
         profiles: { ...saved.profiles, [profileId]: apiKey },
       })
-      useStore.getState().setSettings({ vocApiKey: 'new-voc-secret' })
+      useStore.getState().setSettings({ apiKey: 'new-image-secret' })
       await vi.waitFor(() => expect(setSecrets).toHaveBeenCalledTimes(2))
       expect(setSecrets).toHaveBeenLastCalledWith(
         expect.objectContaining({ profiles: expect.objectContaining({ 'other-profile': 'saved-other-secret' }) }),
@@ -455,7 +481,6 @@ describe('credential startup and settings writes', () => {
     expect(setSecrets).toHaveBeenLastCalledWith(
       expect.objectContaining({
         apiKey: 'persisted-key',
-        vocApiKey: saved.vocApiKey,
         profiles: expect.objectContaining({ 'other-profile': 'saved-other-secret' }),
       }),
     )

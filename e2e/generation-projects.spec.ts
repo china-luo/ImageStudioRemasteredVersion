@@ -49,7 +49,6 @@ async function seedProject(page: Page) {
         'amazon-image-studio-secrets',
         JSON.stringify({
           apiKey: 'test-only-placeholder',
-          vocApiKey: '',
           profiles: { [profile.id]: 'test-only-placeholder' },
         }),
       )
