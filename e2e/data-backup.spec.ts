@@ -10,6 +10,11 @@ const PNG = Buffer.from(
 
 const manifest = (data: Partial<ExportData>) => ({ version: 5, exportedAt: new Date(0).toISOString(), ...data })
 
+test.beforeEach(async ({ page }) => {
+  // 备份流程不依赖外部字体，避免 CDN 响应拖住页面加载。
+  await page.route(/^https:\/\/(fontsapi\.zeoseven\.com|cdn\.jsdelivr\.net)\//, (route) => route.abort())
+})
+
 function readData({ store, id }: { store: string; id?: string }) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('amazon-image-studio')
@@ -157,7 +162,8 @@ test('导入后中断普通在途任务；远端任务仅续查，清空回滚�
   await page.route(/https:\/\/backup-api\.test\/|\/api-proxy\//, async (route) => {
     const request = route.request()
     requests.push(`${request.method()} ${new URL(request.url()).pathname}`)
-    if (requests.length === 1) await held
+    // 等断言确认清空失败后才返回，避免恢复成功的提示覆盖失败提示。
+    await held
     await route.fulfill({ json: { status: 'SUCCESS', b64_json: PNG.toString('base64') } }).catch(() => {})
   })
   await page.goto('/')
@@ -200,6 +206,8 @@ test('导入后中断普通在途任务；远端任务仅续查，清空回滚�
     await page.getByRole('button', { name: '清空所选数据', exact: true }).click()
     await page.getByRole('button', { name: '确认清空', exact: true }).click()
     await expect(page.getByText(/清空失败/)).toBeVisible()
+    await expect.poll(() => requests).toEqual(['GET /v1/jobs/same-remote-id', 'GET /v1/jobs/same-remote-id'])
+    release()
     await expect
       .poll(() => page.evaluate(readData, { store: 'tasks', id: remoteTask.id }))
       .toMatchObject({
