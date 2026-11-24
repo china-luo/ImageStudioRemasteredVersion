@@ -248,13 +248,13 @@ export default function Header({
     {
       destination: 'voc',
       label: 'VOC评论',
-      description: '提炼用户需求',
+      description: '本地评论分析',
       icon: <ChartBarIcon className="h-[17px] w-[17px]" />,
     },
     {
       destination: 'tagger',
       label: 'AI 人物打标',
-      description: '媒体标记与导出',
+      description: '写入披露标记',
       icon: <TagIcon className="h-[17px] w-[17px]" />,
     },
   ]

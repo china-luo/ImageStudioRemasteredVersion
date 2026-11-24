@@ -130,6 +130,7 @@ export interface AppSettings {
   activeProfileId: string
   amazonPlannerProfileId: string
   sopReverseProfileId: string
+  imageEditorProfileId: string
   seedreamEditorProfileId?: string
 }
 

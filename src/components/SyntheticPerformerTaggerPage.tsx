@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { zipSync } from 'fflate'
+import { create } from 'zustand'
 import { useStore } from '../store'
 import {
   getSyntheticPerformerMediaFormat,
@@ -21,6 +22,17 @@ type QueueItem = {
   output?: TaggedSyntheticPerformerFile
   error?: string
 }
+
+// 批次仅保留在当前页面会话的内存中，切换工作区不会丢失，也不写入磁盘。
+const useTaggerBatch = create<{
+  items: QueueItem[]
+  isRunning: boolean
+  setItems: (update: QueueItem[] | ((items: QueueItem[]) => QueueItem[])) => void
+}>((set) => ({
+  items: [],
+  isRunning: false,
+  setItems: (update) => set(({ items }) => ({ items: typeof update === 'function' ? update(items) : update })),
+}))
 
 const FORMAT_LABELS = {
   jpeg: 'JPEG',
@@ -209,9 +221,8 @@ function FilePreview({ file, format }: { file: File; format: keyof typeof FORMAT
 export default function SyntheticPerformerTaggerPage() {
   const showToast = useStore((state) => state.showToast)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [items, setItems] = useState<QueueItem[]>([])
+  const { items, isRunning, setItems } = useTaggerBatch()
   const [isDragging, setIsDragging] = useState(false)
-  const [isRunning, setIsRunning] = useState(false)
 
   const totalBytes = useMemo(() => items.reduce((total, item) => total + item.file.size, 0), [items])
   const pendingCount = items.filter((item) => item.status === 'queued' || item.status === 'error').length
@@ -296,46 +307,27 @@ export default function SyntheticPerformerTaggerPage() {
   }
 
   const startTagging = async () => {
-    if (isRunning || pendingCount === 0) return
+    if (useTaggerBatch.getState().isRunning || pendingCount === 0) return
     const pending = items.filter((item) => item.status === 'queued' || item.status === 'error')
-    setIsRunning(true)
-    const successful: QueueItem[] = []
-    const skipped: QueueItem[] = []
+    useTaggerBatch.setState({ isRunning: true })
+    const patchItem = (id: string, patch: Partial<QueueItem>) =>
+      setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)))
 
-    for (const item of pending) {
-      setItems((current) =>
-        current.map((candidate) =>
-          candidate.id === item.id ? { ...candidate, status: 'processing', error: undefined } : candidate,
-        ),
-      )
-      await nextPaint()
-      try {
-        const result = await processSyntheticPerformerFile(item.file)
-        if (result.kind === 'already-tagged') {
-          const completed = { ...item, status: 'skipped' as const, output: undefined, error: undefined }
-          skipped.push(completed)
-          setItems((current) => current.map((candidate) => (candidate.id === item.id ? completed : candidate)))
-          continue
+    try {
+      for (const item of pending) {
+        patchItem(item.id, { status: 'processing', error: undefined })
+        await nextPaint()
+        try {
+          const result = await processSyntheticPerformerFile(item.file)
+          if (result.kind === 'already-tagged') patchItem(item.id, { status: 'skipped', output: undefined })
+          else patchItem(item.id, { status: 'success', output: result.output })
+        } catch (error) {
+          patchItem(item.id, { status: 'error', error: error instanceof Error ? error.message : String(error) })
         }
-        const output = result.output
-        const completed = { ...item, status: 'success' as const, output, error: undefined }
-        successful.push(completed)
-        setItems((current) => current.map((candidate) => (candidate.id === item.id ? completed : candidate)))
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        setItems((current) =>
-          current.map((candidate) =>
-            candidate.id === item.id ? { ...candidate, status: 'error', error: message } : candidate,
-          ),
-        )
       }
+    } finally {
+      useTaggerBatch.setState({ isRunning: false })
     }
-
-    setIsRunning(false)
-    if (successful.length > 0) deliverOutputs(successful)
-    if (successful.length === 0 && skipped.length > 0)
-      showToast(`已跳过 ${skipped.length} 个已包含标记的文件，没有生成下载`, 'info')
-    if (successful.length === 0 && skipped.length === 0) showToast('没有文件完成打标，请检查失败原因后重试', 'error')
   }
 
   return (
@@ -555,6 +547,16 @@ export default function SyntheticPerformerTaggerPage() {
             <p className="mt-2 text-center text-[11px] font-medium text-[var(--danger)]">
               {errorCount} 个文件失败，可修正后重试
             </p>
+          )}
+          {!isRunning && successCount > 0 && (
+            <button
+              type="button"
+              onClick={() => deliverOutputs(items.filter((item) => item.status === 'success'))}
+              className="ui-btn ui-btn-soft mt-2 w-full"
+            >
+              <DownloadIcon className="h-4 w-4" />
+              下载已打标文件（{successCount}）
+            </button>
           )}
           {!isRunning && items.length > 0 && (
             <button type="button" onClick={resetQueue} className="ui-btn ui-btn-ghost mt-2 w-full">

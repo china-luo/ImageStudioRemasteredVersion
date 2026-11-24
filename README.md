@@ -126,7 +126,8 @@
 | --- | --- | --- |
 | 图片生成 | Images API，或支持图片输出的 Chat Completions | 首页生图、风格板和最终商品图 |
 | AI 策划 | Responses API / Chat Completions | 商品摘要、Listing、A+、TikTok 策划 |
-| 拆图反推 | Responses API / Chat Completions | 可与 AI 策划共用，也可独立配置 |
+| 图片编辑 | 通用图片 API 或 Seedream 5.0 Pro | 在「图片生成」配置页为两个编辑引擎分别选择 profile，不跟随首页配置 |
+| 拆图反推 | Responses API / Chat Completions | 在「AI 策划」配置页明确绑定；可与策划共用一个 profile，不自动继承 |
 
 支持的服务商和连接方式：
 

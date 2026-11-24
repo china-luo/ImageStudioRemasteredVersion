@@ -13,7 +13,10 @@ import {
   createDefaultFalProfile,
   findEquivalentApiProfile,
   getAmazonPlannerProfile,
+  getImageEditorProfile,
   getImageGenerationProfile,
+  getSeedreamEditorProfile,
+  getSopReverseProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
   isAmazonPlannerProfile,
@@ -851,7 +854,38 @@ describe('amazon planner profile', () => {
     expect(settings.profiles).toEqual([imageProfile, plannerProfile, vocProfile])
     expect(getImageGenerationProfile(settings)?.id).toBe(imageProfile.id)
     expect(getAmazonPlannerProfile(settings)?.id).toBe(plannerProfile.id)
-    expect(settings.sopReverseProfileId).toBe(plannerProfile.id)
+    expect(settings.sopReverseProfileId).toBe('')
+  })
+
+  it('resolves only explicitly bound editor and SOP profiles', () => {
+    const image = createDefaultOpenAIProfile({ id: 'gen', apiMode: 'images', apiKey: 'test-only' })
+    const editor = createDefaultOpenAIProfile({ id: 'edit', apiMode: 'images', apiKey: 'test-only' })
+    const planner = createDefaultOpenAIProfile({ id: 'plan', apiMode: 'responses' })
+    const sop = createDefaultOpenAIProfile({ id: 'sop', apiMode: 'chat' })
+    const seedream = createDefaultOpenAIProfile({
+      id: 'seedream',
+      provider: 'volcengine',
+      apiMode: 'images',
+      model: 'doubao-seedream-5-0-pro-260628',
+    })
+    const profiles = [image, editor, planner, sop, seedream]
+    const unbound = { profiles, activeProfileId: image.id, amazonPlannerProfileId: planner.id }
+    expect(getImageEditorProfile(unbound)).toBeNull()
+    expect(getSeedreamEditorProfile({ ...unbound, seedreamEditorProfileId: image.id })).toBeNull()
+    expect(getSopReverseProfile({ ...unbound, sopReverseProfileId: 'deleted' })).toBeNull()
+
+    const bound = {
+      ...unbound,
+      imageEditorProfileId: editor.id,
+      seedreamEditorProfileId: seedream.id,
+      sopReverseProfileId: sop.id,
+    }
+    expect(getImageEditorProfile(bound)?.id).toBe(editor.id)
+    expect(getSeedreamEditorProfile(bound)?.id).toBe(seedream.id)
+    expect(getSopReverseProfile(bound)?.id).toBe(sop.id)
+    expect(getImageEditorProfile({ ...bound, activeProfileId: seedream.id })?.id).toBe(editor.id)
+    expect(getSopReverseProfile({ ...bound, amazonPlannerProfileId: sop.id, sopReverseProfileId: '' })).toBeNull()
+    expect(getSopReverseProfile({ ...bound, profiles: [image, editor, planner, seedream] })).toBeNull()
   })
 
   it('does not create VOC settings when selecting the default planner profile', () => {

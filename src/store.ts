@@ -577,9 +577,11 @@ interface AppState {
   setMaskEditorImageId: (id: string | null) => void
   galleryInputDraft: AgentInputDraft | null
   seedreamEditorDraft: SeedreamEditorDraft
+  seedreamEditorDraftRevision: number
   setSeedreamEditorDraft: (patch: Partial<SeedreamEditorDraft>) => void
   resetSeedreamEditorDraft: () => void
   sopDraft: SopWorkspaceDraft
+  sopDraftRevision: number
   setSopDraft: (patch: Partial<SopWorkspaceDraft>) => void
   resetSopDraft: () => void
   vocDraft: VocWorkspaceDraft
@@ -649,8 +651,8 @@ interface AppState {
   lightboxImageList: string[]
   setLightboxImageId: (id: string | null, list?: string[]) => void
   showSettings: boolean
-  settingsTabRequest: SettingsTab | null
-  setShowSettings: (v: boolean, tab?: SettingsTab) => void
+  settingsTabRequest: SettingsTab | 'editor-api' | 'sop-api' | null
+  setShowSettings: (v: boolean, tab?: SettingsTab | 'editor-api' | 'sop-api') => void
   supportPromptOpen: boolean
   setSupportPromptOpen: (v: boolean) => void
   dismissSupportPrompt: () => void
@@ -1065,11 +1067,16 @@ export const useStore = create<AppState>()(
       },
       galleryInputDraft: null,
       seedreamEditorDraft: { ...DEFAULT_SEEDREAM_EDITOR_DRAFT },
+      seedreamEditorDraftRevision: 0,
       setSeedreamEditorDraft: (patch) =>
         set((state) => ({ seedreamEditorDraft: { ...state.seedreamEditorDraft, ...patch, updatedAt: Date.now() } })),
       resetSeedreamEditorDraft: () =>
-        set({ seedreamEditorDraft: { ...DEFAULT_SEEDREAM_EDITOR_DRAFT, updatedAt: Date.now() } }),
+        set((state) => ({
+          seedreamEditorDraft: { ...DEFAULT_SEEDREAM_EDITOR_DRAFT, updatedAt: Date.now() },
+          seedreamEditorDraftRevision: state.seedreamEditorDraftRevision + 1,
+        })),
       sopDraft: { ...DEFAULT_SOP_DRAFT, form: { ...DEFAULT_SOP_DRAFT.form } },
+      sopDraftRevision: 0,
       setSopDraft: (patch) =>
         set((state) => ({
           sopDraft: {
@@ -1083,7 +1090,10 @@ export const useStore = create<AppState>()(
           },
         })),
       resetSopDraft: () =>
-        set({ sopDraft: { ...DEFAULT_SOP_DRAFT, form: { ...DEFAULT_SOP_DRAFT.form }, updatedAt: Date.now() } }),
+        set((state) => ({
+          sopDraft: { ...DEFAULT_SOP_DRAFT, form: { ...DEFAULT_SOP_DRAFT.form }, updatedAt: Date.now() },
+          sopDraftRevision: state.sopDraftRevision + 1,
+        })),
       vocDraft: { ...DEFAULT_VOC_DRAFT },
       setVocDraft: (patch) => set((state) => ({ vocDraft: { ...state.vocDraft, ...patch, updatedAt: Date.now() } })),
       resetVocDraft: () => set({ vocDraft: { ...DEFAULT_VOC_DRAFT, updatedAt: Date.now() } }),
@@ -1540,19 +1550,46 @@ async function resolveImageSizeParamsList(
 }
 
 /** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并在后台清理孤立图片 */
+type TaskWorkspace = 'generation' | 'editor'
 let storeInitialization: Promise<void> | undefined
+let startupMaintenance: Promise<void> | undefined
+let startupRecovery: { generation: number; taskIds: Set<string> } | undefined
+const startedRecoveryWorkspaces = new Set<TaskWorkspace>()
 let taskWorkGeneration = 0
 let subscribedToTaskDataReset = false
 
-export function initStore(): Promise<void> {
+export function initStore({ deferTaskRecovery = false } = {}): Promise<void> {
   // 严格模式或重复挂载共享同一次启动，避免两轮图片清理与恢复交错。
-  return (storeInitialization ??= restoreStoreAtStartup().catch((error) => {
+  return (storeInitialization ??= restoreStoreAtStartup(deferTaskRecovery).catch((error) => {
     storeInitialization = undefined
     throw error
   }))
 }
 
-async function restoreStoreAtStartup() {
+function belongsToTaskWorkspace(task: TaskRecord, workspace: TaskWorkspace) {
+  const isEditorTask = task.category?.workflow === 'seedream-edit' || Boolean(task.imageEditContext)
+  return isEditorTask === (workspace === 'editor')
+}
+
+export async function resumeWorkspaceStartupTasks(workspace: TaskWorkspace, isActive: () => boolean) {
+  const recovery = startupRecovery
+  await startupMaintenance
+  if (
+    !isActive() ||
+    !recovery ||
+    recovery.generation !== taskWorkGeneration ||
+    startedRecoveryWorkspaces.has(workspace)
+  ) return
+  startedRecoveryWorkspaces.add(workspace)
+  // 只续查启动时读到的任务，不能为本次会话中新提交的任务再开一条轮询。
+  scheduleTaskRecordRecovery(
+    useStore.getState().tasks.filter((task) =>
+      recovery.taskIds.has(task.id) && belongsToTaskWorkspace(task, workspace) && !taskExecutionService?.isExecuting(task.id),
+    ),
+  )
+}
+
+async function restoreStoreAtStartup(deferTaskRecovery: boolean) {
   if (typeof indexedDB !== 'undefined') {
     if (!subscribedToTaskDataReset) {
       subscribeTaskDataReset(async () => (await import('./lib/dataBackup')).applyExternalTaskDataReset())
@@ -1686,35 +1723,33 @@ async function restoreStoreAtStartup() {
     })
   }
 
-  const sopDraft = useStore.getState().sopDraft
-  const restoredSopImages = []
-  let sopImagesChanged = false
-  for (const image of sopDraft.referenceImages) {
-    if (image.dataUrl) {
-      restoredSopImages.push(image)
-      continue
-    }
+  const restoredSopImages = new Map<string, string | undefined>()
+  for (const image of useStore.getState().sopDraft.referenceImages) {
+    if (image.dataUrl) continue
     const storedImage = await getImage(image.id)
     if (!isCurrent()) return
-    if (storedImage?.dataUrl) {
-      restoredSopImages.push({ ...image, dataUrl: storedImage.dataUrl })
-      cacheImage(image.id, storedImage.dataUrl)
-      sopImagesChanged = true
-    } else {
-      sopImagesChanged = true
-    }
+    restoredSopImages.set(image.id, storedImage?.dataUrl)
+    if (storedImage?.dataUrl) cacheImage(image.id, storedImage.dataUrl)
   }
-  if (sopImagesChanged) {
-    useStore.setState({
+  if (restoredSopImages.size) {
+    useStore.setState(({ sopDraft }) => ({
       sopDraft: {
         ...sopDraft,
-        referenceImages: restoredSopImages,
+        // 只补全当前仍存在的引用，不覆盖用户在读取期间进行的上传、移除或重置。
+        referenceImages: sopDraft.referenceImages.flatMap((image) => {
+          if (image.dataUrl || !restoredSopImages.has(image.id)) return [image]
+          const dataUrl = restoredSopImages.get(image.id)
+          return dataUrl ? [{ ...image, dataUrl }] : []
+        }),
       },
-    })
+    }))
   }
 
+  if (deferTaskRecovery) {
+    startupRecovery = { generation: workGeneration, taskIds: new Set([...recoveryTaskIds.fal, ...recoveryTaskIds.custom]) }
+  }
   // 先确定清理候选，再读取最新引用；本次任务恢复等清理结束后启动，避免删到刚写入、尚未关联的结果。
-  void (async () => {
+  startupMaintenance = (async () => {
     const imageIds = await getAllImageIds()
     const [storedTasks, plannerSessions, generationProjects] = await Promise.all([
       getAllTasks(),
@@ -1740,7 +1775,7 @@ async function restoreStoreAtStartup() {
   })()
     .catch((error) => console.warn('后台图片清理失败:', error))
     .finally(() => {
-      if (workGeneration !== taskWorkGeneration) return
+      if (deferTaskRecovery || workGeneration !== taskWorkGeneration) return
       const recoveryManager = getTaskRecoveryManager()
       for (const taskId of recoveryTaskIds.fal) recoveryManager.scheduleFal(taskId, 0)
       for (const taskId of recoveryTaskIds.custom) recoveryManager.scheduleCustom(taskId, 0)
@@ -2728,10 +2763,12 @@ export async function addImageFromFile(file: File): Promise<void> {
   useStore.getState().addInputImage(image)
 }
 
-export async function createInputImageFromFile(file: File): Promise<InputImage | null> {
+export async function createInputImageFromFile(file: File, isCurrent = () => true): Promise<InputImage | null> {
   if (!file.type.startsWith('image/')) return null
   const dataUrl = await fileToDataUrl(file)
+  if (!isCurrent()) return null
   const id = await storeImage(dataUrl, 'upload')
+  if (!isCurrent()) return null
   cacheImage(id, dataUrl)
   return { id, dataUrl }
 }

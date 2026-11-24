@@ -84,6 +84,7 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
 
   return {
     cancel,
+    isExecuting: (taskId: string) => executions.has(taskId),
     cancelAll() {
       for (const taskId of executions.keys()) cancel(taskId)
     },

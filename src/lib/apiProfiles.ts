@@ -616,10 +616,18 @@ export function getHomeApiProfile(settings: Partial<AppSettings> | unknown): Api
   return getImageGenerationProfile(settings)
 }
 
+export function getImageEditorProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
+  const normalized = normalizeSettings(settings)
+  return normalized.profiles.find((profile) => profile.id === normalized.imageEditorProfileId) ?? null
+}
+
+export function isSeedreamEditorProfile(profile: ApiProfile): boolean {
+  return profile.provider === 'volcengine' && isVolcengineSeedreamProModel(profile.model)
+}
+
 export function getSeedreamEditorProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
   const normalized = normalizeSettings(settings)
-  const id = normalized.seedreamEditorProfileId
-  return (id ? normalized.profiles.find((profile) => profile.id === id) : null) ?? getImageGenerationProfile(settings)
+  return normalized.profiles.find((profile) => profile.id === normalized.seedreamEditorProfileId) ?? null
 }
 
 function resolveAmazonPlannerProfileId(profiles: ApiProfile[], value: unknown): string {
@@ -629,15 +637,12 @@ function resolveAmazonPlannerProfileId(profiles: ApiProfile[], value: unknown): 
   return profiles.find(isAmazonPlannerProfile)?.id ?? ''
 }
 
-function resolveSopReverseProfileId(profiles: ApiProfile[], value: unknown, fallbackId: string): string {
-  const requestedId = typeof value === 'string' ? value : ''
-  const requestedProfile = requestedId ? profiles.find((profile) => profile.id === requestedId) : undefined
-  if (requestedProfile && isAmazonPlannerProfile(requestedProfile)) return requestedProfile.id
-
-  const fallbackProfile = fallbackId ? profiles.find((profile) => profile.id === fallbackId) : undefined
-  if (fallbackProfile && isAmazonPlannerProfile(fallbackProfile)) return fallbackProfile.id
-
-  return profiles.find(isAmazonPlannerProfile)?.id ?? ''
+function resolveWorkspaceProfileId(
+  profiles: ApiProfile[],
+  value: unknown,
+  supportsWorkspace: (profile: ApiProfile) => boolean,
+): string {
+  return profiles.find((profile) => profile.id === value && supportsWorkspace(profile))?.id ?? ''
 }
 
 function createDefaultProfilePair(overrides: Partial<ApiProfile> = {}): ApiProfile[] {
@@ -817,12 +822,17 @@ export function normalizeSettings(
       ? record.activeProfileId
       : profiles[0].id
   const amazonPlannerProfileId = resolveAmazonPlannerProfileId(profiles, record.amazonPlannerProfileId)
-  const sopReverseProfileId = resolveSopReverseProfileId(profiles, record.sopReverseProfileId, amazonPlannerProfileId)
-  const seedreamEditorProfileId =
-    typeof record.seedreamEditorProfileId === 'string' &&
-    profiles.some((profile) => profile.id === record.seedreamEditorProfileId)
-      ? record.seedreamEditorProfileId
-      : ''
+  const sopReverseProfileId = resolveWorkspaceProfileId(profiles, record.sopReverseProfileId, isAmazonPlannerProfile)
+  const imageEditorProfileId = resolveWorkspaceProfileId(
+    profiles,
+    record.imageEditorProfileId,
+    canApiProfileGenerateImages,
+  )
+  const seedreamEditorProfileId = resolveWorkspaceProfileId(
+    profiles,
+    record.seedreamEditorProfileId,
+    isSeedreamEditorProfile,
+  )
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
 
   return {
@@ -850,6 +860,7 @@ export function normalizeSettings(
     activeProfileId,
     amazonPlannerProfileId,
     sopReverseProfileId,
+    imageEditorProfileId,
     seedreamEditorProfileId,
   }
 }
@@ -1069,6 +1080,9 @@ function hasOnlyDefaultProfiles(settings: AppSettings): boolean {
     settings.profiles.length === 2 &&
     settings.activeProfileId === DEFAULT_OPENAI_PROFILE_ID &&
     settings.amazonPlannerProfileId === DEFAULT_AMAZON_PLANNER_PROFILE_ID &&
+    !settings.sopReverseProfileId &&
+    !settings.imageEditorProfileId &&
+    !settings.seedreamEditorProfileId &&
     settings.profiles.some(isDefaultOpenAIProfile) &&
     settings.profiles.some(isDefaultAmazonPlannerProfile)
   )
@@ -1250,6 +1264,7 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   profiles: createDefaultProfilePair(),
   activeProfileId: DEFAULT_OPENAI_PROFILE_ID,
   amazonPlannerProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
-  sopReverseProfileId: DEFAULT_AMAZON_PLANNER_PROFILE_ID,
+  sopReverseProfileId: '',
+  imageEditorProfileId: '',
   seedreamEditorProfileId: '',
 })
