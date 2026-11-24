@@ -1937,7 +1937,13 @@ export default function AmazonPlanner({
     const onKeyDown = (event: KeyboardEvent) => {
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || promptEditor) return
       const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
         return
       }
       const index = Number(event.key) - 1
@@ -1985,7 +1991,12 @@ export default function AmazonPlanner({
           [
             ['details', '商品资料', '标题、站点与参考图', Boolean(listingText.trim()) && hasPlanOptions],
             ['style', '策划与风格', '查看候选并选择风格', Boolean(selectedStyleCandidate)],
-            ['production', '图片制作', '逐张检查与提交生成', projectTasks(tasks, project.id).some((task) => task.status === 'done')],
+            [
+              'production',
+              '图片制作',
+              '逐张检查与提交生成',
+              projectTasks(tasks, project.id).some((task) => task.status === 'done'),
+            ],
             ['results', '筛选与导出', '版本定稿与项目导出', finalsCount > 0],
           ] as const
         ).map(([value, label, description, completed], index) => (
@@ -2339,7 +2350,11 @@ export default function AmazonPlanner({
                   {isGeneratingStyleImages ? '生成中...' : '生成风格板'}
                 </button>
                 {isGeneratingStyleImages && (
-                  <button type="button" onClick={stopGeneratingStyleImages} className="ui-btn ui-btn-danger h-9 text-sm">
+                  <button
+                    type="button"
+                    onClick={stopGeneratingStyleImages}
+                    className="ui-btn ui-btn-danger h-9 text-sm"
+                  >
                     <CloseIcon className="h-4 w-4" />
                     停止
                   </button>
@@ -2367,9 +2382,7 @@ export default function AmazonPlanner({
               </div>
             </div>
             {styleError && (
-              <div className="ui-callout ui-callout-danger mt-3 py-2 text-xs leading-relaxed">
-                {styleError}
-              </div>
+              <div className="ui-callout ui-callout-danger mt-3 py-2 text-xs leading-relaxed">{styleError}</div>
             )}
             {activeStyleCandidates.length > 0 && (
               <div
@@ -2472,9 +2485,7 @@ export default function AmazonPlanner({
                   className="aspect-square w-full bg-[var(--surface-inset)] object-contain"
                 />
                 <div className="border-t border-[var(--line)] p-3">
-                  <div className="truncate text-sm font-semibold text-[var(--text-1)]">
-                    {stylePreview.label}
-                  </div>
+                  <div className="truncate text-sm font-semibold text-[var(--text-1)]">{stylePreview.label}</div>
                   <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-[var(--text-2)]">
                     {stylePreview.description}
                   </div>
@@ -2529,16 +2540,10 @@ export default function AmazonPlanner({
               <div className="mb-3 flex flex-col gap-2.5">
                 <div>
                   <div className="text-sm font-bold text-[var(--text-1)]">逐张策划</div>
-                  <div className="mt-0.5 text-xs text-[var(--text-2)]">
-                    选择图片位后，生成按钮会切换到对应提示词。
-                  </div>
+                  <div className="mt-0.5 text-xs text-[var(--text-2)]">选择图片位后，生成按钮会切换到对应提示词。</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={selectAllBatchPlans}
-                    className="ui-btn ui-btn-sm h-7 px-2 text-xs"
-                  >
+                  <button type="button" onClick={selectAllBatchPlans} className="ui-btn ui-btn-sm h-7 px-2 text-xs">
                     {batchSelectedIndexes.length === imagePlans.length ? '清空' : '全选'}
                   </button>
                   <button
@@ -2646,11 +2651,7 @@ export default function AmazonPlanner({
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={selectAllBatchPlans}
-                    className="ui-btn ui-btn-sm h-7 px-2 text-xs"
-                  >
+                  <button type="button" onClick={selectAllBatchPlans} className="ui-btn ui-btn-sm h-7 px-2 text-xs">
                     {batchSelectedIndexes.length === aPlusPlansWithSizes.length ? '清空' : '全选'}
                   </button>
                   <button

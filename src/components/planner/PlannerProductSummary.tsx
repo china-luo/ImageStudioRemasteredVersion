@@ -71,10 +71,7 @@ export default function PlannerProductSummary({ draft }: { draft: AmazonPromptDr
   const [expandedField, setExpandedField] = useState<ProductSummaryField['key'] | null>(null)
 
   return (
-    <section
-      className="mt-2 border-t border-[var(--line)] pt-4"
-      aria-labelledby="product-summary-title"
-    >
+    <section className="mt-2 border-t border-[var(--line)] pt-4" aria-labelledby="product-summary-title">
       <div className="flex flex-wrap items-center gap-2">
         <h3 id="product-summary-title" className="text-sm font-semibold text-[var(--text-1)]">
           AI 商品信息摘要
@@ -106,7 +103,9 @@ export default function PlannerProductSummary({ draft }: { draft: AmazonPromptDr
             <div key={field.key} className={field.wide ? 'md:col-span-2' : ''}>
               <div className="mb-1.5 flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-[var(--text-2)]">{field.label}</span>
-                <span className={`ui-badge h-5 px-1.5 text-[10px] ${field.usage === 'workflow' ? 'ui-badge-success' : ''}`}>
+                <span
+                  className={`ui-badge h-5 px-1.5 text-[10px] ${field.usage === 'workflow' ? 'ui-badge-success' : ''}`}
+                >
                   {field.usage === 'workflow' ? '涉及逻辑' : '仅展示'}
                 </span>
                 <button
@@ -125,7 +124,10 @@ export default function PlannerProductSummary({ draft }: { draft: AmazonPromptDr
                 </button>
               </div>
               {descriptionExpanded && (
-                <p id={descriptionId} className="mb-2 rounded-lg bg-[var(--surface-inset)] px-2.5 py-1.5 text-[11px] leading-relaxed text-[var(--text-2)]">
+                <p
+                  id={descriptionId}
+                  className="mb-2 rounded-lg bg-[var(--surface-inset)] px-2.5 py-1.5 text-[11px] leading-relaxed text-[var(--text-2)]"
+                >
                   {field.note}
                 </p>
               )}

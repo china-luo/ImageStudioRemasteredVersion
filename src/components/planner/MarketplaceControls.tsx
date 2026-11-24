@@ -14,7 +14,8 @@ export default function MarketplaceControls({ marketplaceId, onChange, disabled 
       <div>
         <div className="text-xs font-semibold text-[var(--text-1)]">Amazon 目标站点</div>
         <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--text-3)]">
-          Prompt 主体保持英文；图片里可见文案使用 <span className="font-medium text-[var(--text-2)]">{marketplace.onImageCopyLanguage}</span>。
+          Prompt 主体保持英文；图片里可见文案使用{' '}
+          <span className="font-medium text-[var(--text-2)]">{marketplace.onImageCopyLanguage}</span>。
         </div>
       </div>
       <select

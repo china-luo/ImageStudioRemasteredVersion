@@ -193,12 +193,7 @@ export default function PlannerInputPanel({
               清空
             </button>
           )}
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            disabled={isBusy}
-            className="ui-btn h-9 px-3 text-xs"
-          >
+          <button type="button" onClick={onOpenSettings} disabled={isBusy} className="ui-btn h-9 px-3 text-xs">
             <SettingsIcon className="h-3.5 w-3.5" />
             设置
           </button>

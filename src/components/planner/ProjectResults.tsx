@@ -230,7 +230,11 @@ export default function ProjectResults({
         </div>
       )}
       {missingFinals.map(([key]) => (
-        <div key={key} role="alert" className="ui-callout ui-callout-danger my-3 items-center justify-between gap-2 text-sm">
+        <div
+          key={key}
+          role="alert"
+          className="ui-callout ui-callout-danger my-3 items-center justify-between gap-2 text-sm"
+        >
           <span>定稿记录已删除，请取消此定稿后重新选择。</span>
           <button type="button" onClick={() => onFinalChange(key, null)}>
             取消失效定稿

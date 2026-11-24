@@ -49,12 +49,7 @@ export default function SettingsAboutTab({
         </span>
       </button>
       <div className="ui-inset mt-5 flex w-full max-w-[420px] flex-col items-center gap-3.5 p-5">
-        <a
-          href={APP_REPOSITORY_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="ui-btn ui-btn-sm rounded-full px-4"
-        >
+        <a href={APP_REPOSITORY_URL} target="_blank" rel="noreferrer" className="ui-btn ui-btn-sm rounded-full px-4">
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path
               fillRule="evenodd"

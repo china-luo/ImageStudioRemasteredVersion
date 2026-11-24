@@ -19,6 +19,8 @@
   ·
   <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest">下载 Windows 版</a>
   ·
+  <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/deploy-pages.yml">部署记录</a>
+  ·
   <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/issues">提交 Issue</a>
 </p>
 
@@ -26,12 +28,24 @@
   <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/ci.yml"><img src="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest"><img src="https://img.shields.io/github/v/release/china-luo/ImageStudioRemasteredVersion?display_name=tag" alt="Latest release" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/china-luo/ImageStudioRemasteredVersion" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-2.0.1-2563EB" alt="Version 2.0.1" />
+  <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/deploy-pages.yml"><img src="https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/deploy-pages.yml/badge.svg?branch=main" alt="GitHub Pages 部署" /></a>
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" />
 </p>
 
-![跨境Image工作台 v2.0.1 工作台](./docs/images/workbench-overview.png)
+![跨境Image工作台：图片制作界面](./docs/images/workbench-overview.png)
+
+## v2.0.3 更新
+
+修复「习惯配置」里默认背景预览与工作台实际背景不一致的问题。默认预览会跟随主题变化，已有自定义图片仍可继续使用。
+
+## v2.0.2 更新亮点
+
+- **更清晰的制作流程**：按「商品资料 → 策划与风格 → 图片制作 → 筛选与导出」推进，桌面与移动端均可使用；支持浅色、深色和跟随系统主题。
+- **快捷命令面板**：使用 `Ctrl+K`（macOS 为 `⌘K`）搜索功能；用 `Tab` 或方向键选择，按 `Enter` 执行。
+- **更稳的项目与生成恢复**：缺少参考图时仍可切换和保存项目，导入同一 ID 的图片后恢复引用；已取得远端 ID 的任务只续查，不重新提交生成。
+
+完整变化见 [更新日志](./CHANGELOG.md)。
 
 ## 这是什么
 
@@ -96,11 +110,13 @@
 
 从 [GitHub Releases](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest) 下载最新 x64 安装包。桌面版通过 Electron 主进程使用受控网络通道，更适合日常生产、跨域受限接口和本地文件交付。
 
-当前最新版本：**v2.0.1**
+本次版本：[**v2.0.3**](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v2.0.3)
 
 ### 静态部署
 
-仓库提供 GitHub Pages、Vercel Deploy Hook、Cloudflare Assets 和 Docker 构建配置。静态托管本身不提供通用上游 API 代理，部署后仍需要上游允许 CORS，或自行提供同源代理。
+推送到 `main` 后，[GitHub Pages 工作流](https://github.com/china-luo/ImageStudioRemasteredVersion/actions/workflows/deploy-pages.yml) 会运行测试、构建和部署。可在工作流运行记录查看进度，或在仓库首页右侧的 **Deployments** 栏查看 `github-pages` 环境。
+
+仓库也提供 Vercel Deploy Hook、Cloudflare Assets 和 Docker 构建配置。静态托管本身不提供通用上游 API 代理；上游接口需允许 CORS，或自行提供同源代理。
 
 ## API 配置
 
@@ -110,7 +126,8 @@
 | --- | --- | --- |
 | 图片生成 | Images API，或支持图片输出的 Chat Completions | 首页生图、风格板和最终商品图 |
 | AI 策划 | Responses API / Chat Completions | 商品摘要、Listing、A+、TikTok 策划 |
-| 拆图反推 | Responses API / Chat Completions | 可与 AI 策划共用，也可独立配置 |
+| 图片编辑 | 通用图片 API 或 Seedream 5.0 Pro | 在「图片生成」配置页为两个编辑引擎分别选择 profile，不跟随首页配置 |
+| 拆图反推 | Responses API / Chat Completions | 在「AI 策划」配置页明确绑定；可与策划共用一个 profile，不自动继承 |
 
 支持的服务商和连接方式：
 
@@ -144,7 +161,7 @@
 
 ### 环境要求
 
-- Node.js 24 LTS 或更高版本（Windows 启动脚本、CI 与 Docker 构建统一使用 Node.js 24 基线）
+- Node.js 24 LTS 或更高版本（本地开发、CI 与 Docker 构建统一使用 Node.js 24 基线）
 - npm
 - Windows 安装包构建额外需要 NSIS 3 和 `rcedit.exe`
 
@@ -159,13 +176,7 @@ npm ci
 npm run dev
 ```
 
-打开 `http://127.0.0.1:5173/`。Windows 用户也可以运行：
-
-```text
-start-amazon-image-studio.bat
-```
-
-该脚本会检查依赖并启动本地服务。
+打开 `http://127.0.0.1:5173/`，或使用终端显示的实际地址与端口。Windows 用户执行相同的 `npm` 命令即可启动本地开发环境。
 
 ### 生产构建与预览
 

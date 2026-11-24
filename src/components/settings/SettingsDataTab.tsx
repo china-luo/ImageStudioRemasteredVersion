@@ -44,7 +44,12 @@ export default function SettingsDataTab({
   return (
     <div className="space-y-4">
       <div className="ui-callout ui-callout-accent items-start gap-3">
-        <svg className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg
+          className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent)]"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -111,7 +116,7 @@ export default function SettingsDataTab({
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-3">
           <Checkbox checked={clearConfig} onChange={onClearConfigChange} label="包含配置" tone="danger" />
-          <Checkbox checked={clearTasks} onChange={onClearTasksChange} label="包含任务和图片" tone="danger" />
+          <Checkbox checked={clearTasks} onChange={onClearTasksChange} label="包含任务、项目和图片" tone="danger" />
         </div>
         <button
           type="button"

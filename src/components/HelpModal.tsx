@@ -90,7 +90,8 @@ export default function HelpModal({ appMode, onClose }: HelpModalProps) {
                 <ul className="list-disc space-y-2 pl-4 leading-relaxed">
                   <li>
                     按 <kbd className="ui-kbd">Ctrl</kbd> + <kbd className="ui-kbd">K</kbd> 或{' '}
-                    <kbd className="ui-kbd">⌘</kbd> + <kbd className="ui-kbd">K</kbd> 打开快捷命令面板，快速切换工作空间与深浅主题。
+                    <kbd className="ui-kbd">⌘</kbd> + <kbd className="ui-kbd">K</kbd>{' '}
+                    打开快捷命令面板，快速切换工作空间与深浅主题。
                   </li>
                   <li>点击左侧栏顶部折叠按钮可切换紧凑图标栏模式，获得更大创作画布。</li>
                 </ul>

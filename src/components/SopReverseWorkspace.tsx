@@ -216,33 +216,52 @@ export default function SopReverseWorkspace() {
   const addImages = async (files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'))
     if (!imageFiles.length) return
-    const slots = Math.max(0, MAX_REFERENCE_IMAGES - referenceImages.length)
+    const { sopDraft, sopDraftRevision } = useStore.getState()
+    const isCurrent = () => useStore.getState().sopDraftRevision === sopDraftRevision
+    const slots = Math.max(0, MAX_REFERENCE_IMAGES - sopDraft.referenceImages.length)
     const selected = imageFiles.slice(0, slots)
     if (!selected.length) {
       showToast(`最多上传 ${MAX_REFERENCE_IMAGES} 张竞品图`, 'error')
       return
     }
 
-    const nextImages = await Promise.all(
-      selected.map(async (file) => {
-        const dataUrl = await fileToDataUrl(file)
-        const id = await storeImage(dataUrl, 'upload')
-        return { id, name: file.name, dataUrl }
-      }),
-    )
-    setSopDraft({ referenceImages: [...referenceImages, ...nextImages] })
-    if (imageFiles.length > selected.length) showToast(`已保留前 ${MAX_REFERENCE_IMAGES} 张图片`, 'info')
+    try {
+      const nextImages = await Promise.all(
+        selected.map(async (file) => {
+          const dataUrl = await fileToDataUrl(file)
+          if (!isCurrent()) return null
+          const id = await storeImage(dataUrl, 'upload')
+          return { id, name: file.name, dataUrl }
+        }),
+      )
+      if (!isCurrent()) return
+      const current = useStore.getState().sopDraft.referenceImages
+      const seen = new Set(current.map((image) => image.id))
+      const unique = nextImages.flatMap((image) => {
+        if (!image || seen.has(image.id)) return []
+        seen.add(image.id)
+        return [image]
+      })
+      const added = unique.slice(0, Math.max(0, MAX_REFERENCE_IMAGES - current.length))
+      if (added.length) setSopDraft({ referenceImages: [...current, ...added] })
+      if (imageFiles.length > selected.length || unique.length > added.length) {
+        showToast(`最多上传 ${MAX_REFERENCE_IMAGES} 张竞品图`, 'info')
+      }
+    } catch (error) {
+      if (isCurrent()) showToast(`竞品图读取失败：${String(error)}`, 'error')
+    }
   }
 
   const removeImage = (id: string) => {
-    setSopDraft({ referenceImages: referenceImages.filter((image) => image.id !== id) })
+    const current = useStore.getState().sopDraft.referenceImages
+    setSopDraft({ referenceImages: current.filter((image) => image.id !== id) })
   }
 
   const analyzeWithAi = async () => {
     if (!reverseProfile || profileValidation) {
       setError(profileValidation)
       showToast(`请先配置拆图反推 AI：${profileValidation}`, 'error')
-      setShowSettings(true, 'api')
+      setShowSettings(true, 'sop-api')
       return
     }
 
@@ -345,7 +364,7 @@ export default function SopReverseWorkspace() {
               {reverseProfile.name}
             </span>
           )}
-          <button type="button" onClick={() => setShowSettings(true, 'api')} className="ui-btn ui-btn-sm h-9">
+          <button type="button" onClick={() => setShowSettings(true, 'sop-api')} className="ui-btn ui-btn-sm h-9">
             <SettingsIcon className="h-3.5 w-3.5" />
             配置拆图 AI
           </button>
@@ -470,7 +489,9 @@ export default function SopReverseWorkspace() {
 
             <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-xs text-[var(--text-2)]">
               {missingFields.length === 0 ? (
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">核心资料完整，可直接开始 AI 拆解反推</span>
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                  核心资料完整，可直接开始 AI 拆解反推
+                </span>
               ) : (
                 <span>建议补充：{missingFields.join('、')}</span>
               )}
@@ -540,7 +561,11 @@ export default function SopReverseWorkspace() {
                   <p className="mt-0.5 text-xs text-[var(--text-3)]">包含 12 项完整结构拆解、迁移方案与中英文提示词</p>
                 </div>
                 {englishPrompt && (
-                  <button type="button" onClick={() => void copyEnglishPrompt()} className="ui-btn ui-btn-soft ui-btn-sm">
+                  <button
+                    type="button"
+                    onClick={() => void copyEnglishPrompt()}
+                    className="ui-btn ui-btn-soft ui-btn-sm"
+                  >
                     <CopyIcon className="h-3.5 w-3.5" />
                     复制提示词
                   </button>
@@ -648,7 +673,10 @@ export default function SopReverseWorkspace() {
         englishPrompt &&
         createPortal(
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-6">
-            <div className="ui-backdrop animate-overlay-in absolute inset-0" onClick={() => setShowPromptModal(false)} />
+            <div
+              className="ui-backdrop animate-overlay-in absolute inset-0"
+              onClick={() => setShowPromptModal(false)}
+            />
             <div
               className="ui-modal animate-modal-in relative z-10 flex h-[72vh] w-full max-w-3xl flex-col"
               onClick={(event) => event.stopPropagation()}
@@ -661,7 +689,11 @@ export default function SopReverseWorkspace() {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <button type="button" onClick={() => void copyEnglishPrompt()} className="ui-btn ui-btn-primary ui-btn-sm">
+                  <button
+                    type="button"
+                    onClick={() => void copyEnglishPrompt()}
+                    className="ui-btn ui-btn-primary ui-btn-sm"
+                  >
                     <CopyIcon className="h-3.5 w-3.5" />
                     复制
                   </button>

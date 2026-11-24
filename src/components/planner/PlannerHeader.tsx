@@ -19,10 +19,8 @@ interface PlannerHeaderProps {
 
 const SEGMENT_GROUP_CLASS =
   'inline-flex rounded-[9px] bg-[var(--surface-inset)] p-[3px] shadow-[inset_0_0_0_1px_var(--line)]'
-const SEGMENT_ACTIVE_CLASS =
-  'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
-const SEGMENT_IDLE_CLASS =
-  'text-[var(--text-2)] hover:text-[var(--text-1)]'
+const SEGMENT_ACTIVE_CLASS = 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+const SEGMENT_IDLE_CLASS = 'text-[var(--text-2)] hover:text-[var(--text-1)]'
 
 export default function PlannerHeader({
   platform,

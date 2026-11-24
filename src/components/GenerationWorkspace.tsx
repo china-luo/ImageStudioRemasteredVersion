@@ -340,7 +340,10 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
 
   if (!project)
     return (
-      <div className="ui-panel animate-fade-up flex flex-col items-center justify-center gap-3 px-6 py-20 text-center" role="status">
+      <div
+        className="ui-panel animate-fade-up flex flex-col items-center justify-center gap-3 px-6 py-20 text-center"
+        role="status"
+      >
         {!error && <div className="progress-ring" aria-hidden="true" />}
         <p className={error ? 'text-sm font-medium text-[var(--danger)]' : 'text-sm text-[var(--text-2)]'}>
           {error || '正在加载项目…'}
@@ -413,7 +416,10 @@ export default function GenerationWorkspace(props: { resultsPanel: ReactNode }) 
           </span>
         </div>
         {error && (
-          <div role="alert" className="ui-callout ui-callout-danger w-full flex-wrap items-center justify-between gap-2 text-sm">
+          <div
+            role="alert"
+            className="ui-callout ui-callout-danger w-full flex-wrap items-center justify-between gap-2 text-sm"
+          >
             <span>{error}</span>
             <button
               type="button"

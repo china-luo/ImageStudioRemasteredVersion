@@ -194,10 +194,15 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenHelp }
   useEffect(() => {
     if (!open) return
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
-      } else if (event.key === 'ArrowDown') {
+        return
+      }
+      // 搜索框使用高亮选项；按钮保留原生键盘激活，执行实际获得焦点的命令。
+      if (event.target !== inputRef.current) return
+      if (event.key === 'ArrowDown') {
         event.preventDefault()
         setActiveIndex((prev) => (filtered.length ? (prev + 1) % filtered.length : 0))
       } else if (event.key === 'ArrowUp') {
@@ -270,10 +275,13 @@ export default function CommandPalette({ open, onClose, onNavigate, onOpenHelp }
                       key={item.id}
                       type="button"
                       data-active={active ? 'true' : undefined}
+                      onFocus={() => setActiveIndex(index)}
                       onMouseEnter={() => setActiveIndex(index)}
                       onClick={item.action}
                       className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors ${
-                        active ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--text-1)] hover:bg-[var(--surface-hover)]'
+                        active
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                          : 'text-[var(--text-1)] hover:bg-[var(--surface-hover)]'
                       }`}
                     >
                       <span

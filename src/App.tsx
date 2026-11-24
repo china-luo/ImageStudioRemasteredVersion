@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { initSettingsSecrets, initStore } from './store'
+import { initSettingsSecrets, initStore, resumeWorkspaceStartupTasks } from './store'
 import { useStore } from './store'
 import { parseAppRoute, routeFromAppState, serializeAppRoute, type AppFeatureView, type AppRoute } from './lib/appRoute'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
@@ -82,7 +82,7 @@ export default function App() {
         if (hasUrlSettings) {
           setSettings(buildSettingsFromUrlParams(useStore.getState().settings, urlSettingsParams))
         }
-        return initStore()
+        return initStore({ deferTaskRecovery: true })
       })
       .then(() => setStoreReady(true))
       .catch((error) => {
@@ -109,6 +109,18 @@ export default function App() {
     if (serializeAppRoute(parseAppRoute(window.location.hash)) === next) return
     window.history.pushState(null, '', next)
   }, [appMode, featureView, routeReady])
+
+  useEffect(() => {
+    if (!storeReady || !routeReady) return
+    const workspace =
+      featureView === 'editor' ? 'editor' : featureView === 'home' && appMode === 'gallery' ? 'generation' : null
+    if (!workspace) return
+    let active = true
+    void resumeWorkspaceStartupTasks(workspace, () => active)
+    return () => {
+      active = false
+    }
+  }, [appMode, featureView, routeReady, storeReady])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {
@@ -192,16 +204,10 @@ export default function App() {
       <ErrorBoundary
         resetKey={showSettings}
         fallback={(error, reset) => (
-          <div
-            data-no-drag-select
-            className="ui-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4"
-          >
+          <div data-no-drag-select className="ui-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4">
             <div className="ui-modal animate-modal-in w-full max-w-md p-6">
               <div className="text-base font-bold text-[var(--text-1)]">设置面板打开失败</div>
-              <div
-                data-selectable-text
-                className="ui-callout ui-callout-danger mt-3 font-mono text-xs"
-              >
+              <div data-selectable-text className="ui-callout ui-callout-danger mt-3 font-mono text-xs">
                 {error.message}
               </div>
               <div className="mt-5 flex justify-end gap-2">

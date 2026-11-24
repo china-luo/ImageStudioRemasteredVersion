@@ -210,8 +210,7 @@ export function sortPlannerSessions(sessions: AmazonPlannerSession[]) {
 }
 
 export function getActionStepClass(status: WorkflowStepStatus) {
-  if (status === 'done')
-    return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  if (status === 'done') return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
   if (status === 'current')
     return 'border-[var(--accent-ring)] bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--accent-soft)]'
   return 'border-[var(--line)] bg-[var(--surface-solid)] text-[var(--text-3)]'

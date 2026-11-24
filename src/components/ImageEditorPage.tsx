@@ -9,9 +9,8 @@ import {
 } from 'react'
 import {
   canApiProfileGenerateImages,
-  getHomeApiProfile,
+  getImageEditorProfile,
   getSeedreamEditorProfile,
-  isVolcengineSeedreamProModel,
   validateApiProfile,
 } from '../lib/apiProfiles'
 import { downloadImageIds } from '../lib/downloadImages'
@@ -174,16 +173,9 @@ function HistoryImagePicker({
         <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4 sm:px-6">
           <div>
             <h3 className="text-base font-bold tracking-tight text-[var(--text-1)]">从历史记录选择</h3>
-            <p className="mt-0.5 text-xs text-[var(--text-3)]">
-              选为{mode === 'source' ? '待编辑主图' : '参考图'}
-            </p>
+            <p className="mt-0.5 text-xs text-[var(--text-3)]">选为{mode === 'source' ? '待编辑主图' : '参考图'}</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="ui-icon-btn"
-            aria-label="关闭"
-          >
+          <button type="button" onClick={onClose} className="ui-icon-btn" aria-label="关闭">
             <CloseIcon className="h-4 w-4" />
           </button>
         </div>
@@ -391,20 +383,18 @@ export default function ImageEditorPage() {
   const imageDataUrls = useImageDataUrls(requestedImageIds)
   const sourceDataUrl = draft.sourceImageId ? imageDataUrls[draft.sourceImageId] : null
   const outputDataUrl = outputImageId ? imageDataUrls[outputImageId] : null
-  const homeProfile = useMemo(() => getHomeApiProfile(settings), [settings])
+  const editorProfile = useMemo(() => getImageEditorProfile(settings), [settings])
   const seedreamProfile = useMemo(() => getSeedreamEditorProfile(settings), [settings])
-  const profile = draft.engine === 'seedream' ? seedreamProfile : homeProfile
+  const profile = draft.engine === 'seedream' ? seedreamProfile : editorProfile
+  const engineLabel = draft.engine === 'seedream' ? 'Seedream 编辑' : '通用图片编辑'
   const profileValidationError = profile ? validateApiProfile(profile) : null
   const profileError = !profile
-    ? '尚未配置 Seedream Pro 图片编辑 API'
+    ? `尚未绑定${engineLabel} API，请在设置里为此工具选择配置`
     : !canApiProfileGenerateImages(profile)
       ? `配置「${profile.name}」不支持图片生成或编辑`
-      : draft.engine === 'seedream' &&
-          (profile.provider !== 'volcengine' || !isVolcengineSeedreamProModel(profile.model))
-        ? 'Seedream 编辑配置必须使用 Seedream 5.0 Pro 模型'
-        : profileValidationError
-          ? `${draft.engine === 'seedream' ? 'Seedream 编辑' : '首页生图'}配置不完整：${profileValidationError}`
-          : null
+      : profileValidationError
+        ? `${engineLabel}配置不完整：${profileValidationError}`
+        : null
   const isRunning = latestTask?.status === 'running'
 
   useEffect(() => {
@@ -456,19 +446,17 @@ export default function ImageEditorPage() {
         ?.getAsFile()
       if (!file) return
       event.preventDefault()
-      void createInputImageFromFile(file).then((image) => {
-        if (image) applySourceImage(image.id)
-      })
+      void uploadSource(file)
     }
     window.addEventListener('paste', handlePaste)
     return () => window.removeEventListener('paste', handlePaste)
   })
 
   const applySourceImage = (imageId: string) => {
-    const previousSourceId = draft.sourceImageId
+    const { sourceImageId: previousSourceId, referenceImageIds } = useStore.getState().seedreamEditorDraft
     setDraft({
       sourceImageId: imageId,
-      referenceImageIds: draft.referenceImageIds.filter((id) => id !== imageId),
+      referenceImageIds: referenceImageIds.filter((id) => id !== imageId),
       annotations: [],
       instruction: '',
       latestTaskId: null,
@@ -476,40 +464,59 @@ export default function ImageEditorPage() {
     if (previousSourceId && previousSourceId !== imageId) void deleteImageIfUnreferenced(previousSourceId)
   }
 
-  const uploadSource = async (file: File | undefined) => {
-    if (!file) return
-    const image = await createInputImageFromFile(file)
-    if (!image) {
-      showToast('请选择有效的图片文件', 'error')
-      return
-    }
-    applySourceImage(image.id)
+  const captureUpload = () => {
+    const { seedreamEditorDraftRevision } = useStore.getState()
+    return () => useStore.getState().seedreamEditorDraftRevision === seedreamEditorDraftRevision
   }
 
-  const addReferenceIds = (ids: string[]) => {
-    const next = [...draft.referenceImageIds]
-    for (const id of ids) {
-      if (id === draft.sourceImageId || next.includes(id)) continue
-      if (next.length >= SEEDREAM_EDITOR_REFERENCE_LIMIT) break
-      next.push(id)
+  const uploadSource = async (file: File | undefined) => {
+    if (!file) return
+    const isCurrent = captureUpload()
+    try {
+      const image = await createInputImageFromFile(file, isCurrent)
+      if (!isCurrent()) return
+      if (!image) {
+        showToast('请选择有效的图片文件', 'error')
+        return
+      }
+      applySourceImage(image.id)
+    } catch (error) {
+      if (isCurrent()) showToast(`主图读取失败：${String(error)}`, 'error')
     }
-    if (next.length === draft.referenceImageIds.length) {
-      showToast(next.length >= SEEDREAM_EDITOR_REFERENCE_LIMIT ? '参考图最多添加 4 张' : '这张图片已经添加', 'info')
-      return
-    }
-    setDraft({ referenceImageIds: next })
-    if (ids.length > next.length - draft.referenceImageIds.length) showToast('参考图最多添加 4 张', 'info')
+  }
+
+  const addReferenceIds = (ids: string[], truncated = false) => {
+    const { sourceImageId, referenceImageIds } = useStore.getState().seedreamEditorDraft
+    const unique = [...new Set(ids)].filter((id) => id !== sourceImageId && !referenceImageIds.includes(id))
+    const remaining = SEEDREAM_EDITOR_REFERENCE_LIMIT - referenceImageIds.length
+    const added = unique.slice(0, Math.max(0, remaining))
+    if (added.length) setDraft({ referenceImageIds: [...referenceImageIds, ...added] })
+    if (truncated || unique.length > added.length)
+      showToast(`参考图最多添加 ${SEEDREAM_EDITOR_REFERENCE_LIMIT} 张`, 'info')
+    else if (ids.length && !added.length) showToast('这张图片已经添加', 'info')
   }
 
   const uploadReferences = async (files: File[]) => {
-    const remaining = SEEDREAM_EDITOR_REFERENCE_LIMIT - draft.referenceImageIds.length
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+    if (!imageFiles.length) return
+    const remaining = SEEDREAM_EDITOR_REFERENCE_LIMIT - useStore.getState().seedreamEditorDraft.referenceImageIds.length
     if (remaining <= 0) {
-      showToast('参考图最多添加 4 张', 'info')
+      showToast(`参考图最多添加 ${SEEDREAM_EDITOR_REFERENCE_LIMIT} 张`, 'info')
       return
     }
-    const images = await Promise.all(files.slice(0, remaining).map(createInputImageFromFile))
-    addReferenceIds(images.filter((image): image is InputImage => image != null).map((image) => image.id))
-    if (files.length > remaining) showToast(`仅添加前 ${remaining} 张参考图`, 'info')
+    const isCurrent = captureUpload()
+    try {
+      const images = await Promise.all(
+        imageFiles.slice(0, remaining).map((file) => createInputImageFromFile(file, isCurrent)),
+      )
+      if (!isCurrent()) return
+      addReferenceIds(
+        images.flatMap((image) => (image ? [image.id] : [])),
+        imageFiles.length > remaining,
+      )
+    } catch (error) {
+      if (isCurrent()) showToast(`参考图读取失败：${String(error)}`, 'error')
+    }
   }
 
   const removeReference = (imageId: string) => {
@@ -713,7 +720,7 @@ export default function ImageEditorPage() {
   const generate = async () => {
     if (profileError || !profile) {
       showToast(profileError ?? '请先配置图片编辑 API', 'error')
-      setShowSettings(true, 'api')
+      setShowSettings(true, 'editor-api')
       return
     }
     if (!draft.sourceImageId) {
@@ -820,7 +827,11 @@ export default function ImageEditorPage() {
           </h3>
           <p className="mt-1.5 text-sm text-[var(--text-2)]">上传、拖放，或直接 Ctrl/Cmd + V 粘贴一张图片</p>
           <div className="mt-5 flex flex-wrap justify-center gap-2.5">
-            <button type="button" onClick={() => sourceInputRef.current?.click()} className="ui-btn ui-btn-primary h-10 px-5">
+            <button
+              type="button"
+              onClick={() => sourceInputRef.current?.click()}
+              className="ui-btn ui-btn-primary h-10 px-5"
+            >
               上传主图
             </button>
             <button type="button" onClick={() => setPickerMode('source')} className="ui-btn ui-btn-soft h-10 px-4">
@@ -963,20 +974,16 @@ export default function ImageEditorPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div
-            role="group"
-            aria-label="编辑引擎"
-            className="ui-segmented inline-grid grid-cols-2 p-0.5"
-          >
+          <div role="group" aria-label="编辑引擎" className="ui-segmented inline-grid grid-cols-2 p-0.5">
             <button
               type="button"
               aria-pressed={draft.engine === 'home'}
               data-active={draft.engine === 'home'}
               onClick={() => setDraft({ engine: 'home' })}
-              title={`${homeProfile?.name ?? '未配置'} · ${homeProfile?.model || '未配置模型'}`}
+              title={`${editorProfile?.name ?? '未配置'} · ${editorProfile?.model || '未配置模型'}`}
               className="ui-segment min-h-8 px-3 text-xs font-semibold"
             >
-              首页生图 API
+              通用编辑 API
             </button>
             <button
               type="button"
@@ -984,9 +991,7 @@ export default function ImageEditorPage() {
               data-active={draft.engine === 'seedream'}
               onClick={() => setDraft({ engine: 'seedream' })}
               title={
-                seedreamProfile
-                  ? `${seedreamProfile.name} · ${seedreamProfile.model || '未配置模型'}`
-                  : '可选专用配置'
+                seedreamProfile ? `${seedreamProfile.name} · ${seedreamProfile.model || '未配置模型'}` : '可选专用配置'
               }
               className="ui-segment min-h-8 px-3 text-xs font-semibold"
             >
@@ -1013,7 +1018,7 @@ export default function ImageEditorPage() {
             指南
             <ExternalLinkIcon className="h-3.5 w-3.5" />
           </a>
-          <button type="button" onClick={() => setShowSettings(true, 'api')} className="ui-btn ui-btn-sm h-9">
+          <button type="button" onClick={() => setShowSettings(true, 'editor-api')} className="ui-btn ui-btn-sm h-9">
             <SettingsIcon className="h-3.5 w-3.5" />
             编辑配置
           </button>
@@ -1023,7 +1028,7 @@ export default function ImageEditorPage() {
       {profileError && (
         <button
           type="button"
-          onClick={() => setShowSettings(true, 'api')}
+          onClick={() => setShowSettings(true, 'editor-api')}
           className="ui-callout ui-callout-warning mb-4 w-full items-center justify-between text-left transition hover:brightness-95"
         >
           <span className="font-medium">{profileError}</span>
@@ -1035,13 +1040,23 @@ export default function ImageEditorPage() {
         <section className="ui-panel overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] bg-[var(--surface-panel-strong)] px-3.5 py-2">
             <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
-              <ToolButton active={tool === 'select'} label="选择并移动标注" shortcut="V" onClick={() => setTool('select')}>
+              <ToolButton
+                active={tool === 'select'}
+                label="选择并移动标注"
+                shortcut="V"
+                onClick={() => setTool('select')}
+              >
                 <MoveIcon className="h-4 w-4" />
               </ToolButton>
               <ToolButton active={tool === 'brush'} label="自由涂鸦" shortcut="B" onClick={() => setTool('brush')}>
                 <BrushIcon className="h-4 w-4" />
               </ToolButton>
-              <ToolButton active={tool === 'rectangle'} label="矩形标注" shortcut="R" onClick={() => setTool('rectangle')}>
+              <ToolButton
+                active={tool === 'rectangle'}
+                label="矩形标注"
+                shortcut="R"
+                onClick={() => setTool('rectangle')}
+              >
                 <RectangleIcon className="h-4 w-4" />
               </ToolButton>
               <ToolButton active={tool === 'ellipse'} label="椭圆标注" shortcut="O" onClick={() => setTool('ellipse')}>
@@ -1142,10 +1157,18 @@ export default function ImageEditorPage() {
                   {draft.annotations.length > 0 ? ` · ${draft.annotations.length} 标注` : ''}
                 </span>
               )}
-              <button type="button" onClick={() => sourceInputRef.current?.click()} className="ui-btn ui-btn-ghost ui-btn-sm h-7">
+              <button
+                type="button"
+                onClick={() => sourceInputRef.current?.click()}
+                className="ui-btn ui-btn-ghost ui-btn-sm h-7"
+              >
                 更换主图
               </button>
-              <button type="button" onClick={() => setPickerMode('source')} className="ui-btn ui-btn-ghost ui-btn-sm h-7">
+              <button
+                type="button"
+                onClick={() => setPickerMode('source')}
+                className="ui-btn ui-btn-ghost ui-btn-sm h-7"
+              >
                 历史
               </button>
             </div>
@@ -1360,7 +1383,10 @@ export default function ImageEditorPage() {
         ) : latestTask.status === 'error' ? (
           <div className="flex min-h-48 flex-col items-center justify-center px-5 py-6 text-center">
             <div className="text-sm font-bold text-[var(--danger)]">编辑失败</div>
-            <div data-selectable-text className="mt-2 max-w-2xl whitespace-pre-wrap text-xs leading-5 text-[var(--text-2)]">
+            <div
+              data-selectable-text
+              className="mt-2 max-w-2xl whitespace-pre-wrap text-xs leading-5 text-[var(--text-2)]"
+            >
               {latestTask.error || '未知错误'}
             </div>
             <button type="button" onClick={() => void generate()} className="ui-btn ui-btn-soft mt-4">
@@ -1380,11 +1406,7 @@ export default function ImageEditorPage() {
                   <span className="absolute left-3 top-3 z-10 rounded-md bg-black/70 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-sm">
                     原图（修改前）
                   </span>
-                  <img
-                    src={sourceDataUrl}
-                    alt="编辑前原图"
-                    className="max-h-[70vh] max-w-full object-contain"
-                  />
+                  <img src={sourceDataUrl} alt="编辑前原图" className="max-h-[70vh] max-w-full object-contain" />
                 </>
               ) : outputDataUrl ? (
                 <>
