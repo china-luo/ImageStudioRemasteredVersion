@@ -1579,13 +1579,19 @@ export async function resumeWorkspaceStartupTasks(workspace: TaskWorkspace, isAc
     !recovery ||
     recovery.generation !== taskWorkGeneration ||
     startedRecoveryWorkspaces.has(workspace)
-  ) return
+  )
+    return
   startedRecoveryWorkspaces.add(workspace)
   // 只续查启动时读到的任务，不能为本次会话中新提交的任务再开一条轮询。
   scheduleTaskRecordRecovery(
-    useStore.getState().tasks.filter((task) =>
-      recovery.taskIds.has(task.id) && belongsToTaskWorkspace(task, workspace) && !taskExecutionService?.isExecuting(task.id),
-    ),
+    useStore
+      .getState()
+      .tasks.filter(
+        (task) =>
+          recovery.taskIds.has(task.id) &&
+          belongsToTaskWorkspace(task, workspace) &&
+          !taskExecutionService?.isExecuting(task.id),
+      ),
   )
 }
 
@@ -1746,7 +1752,10 @@ async function restoreStoreAtStartup(deferTaskRecovery: boolean) {
   }
 
   if (deferTaskRecovery) {
-    startupRecovery = { generation: workGeneration, taskIds: new Set([...recoveryTaskIds.fal, ...recoveryTaskIds.custom]) }
+    startupRecovery = {
+      generation: workGeneration,
+      taskIds: new Set([...recoveryTaskIds.fal, ...recoveryTaskIds.custom]),
+    }
   }
   // 先确定清理候选，再读取最新引用；本次任务恢复等清理结束后启动，避免删到刚写入、尚未关联的结果。
   startupMaintenance = (async () => {

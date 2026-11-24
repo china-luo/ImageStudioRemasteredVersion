@@ -491,7 +491,8 @@ export default function ImageEditorPage() {
     const remaining = SEEDREAM_EDITOR_REFERENCE_LIMIT - referenceImageIds.length
     const added = unique.slice(0, Math.max(0, remaining))
     if (added.length) setDraft({ referenceImageIds: [...referenceImageIds, ...added] })
-    if (truncated || unique.length > added.length) showToast(`参考图最多添加 ${SEEDREAM_EDITOR_REFERENCE_LIMIT} 张`, 'info')
+    if (truncated || unique.length > added.length)
+      showToast(`参考图最多添加 ${SEEDREAM_EDITOR_REFERENCE_LIMIT} 张`, 'info')
     else if (ids.length && !added.length) showToast('这张图片已经添加', 'info')
   }
 
@@ -505,9 +506,14 @@ export default function ImageEditorPage() {
     }
     const isCurrent = captureUpload()
     try {
-      const images = await Promise.all(imageFiles.slice(0, remaining).map((file) => createInputImageFromFile(file, isCurrent)))
+      const images = await Promise.all(
+        imageFiles.slice(0, remaining).map((file) => createInputImageFromFile(file, isCurrent)),
+      )
       if (!isCurrent()) return
-      addReferenceIds(images.flatMap((image) => image ? [image.id] : []), imageFiles.length > remaining)
+      addReferenceIds(
+        images.flatMap((image) => (image ? [image.id] : [])),
+        imageFiles.length > remaining,
+      )
     } catch (error) {
       if (isCurrent()) showToast(`参考图读取失败：${String(error)}`, 'error')
     }

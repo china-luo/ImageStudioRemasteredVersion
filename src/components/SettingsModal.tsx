@@ -283,7 +283,8 @@ export default function SettingsModal() {
         apiProxy:
           profile.provider === 'openai' || profile.provider === 'volcengine'
             ? apiProxyLocked || profile.apiProxy
-            : normalizedSettings.customProviders.some((provider) => provider.id === profile.provider) && profile.apiProxy,
+            : normalizedSettings.customProviders.some((provider) => provider.id === profile.provider) &&
+              profile.apiProxy,
       })),
     })
     setDraft(nextDraft)
@@ -293,10 +294,12 @@ export default function SettingsModal() {
         : nextDraft.profiles.filter(canApiProfileGenerateImages)
     const preferredId = apiConfigView === 'analysis' ? nextDraft.amazonPlannerProfileId : nextDraft.activeProfileId
     // 临时复用只影响打开时显示的配置，不写进草稿的默认配置 ID。
-    const reusedProfile = apiConfigView === 'generation' && nextDraft.reuseTaskApiProfileTemporarily
-      ? candidates.find((profile) => profile.id === reusedTaskApiProfileId)
-      : undefined
-    const initialEditorProfile = reusedProfile ?? candidates.find((profile) => profile.id === preferredId) ?? candidates[0]
+    const reusedProfile =
+      apiConfigView === 'generation' && nextDraft.reuseTaskApiProfileTemporarily
+        ? candidates.find((profile) => profile.id === reusedTaskApiProfileId)
+        : undefined
+    const initialEditorProfile =
+      reusedProfile ?? candidates.find((profile) => profile.id === preferredId) ?? candidates[0]
     setApiEditorProfileId(initialEditorProfile?.id ?? null)
     setTimeoutInput(String(initialEditorProfile?.timeout ?? DEFAULT_SETTINGS.timeout))
   }, [apiConfigView, apiProxyAvailable, apiProxyLocked, showSettings, settings, reusedTaskApiProfileId])
@@ -575,10 +578,12 @@ export default function SettingsModal() {
     modelFetchRequests.current.set(profileId, request)
     const isLatest = () => modelFetchRequests.current.get(profileId) === request
     const matchesProfile = (profile: ApiProfile) =>
-      profile.id === profileId && profile.provider === requestedProfile.provider &&
-      profile.baseUrl === requestedProfile.baseUrl && profile.apiKey === requestedProfile.apiKey
+      profile.id === profileId &&
+      profile.provider === requestedProfile.provider &&
+      profile.baseUrl === requestedProfile.baseUrl &&
+      profile.apiKey === requestedProfile.apiKey
     const updateFetchState = (status: 'idle' | 'success' | 'error', message?: string) =>
-      setModelFetchState((current) => current.profileId === profileId ? { profileId, status, message } : current)
+      setModelFetchState((current) => (current.profileId === profileId ? { profileId, status, message } : current))
     setModelFetchState({ profileId, status: 'loading' })
     try {
       const fetchedModels = await fetchUpstreamModels(requestedProfile)
@@ -592,10 +597,12 @@ export default function SettingsModal() {
       const mergeModels = (profile: ApiProfile) => [...new Set([...(profile.availableModels ?? []), ...fetchedModels])]
       const availableModels = mergeModels(profile)
       // 只更新模型列表；等待期间的配置绑定、编辑和删除都要保留。
-      setSettings({ profiles: profiles.map((item) => item.id === profileId ? { ...item, availableModels } : item) })
+      setSettings({ profiles: profiles.map((item) => (item.id === profileId ? { ...item, availableModels } : item)) })
       setDraft((current) => ({
         ...current,
-        profiles: current.profiles.map((item) => matchesProfile(item) ? { ...item, availableModels: mergeModels(item) } : item),
+        profiles: current.profiles.map((item) =>
+          matchesProfile(item) ? { ...item, availableModels: mergeModels(item) } : item,
+        ),
       }))
       const message = `已获取 ${availableModels.length} 个模型`
       updateFetchState('success', message)
@@ -1337,9 +1344,12 @@ export default function SettingsModal() {
                       title: '清空所选数据',
                       message: [
                         clearConfig && '恢复全局设置，并清除图片生成、图片编辑和拆图反推的 API 配置。',
-                        clearTasks && '删除生成和编辑任务、项目及本地图片，重置图片编辑草稿；拆图反推文字和 VOC 评论保留，但拆图参考图片会被删除。',
+                        clearTasks &&
+                          '删除生成和编辑任务、项目及本地图片，重置图片编辑草稿；拆图反推文字和 VOC 评论保留，但拆图参考图片会被删除。',
                         '此操作不可恢复。',
-                      ].filter(Boolean).join('\n'),
+                      ]
+                        .filter(Boolean)
+                        .join('\n'),
                       confirmText: '确认清空',
                       action: () => void handleClearAllData(),
                     })

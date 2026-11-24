@@ -82,7 +82,10 @@ export type SettingsApiTabProps = {
   handleProfileTouchMove: (event: TouchEvent) => void
   handleProfileTouchEnd: (event: TouchEvent) => void
   setConfirmDialog: (dialog: { title: string; message: string; action: () => void }) => void
-  bindWorkspaceProfile: (key: 'imageEditorProfileId' | 'seedreamEditorProfileId' | 'sopReverseProfileId', id: string) => void
+  bindWorkspaceProfile: (
+    key: 'imageEditorProfileId' | 'seedreamEditorProfileId' | 'sopReverseProfileId',
+    id: string,
+  ) => void
   updateActiveProfile: (patch: Partial<ApiProfile>, commit?: boolean) => void
   commitActiveProfilePatch: (patch: Partial<ApiProfile>) => void
   handleProviderTypeChange: (value: string | number) => void
@@ -898,10 +901,12 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
             </p>
           </div>
           <div className="space-y-4 p-5">
-            {([
-              ['imageEditorProfileId', '通用编辑 API 配置', canApiProfileGenerateImages],
-              ['seedreamEditorProfileId', 'Seedream 编辑 API 配置', isSeedreamEditorProfile],
-            ] as const).map(([key, label, supports]) => (
+            {(
+              [
+                ['imageEditorProfileId', '通用编辑 API 配置', canApiProfileGenerateImages],
+                ['seedreamEditorProfileId', 'Seedream 编辑 API 配置', isSeedreamEditorProfile],
+              ] as const
+            ).map(([key, label, supports]) => (
               <label className="block" key={key}>
                 <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">{label}</span>
                 <select
@@ -943,7 +948,9 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
                 className="ui-input"
               >
                 {sopReverseProfileOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </label>
