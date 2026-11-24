@@ -11,6 +11,7 @@ import {
   getApiProviderLabel,
   isAmazonPlannerProfile,
   isOpenRouterImageGenerationProfile,
+  isSeedreamEditorProfile,
   OPENAI_PLANNER_MODELS,
 } from '../../lib/apiProfiles'
 import type { ApiProfile, AppSettings, CustomProviderDefinition } from '../../types'
@@ -51,12 +52,10 @@ export type SettingsApiTabProps = {
   dragOverProfileId: string | null
   dragDropPosition: 'before' | 'after' | null
   providerOptions: SelectOption[]
-  amazonPlannerProfiles: ApiProfile[]
   modelFetchState: { profileId: string; status: 'idle' | 'loading' | 'success' | 'error'; message?: string }
   fetchModels: () => void | Promise<void>
   addModelToCatalog: () => void
   sopReverseProfileOptions: SelectOption[]
-  vocProfileOptions: SelectOption[]
   activeProviderUsesApiUrl: boolean
   activeProviderIsOpenAICompatible: boolean
   activeProviderSupportsApiProxy: boolean
@@ -83,7 +82,10 @@ export type SettingsApiTabProps = {
   handleProfileTouchMove: (event: TouchEvent) => void
   handleProfileTouchEnd: (event: TouchEvent) => void
   setConfirmDialog: (dialog: { title: string; message: string; action: () => void }) => void
-  commitSettings: (settings: AppSettings) => void
+  bindWorkspaceProfile: (
+    key: 'imageEditorProfileId' | 'seedreamEditorProfileId' | 'sopReverseProfileId',
+    id: string,
+  ) => void
   updateActiveProfile: (patch: Partial<ApiProfile>, commit?: boolean) => void
   commitActiveProfilePatch: (patch: Partial<ApiProfile>) => void
   handleProviderTypeChange: (value: string | number) => void
@@ -124,12 +126,10 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
     dragOverProfileId,
     dragDropPosition,
     providerOptions,
-    amazonPlannerProfiles,
     modelFetchState,
     fetchModels,
     addModelToCatalog,
     sopReverseProfileOptions,
-    vocProfileOptions,
     activeProviderUsesApiUrl,
     activeProviderIsOpenAICompatible,
     activeProviderSupportsApiProxy,
@@ -156,7 +156,7 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
     handleProfileTouchMove,
     handleProfileTouchEnd,
     setConfirmDialog,
-    commitSettings,
+    bindWorkspaceProfile,
     updateActiveProfile,
     commitActiveProfilePatch,
     handleProviderTypeChange,
@@ -897,27 +897,32 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
               </span>
             </div>
             <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
-              仅供独立图片编辑器使用，不改变首页图片生成配置。
+              编辑器需要单独绑定。可以选用已有配置，但不会跟随首页切换。
             </p>
           </div>
           <div className="space-y-4 p-5">
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">编辑器 API 配置</span>
-              <Select
-                value={draft.seedreamEditorProfileId || ''}
-                onChange={(value) => commitSettings({ ...draft, seedreamEditorProfileId: String(value) })}
-                options={[
-                  { label: '跟随当前图片生成配置', value: '' },
-                  ...draft.profiles
-                    .filter((profile) => profile.apiMode === 'images')
-                    .map((profile) => ({
-                      label: `${profile.name} · ${profile.model || '未配置模型'}`,
-                      value: profile.id,
-                    })),
-                ]}
-                className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
-              />
-            </label>
+            {(
+              [
+                ['imageEditorProfileId', '通用编辑 API 配置', canApiProfileGenerateImages],
+                ['seedreamEditorProfileId', 'Seedream 编辑 API 配置', isSeedreamEditorProfile],
+              ] as const
+            ).map(([key, label, supports]) => (
+              <label className="block" key={key}>
+                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">{label}</span>
+                <select
+                  value={draft[key] || ''}
+                  onChange={(event) => bindWorkspaceProfile(key, event.target.value)}
+                  className="ui-input"
+                >
+                  <option value="">未绑定配置</option>
+                  {draft.profiles.filter(supports).map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name} · {profile.model || '未配置模型'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
             <div className="rounded-xl border border-dashed border-gray-300 px-4 py-5 text-center text-xs leading-5 text-gray-500 dark:border-white/[0.14] dark:text-gray-400">
               需要 Seedream 5.0 Pro 时，可先在左侧图片生成卡片中新建对应配置，再在这里选用。
             </div>
@@ -937,33 +942,17 @@ export default function SettingsApiTab(props: SettingsApiTabProps) {
           <div className="space-y-4 p-5">
             <label className="block">
               <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">拆图反推配置</span>
-              <Select
+              <select
                 value={draft.sopReverseProfileId}
-                onChange={(value) => commitSettings({ ...draft, sopReverseProfileId: String(value) })}
-                disabled={amazonPlannerProfiles.length === 0}
-                options={sopReverseProfileOptions}
-                className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">VOC 评论分析配置</span>
-              <Select
-                value={draft.vocProfileId}
-                onChange={(value) => commitSettings({ ...draft, vocProfileId: String(value) })}
-                disabled={amazonPlannerProfiles.length === 0}
-                options={vocProfileOptions}
-                className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">Shulex OpenAPI Key</span>
-              <input
-                value={draft.vocApiKey}
-                onChange={(event) => commitSettings({ ...draft, vocApiKey: event.target.value })}
-                type="password"
-                placeholder="仅用于 VOC 评论实时任务"
-                className="w-full rounded-xl border border-gray-200/70 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 outline-none placeholder:text-gray-400 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
-              />
+                onChange={(event) => bindWorkspaceProfile('sopReverseProfileId', event.target.value)}
+                className="ui-input"
+              >
+                {sopReverseProfileOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         </section>

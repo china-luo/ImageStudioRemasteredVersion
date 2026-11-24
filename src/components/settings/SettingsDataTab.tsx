@@ -116,7 +116,7 @@ export default function SettingsDataTab({
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-3">
           <Checkbox checked={clearConfig} onChange={onClearConfigChange} label="包含配置" tone="danger" />
-          <Checkbox checked={clearTasks} onChange={onClearTasksChange} label="包含任务和图片" tone="danger" />
+          <Checkbox checked={clearTasks} onChange={onClearTasksChange} label="包含任务、项目和图片" tone="danger" />
         </div>
         <button
           type="button"

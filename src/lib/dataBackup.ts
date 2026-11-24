@@ -86,6 +86,8 @@ function resetLocalTaskView() {
     lightboxImageId: null,
     lightboxImageList: [],
     pendingTaskCategory: null,
+    sopDraft: { ...state.sopDraft, referenceImages: [] },
+    sopDraftRevision: state.sopDraftRevision + 1,
   })
   state.clearInputImages()
   state.clearMaskDraft()

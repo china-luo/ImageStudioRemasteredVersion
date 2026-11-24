@@ -205,7 +205,6 @@ export function isCustomProviderProxyPathSupported(baseUrl: string, path: string
     return [
       /^\/v1\/(responses|models|chat\/completions)\/?$/,
       /^\/v1\/images\/(generations|edits|tasks\/[^/]+)\/?$/,
-      /^\/v1\/api\/(RtTask01|RtQry01)\/?$/,
       /^\/api\/v[13](\/|$)/,
       /^\/images\/(generations|edits|tasks\/[^/]+)\/?$/,
       /^\/(responses|models|chat\/completions)\/?$/,

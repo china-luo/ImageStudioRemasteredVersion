@@ -4,13 +4,12 @@ import { normalizeSettings } from './apiProfiles'
 export const SESSION_SECRETS_KEY = 'amazon-image-studio-secrets'
 
 export interface AppSecrets {
-  vocApiKey: string
   apiKey: string
   profiles: Record<string, string>
 }
 
 export function emptySecrets(): AppSecrets {
-  return { vocApiKey: '', apiKey: '', profiles: {} }
+  return { apiKey: '', profiles: {} }
 }
 
 export function normalizeSecrets(input: unknown): AppSecrets {
@@ -25,21 +24,19 @@ export function normalizeSecrets(input: unknown): AppSecrets {
         )
       : {}
   return {
-    vocApiKey: typeof record.vocApiKey === 'string' ? record.vocApiKey : '',
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
     profiles,
   }
 }
 
 export function hasSecretValues(secrets: AppSecrets): boolean {
-  return Boolean(secrets.apiKey || secrets.vocApiKey || Object.values(secrets.profiles).some((value) => Boolean(value)))
+  return Boolean(secrets.apiKey || Object.values(secrets.profiles).some((value) => Boolean(value)))
 }
 
 export function mergeSecretRecords(...records: AppSecrets[]): AppSecrets {
   const merged = emptySecrets()
   for (const record of records) {
     if (record.apiKey) merged.apiKey = record.apiKey
-    if (record.vocApiKey) merged.vocApiKey = record.vocApiKey
     for (const [id, apiKey] of Object.entries(record.profiles)) {
       if (apiKey) merged.profiles[id] = apiKey
     }
@@ -53,7 +50,6 @@ export function extractSecretsFromSettings(settings: AppSettings): AppSecrets {
     if (profile.apiKey) profiles[profile.id] = profile.apiKey
   }
   return {
-    vocApiKey: settings.vocApiKey || '',
     apiKey: settings.apiKey || '',
     profiles,
   }
@@ -63,7 +59,6 @@ export function stripSecretsFromSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
     apiKey: '',
-    vocApiKey: '',
     profiles: settings.profiles.map((profile) => ({ ...profile, apiKey: '' })),
   }
 }
@@ -82,7 +77,6 @@ export function mergeSecretsIntoSettings(settings: AppSettings, secrets: AppSecr
     ...settings,
     profiles,
     apiKey: active?.apiKey || secrets.apiKey || '',
-    vocApiKey: secrets.vocApiKey || settings.vocApiKey || '',
   }
 }
 

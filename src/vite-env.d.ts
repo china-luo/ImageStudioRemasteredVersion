@@ -25,15 +25,10 @@ interface Window {
       body: number[]
     }>
     readonly getSecrets?: () => Promise<{
-      vocApiKey: string
       apiKey: string
       profiles: Record<string, string>
     }>
-    readonly setSecrets?: (payload: {
-      vocApiKey: string
-      apiKey: string
-      profiles: Record<string, string>
-    }) => Promise<boolean>
+    readonly setSecrets?: (payload: { apiKey: string; profiles: Record<string, string> }) => Promise<boolean>
   }
 }
 

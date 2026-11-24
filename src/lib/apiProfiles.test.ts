@@ -13,8 +13,10 @@ import {
   createDefaultFalProfile,
   findEquivalentApiProfile,
   getAmazonPlannerProfile,
+  getImageEditorProfile,
   getImageGenerationProfile,
-  getVocAnalysisProfile,
+  getSeedreamEditorProfile,
+  getSopReverseProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
   isAmazonPlannerProfile,
@@ -814,7 +816,7 @@ describe('amazon planner profile', () => {
     expect(getImageGenerationProfile(settings)?.id).toBe(imageProfile.id)
   })
 
-  it('keeps VOC analysis profile and Shulex key separate from image generation', () => {
+  it('ignores legacy VOC settings without removing the referenced general API profile', () => {
     const imageProfile = createDefaultOpenAIProfile({
       id: 'image-profile',
       name: 'Image Profile',
@@ -847,12 +849,46 @@ describe('amazon planner profile', () => {
 
     expect(settings.activeProfileId).toBe(imageProfile.id)
     expect(settings.amazonPlannerProfileId).toBe(plannerProfile.id)
-    expect(settings.vocProfileId).toBe(vocProfile.id)
-    expect(settings.vocApiKey).toBe('shulex-key')
-    expect(getVocAnalysisProfile(settings)?.id).toBe(vocProfile.id)
+    expect(settings).not.toHaveProperty('vocProfileId')
+    expect(settings).not.toHaveProperty('vocApiKey')
+    expect(settings.profiles).toEqual([imageProfile, plannerProfile, vocProfile])
+    expect(getImageGenerationProfile(settings)?.id).toBe(imageProfile.id)
+    expect(getAmazonPlannerProfile(settings)?.id).toBe(plannerProfile.id)
+    expect(settings.sopReverseProfileId).toBe('')
   })
 
-  it('defaults VOC analysis to the planner Chat/Responses profile when unset', () => {
+  it('resolves only explicitly bound editor and SOP profiles', () => {
+    const image = createDefaultOpenAIProfile({ id: 'gen', apiMode: 'images', apiKey: 'test-only' })
+    const editor = createDefaultOpenAIProfile({ id: 'edit', apiMode: 'images', apiKey: 'test-only' })
+    const planner = createDefaultOpenAIProfile({ id: 'plan', apiMode: 'responses' })
+    const sop = createDefaultOpenAIProfile({ id: 'sop', apiMode: 'chat' })
+    const seedream = createDefaultOpenAIProfile({
+      id: 'seedream',
+      provider: 'volcengine',
+      apiMode: 'images',
+      model: 'doubao-seedream-5-0-pro-260628',
+    })
+    const profiles = [image, editor, planner, sop, seedream]
+    const unbound = { profiles, activeProfileId: image.id, amazonPlannerProfileId: planner.id }
+    expect(getImageEditorProfile(unbound)).toBeNull()
+    expect(getSeedreamEditorProfile({ ...unbound, seedreamEditorProfileId: image.id })).toBeNull()
+    expect(getSopReverseProfile({ ...unbound, sopReverseProfileId: 'deleted' })).toBeNull()
+
+    const bound = {
+      ...unbound,
+      imageEditorProfileId: editor.id,
+      seedreamEditorProfileId: seedream.id,
+      sopReverseProfileId: sop.id,
+    }
+    expect(getImageEditorProfile(bound)?.id).toBe(editor.id)
+    expect(getSeedreamEditorProfile(bound)?.id).toBe(seedream.id)
+    expect(getSopReverseProfile(bound)?.id).toBe(sop.id)
+    expect(getImageEditorProfile({ ...bound, activeProfileId: seedream.id })?.id).toBe(editor.id)
+    expect(getSopReverseProfile({ ...bound, amazonPlannerProfileId: sop.id, sopReverseProfileId: '' })).toBeNull()
+    expect(getSopReverseProfile({ ...bound, profiles: [image, editor, planner, seedream] })).toBeNull()
+  })
+
+  it('does not create VOC settings when selecting the default planner profile', () => {
     const settings = normalizeSettings({
       profiles: [
         createDefaultOpenAIProfile({
@@ -870,8 +906,9 @@ describe('amazon planner profile', () => {
       amazonPlannerProfileId: 'planner-profile',
     })
 
-    expect(settings.vocProfileId).toBe('planner-profile')
-    expect(getVocAnalysisProfile(settings)?.id).toBe('planner-profile')
+    expect(settings).not.toHaveProperty('vocProfileId')
+    expect(settings).not.toHaveProperty('vocApiKey')
+    expect(getAmazonPlannerProfile(settings)?.id).toBe('planner-profile')
   })
 })
 

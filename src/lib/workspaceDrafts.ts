@@ -31,24 +31,13 @@ export interface SopWorkspaceDraft {
   analysisOperation: 'analyze' | null
 }
 
-export type VocSourceMode = 'asin' | 'csv'
-
 export interface VocWorkspaceDraft {
-  sourceMode: VocSourceMode
-  asin: string
-  market: string
-  limit: number
   productName: string
   csvText: string
   reviewsEnvelope: VocReviewEnvelope | null
-  aiReport: string
-  statusText: string
+  archivedReport: string
   error: string
   updatedAt: number
-  analysisStatus: 'idle' | 'running' | 'done' | 'error' | 'stopped'
-  analysisRequestId: string | null
-  analysisStartedAt: number | null
-  analysisOperation: 'fetch' | 'analyze' | null
 }
 
 export const DEFAULT_SOP_FORM: SopForm = {
@@ -77,21 +66,12 @@ export const DEFAULT_SOP_DRAFT: SopWorkspaceDraft = {
 }
 
 export const DEFAULT_VOC_DRAFT: VocWorkspaceDraft = {
-  sourceMode: 'asin',
-  asin: '',
-  market: 'US',
-  limit: 100,
   productName: '',
   csvText: '',
   reviewsEnvelope: null,
-  aiReport: '',
-  statusText: '',
+  archivedReport: '',
   error: '',
   updatedAt: 0,
-  analysisStatus: 'idle',
-  analysisRequestId: null,
-  analysisStartedAt: null,
-  analysisOperation: null,
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -144,33 +124,17 @@ export function normalizeSopDraft(value: unknown): SopWorkspaceDraft {
 
 export function normalizeVocDraft(value: unknown): VocWorkspaceDraft {
   const draft = isRecord(value) ? value : {}
-  const sourceMode = draft.sourceMode === 'csv' ? 'csv' : 'asin'
-  const limit =
-    typeof draft.limit === 'number' && Number.isFinite(draft.limit) ? Math.max(1, Math.min(100, draft.limit)) : 100
   const reviewsEnvelope =
     isRecord(draft.reviewsEnvelope) && Array.isArray(draft.reviewsEnvelope.reviews)
       ? (draft.reviewsEnvelope as unknown as VocReviewEnvelope)
       : null
   return {
-    sourceMode,
-    asin: readString(draft.asin),
-    market: readString(draft.market, 'US'),
-    limit,
     productName: readString(draft.productName),
     csvText: readString(draft.csvText),
     reviewsEnvelope,
-    aiReport: readString(draft.aiReport),
-    statusText: readString(draft.statusText),
-    error: readString(draft.error),
+    archivedReport: readString(draft.archivedReport, readString(draft.aiReport)),
+    error: draft.analysisOperation ? '' : readString(draft.error),
     updatedAt: typeof draft.updatedAt === 'number' && Number.isFinite(draft.updatedAt) ? draft.updatedAt : 0,
-    analysisStatus: readAnalysisStatus(draft.analysisStatus),
-    analysisRequestId: typeof draft.analysisRequestId === 'string' ? draft.analysisRequestId : null,
-    analysisStartedAt:
-      typeof draft.analysisStartedAt === 'number' && Number.isFinite(draft.analysisStartedAt)
-        ? draft.analysisStartedAt
-        : null,
-    analysisOperation:
-      draft.analysisOperation === 'fetch' || draft.analysisOperation === 'analyze' ? draft.analysisOperation : null,
   }
 }
 
@@ -198,15 +162,6 @@ export function collectAmazonPlannerSessionImageIds(session: {
   return [...(session.referenceImageIds || []), ...(session.styleImages || []).map((image) => image.imageId)].filter(
     (id): id is string => typeof id === 'string' && Boolean(id.trim()),
   )
-}
-
-export const VOC_NO_VALID_REVIEWS_ERROR =
-  '没有可用的有效评论。请确认文件或数据源包含至少 1 条正文不少于 3 个字符的评论。'
-
-export function assertVocHasValidReviews(envelope: { reviews?: unknown[] } | null | undefined): void {
-  if (!envelope || !Array.isArray(envelope.reviews) || envelope.reviews.length === 0) {
-    throw new Error(VOC_NO_VALID_REVIEWS_ERROR)
-  }
 }
 
 export function extractEnglishImagePrompt(text: string): string {

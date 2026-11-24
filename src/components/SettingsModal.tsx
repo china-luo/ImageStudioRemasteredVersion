@@ -89,7 +89,7 @@ function getAppVersionLabel() {
 }
 
 const ABOUT_DESCRIPTION =
-  '面向 Amazon 与 TikTok Shop 的跨境电商图片工作台，支持商品图生成、Listing 与 A+ 图片策划、竞品图片拆解反推、VOC 评论分析，以及 CSV/XLSX 评论导入后的 AI 报告生成。适合主图、卖点图、详情图、A+ 模块和多平台视觉素材的本地化创作流程。'
+  '面向 Amazon 与 TikTok Shop 的跨境电商图片工作台，支持商品图生成、Listing 与 A+ 图片策划、竞品图片拆解反推、VOC 评论分析，以及 CSV/XLSX 评论导入和本地报告导出。适合主图、卖点图、详情图、A+ 模块和多平台视觉素材的本地化创作流程。'
 
 export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
@@ -158,6 +158,7 @@ export default function SettingsModal() {
     status: 'idle' | 'loading' | 'success' | 'error'
     message?: string
   }>({ profileId: '', status: 'idle' })
+  const modelFetchRequests = useRef(new Map<string, symbol>())
 
   const apiProxyConfig = readClientDevProxyConfig()
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
@@ -214,18 +215,13 @@ export default function SettingsModal() {
   const imageGenerationProfiles = draft.profiles.filter(canApiProfileGenerateImages)
   const imageGenerationProfile =
     imageGenerationProfiles.find((profile) => profile.id === draft.activeProfileId) ?? imageGenerationProfiles[0]
-  const sopReverseProfileOptions = amazonPlannerProfiles.length
-    ? amazonPlannerProfiles.map((profile) => ({
-        label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
-        value: profile.id,
-      }))
-    : [{ label: '暂无 Chat/Responses 拆图配置', value: '' }]
-  const vocProfileOptions = amazonPlannerProfiles.length
-    ? amazonPlannerProfiles.map((profile) => ({
-        label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
-        value: profile.id,
-      }))
-    : [{ label: '暂无 Chat/Responses VOC 配置', value: '' }]
+  const sopReverseProfileOptions = [
+    { label: '未绑定配置', value: '' },
+    ...amazonPlannerProfiles.map((profile) => ({
+      label: `${profile.name} · ${profile.model || getDefaultModelForMode(profile.apiMode)} · ${getApiModeLabel(profile.apiMode)}`,
+      value: profile.id,
+    })),
+  ]
 
   const editorProfileCandidates = apiConfigView === 'analysis' ? amazonPlannerProfiles : imageGenerationProfiles
   const preferredEditorProfile = apiConfigView === 'analysis' ? amazonPlannerProfile : imageGenerationProfile
@@ -280,20 +276,15 @@ export default function SettingsModal() {
 
     wasSettingsOpenRef.current = true
     const normalizedSettings = normalizeDraftSettings(settings)
-    const displaySettings =
-      normalizedSettings.reuseTaskApiProfileTemporarily &&
-      reusedTaskApiProfileId &&
-      normalizedSettings.profiles.some((profile) => profile.id === reusedTaskApiProfileId)
-        ? normalizeDraftSettings({ ...normalizedSettings, activeProfileId: reusedTaskApiProfileId })
-        : normalizedSettings
     const nextDraft = normalizeDraftSettings({
-      ...displaySettings,
-      profiles: displaySettings.profiles.map((profile) => ({
+      ...normalizedSettings,
+      profiles: normalizedSettings.profiles.map((profile) => ({
         ...profile,
         apiProxy:
           profile.provider === 'openai' || profile.provider === 'volcengine'
             ? apiProxyLocked || profile.apiProxy
-            : displaySettings.customProviders.some((provider) => provider.id === profile.provider) && profile.apiProxy,
+            : normalizedSettings.customProviders.some((provider) => provider.id === profile.provider) &&
+              profile.apiProxy,
       })),
     })
     setDraft(nextDraft)
@@ -302,7 +293,13 @@ export default function SettingsModal() {
         ? nextDraft.profiles.filter(isAmazonPlannerProfile)
         : nextDraft.profiles.filter(canApiProfileGenerateImages)
     const preferredId = apiConfigView === 'analysis' ? nextDraft.amazonPlannerProfileId : nextDraft.activeProfileId
-    const initialEditorProfile = candidates.find((profile) => profile.id === preferredId) ?? candidates[0]
+    // 临时复用只影响打开时显示的配置，不写进草稿的默认配置 ID。
+    const reusedProfile =
+      apiConfigView === 'generation' && nextDraft.reuseTaskApiProfileTemporarily
+        ? candidates.find((profile) => profile.id === reusedTaskApiProfileId)
+        : undefined
+    const initialEditorProfile =
+      reusedProfile ?? candidates.find((profile) => profile.id === preferredId) ?? candidates[0]
     setApiEditorProfileId(initialEditorProfile?.id ?? null)
     setTimeoutInput(String(initialEditorProfile?.timeout ?? DEFAULT_SETTINGS.timeout))
   }, [apiConfigView, apiProxyAvailable, apiProxyLocked, showSettings, settings, reusedTaskApiProfileId])
@@ -336,7 +333,12 @@ export default function SettingsModal() {
 
   useEffect(() => {
     if (!showSettings || !settingsTabRequest) return
-    setActiveTab(settingsTabRequest === 'agent' ? 'api' : settingsTabRequest)
+    if (settingsTabRequest === 'editor-api' || settingsTabRequest === 'sop-api') {
+      setApiConfigView(settingsTabRequest === 'editor-api' ? 'generation' : 'analysis')
+      setActiveTab('api')
+    } else {
+      setActiveTab(settingsTabRequest === 'agent' ? 'api' : settingsTabRequest)
+    }
   }, [settingsTabRequest, showSettings])
 
   const updateProfileMenuMaxHeight = useCallback(() => {
@@ -570,24 +572,48 @@ export default function SettingsModal() {
   }
 
   const fetchActiveProfileModels = async () => {
-    const profileId = editorProfile.id
+    const requestedProfile = editorProfile
+    const profileId = requestedProfile.id
+    const request = Symbol()
+    modelFetchRequests.current.set(profileId, request)
+    const isLatest = () => modelFetchRequests.current.get(profileId) === request
+    const matchesProfile = (profile: ApiProfile) =>
+      profile.id === profileId &&
+      profile.provider === requestedProfile.provider &&
+      profile.baseUrl === requestedProfile.baseUrl &&
+      profile.apiKey === requestedProfile.apiKey
+    const updateFetchState = (status: 'idle' | 'success' | 'error', message?: string) =>
+      setModelFetchState((current) => (current.profileId === profileId ? { profileId, status, message } : current))
     setModelFetchState({ profileId, status: 'loading' })
     try {
-      const fetchedModels = await fetchUpstreamModels(editorProfile)
-      const availableModels = [...new Set([...(editorProfile.availableModels ?? []), ...fetchedModels])]
-      const nextDraft = {
-        ...draft,
-        profiles: draft.profiles.map((profile) =>
-          profile.id === profileId ? { ...profile, availableModels } : profile,
-        ),
+      const fetchedModels = await fetchUpstreamModels(requestedProfile)
+      if (!isLatest()) return
+      const { profiles } = useStore.getState().settings
+      const profile = profiles.find(matchesProfile)
+      if (!profile) {
+        updateFetchState('idle')
+        return
       }
-      commitSettings(nextDraft)
-      setModelFetchState({ profileId, status: 'success', message: `已获取 ${availableModels.length} 个模型` })
-      showToast(`已获取 ${availableModels.length} 个模型`, 'success')
+      const mergeModels = (profile: ApiProfile) => [...new Set([...(profile.availableModels ?? []), ...fetchedModels])]
+      const availableModels = mergeModels(profile)
+      // 只更新模型列表；等待期间的配置绑定、编辑和删除都要保留。
+      setSettings({ profiles: profiles.map((item) => (item.id === profileId ? { ...item, availableModels } : item)) })
+      setDraft((current) => ({
+        ...current,
+        profiles: current.profiles.map((item) =>
+          matchesProfile(item) ? { ...item, availableModels: mergeModels(item) } : item,
+        ),
+      }))
+      const message = `已获取 ${availableModels.length} 个模型`
+      updateFetchState('success', message)
+      showToast(message, 'success')
     } catch (error) {
+      if (!isLatest()) return
       const message = error instanceof Error ? error.message : String(error)
-      setModelFetchState({ profileId, status: 'error', message })
+      updateFetchState('error', message)
       showToast(`获取模型列表失败：${message}`, 'error')
+    } finally {
+      if (isLatest()) modelFetchRequests.current.delete(profileId)
     }
   }
 
@@ -1247,9 +1273,7 @@ export default function SettingsModal() {
                     dragOverProfileId,
                     dragDropPosition,
                     providerOptions: editorProviderOptions,
-                    amazonPlannerProfiles,
                     sopReverseProfileOptions,
-                    vocProfileOptions,
                     activeProviderUsesApiUrl,
                     activeProviderIsOpenAICompatible,
                     activeProviderSupportsApiProxy,
@@ -1276,7 +1300,10 @@ export default function SettingsModal() {
                     handleProfileTouchMove,
                     handleProfileTouchEnd,
                     setConfirmDialog,
-                    commitSettings,
+                    bindWorkspaceProfile: (key, id) => {
+                      setSettings({ [key]: id })
+                      setDraft((current) => ({ ...current, [key]: id }))
+                    },
                     updateActiveProfile,
                     commitActiveProfilePatch,
                     handleProviderTypeChange,
@@ -1315,7 +1342,14 @@ export default function SettingsModal() {
                   onClear={() =>
                     setConfirmDialog({
                       title: '清空所选数据',
-                      message: '确定要清空所选的数据吗？此操作不可恢复。',
+                      message: [
+                        clearConfig && '恢复全局设置，并清除图片生成、图片编辑和拆图反推的 API 配置。',
+                        clearTasks &&
+                          '删除生成和编辑任务、项目及本地图片，重置图片编辑草稿；拆图反推文字和 VOC 评论保留，但拆图参考图片会被删除。',
+                        '此操作不可恢复。',
+                      ]
+                        .filter(Boolean)
+                        .join('\n'),
                       confirmText: '确认清空',
                       action: () => void handleClearAllData(),
                     })

@@ -69,7 +69,7 @@
 | 动态模型目录 | 从上游获取模型列表；单一可编辑模型输入框；下拉选择、手动添加和自定义模型并存 |
 | 图片编辑 | 画布缩放、拖动、区域标注、撤销/重做、连续编辑；支持 OpenAI-compatible 与 Seedream Pro |
 | 拆图反推 | 根据竞品图和商品资料生成中文拆解、迁移建议、image prompt 与 negative prompt |
-| VOC 分析 | Shulex OpenAPI 按 ASIN 获取评论，或导入 CSV/XLSX，生成痛点、卖点和图片策略报告 |
+| VOC 分析 | 上传 CSV/XLSX 或粘贴表格，本地统计星级和常见主题，支持导出原始评论 JSON 和 HTML 报告 |
 | AI 人物打标 | 为已确认需要披露的图片或视频写入 Amazon XMP 标记，支持单文件和 ZIP；全程本地处理 |
 | 历史与交付 | 搜索、收藏、筛选、批量下载、项目定稿、ZIP 导出和数据备份/恢复 |
 | 工作区 | 自定义背景、响应式布局、持久化草稿、项目版本和跨标签页冲突保护 |
@@ -126,8 +126,8 @@
 | --- | --- | --- |
 | 图片生成 | Images API，或支持图片输出的 Chat Completions | 首页生图、风格板和最终商品图 |
 | AI 策划 | Responses API / Chat Completions | 商品摘要、Listing、A+、TikTok 策划 |
-| 拆图反推 | Responses API / Chat Completions | 可与 AI 策划共用，也可独立配置 |
-| VOC 分析 | Responses API / Chat Completions | 评论分析；ASIN 抓取另需 Shulex OpenAPI Key |
+| 图片编辑 | 通用图片 API 或 Seedream 5.0 Pro | 在「图片生成」配置页为两个编辑引擎分别选择 profile，不跟随首页配置 |
+| 拆图反推 | Responses API / Chat Completions | 在「AI 策划」配置页明确绑定；可与策划共用一个 profile，不自动继承 |
 
 支持的服务商和连接方式：
 
@@ -151,7 +151,8 @@
 - 设置中的 API profile 会按应用数据保存；API Key 不会写入 Git 或发布资产。
 - Web 版依赖浏览器存储；清理站点数据会删除本地任务和草稿，建议定期使用数据导入/导出。
 - Windows 桌面版使用系统加密凭据保存 API Key。
-- 图片生成、AI 策划、拆图反推和 VOC 分析只会把你主动提交的内容发送到所选服务商。
+- 图片生成、AI 策划和拆图反推只会把你主动提交的内容发送到所选服务商。
+- VOC 评论在设备上解析、分析和导出，不需要 API Key，不上传评论，也不再按 ASIN 在线拉取。
 - AI 人物打标在本地写入 XMP 元数据，不上传媒体，也不负责判断图片中是否存在 AI 人物。
 
 详细的代理边界和部署策略见 [部署文档](./docs/deployment.md)。
