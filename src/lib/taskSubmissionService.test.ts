@@ -126,6 +126,63 @@ describe('editor retry configuration', () => {
     )
   })
 
+  it('preserves the separate style board alongside 16 uploaded references on retry', async () => {
+    const { service, task, putTask } = retryFixture()
+    const inputImageIds = [...Array.from({ length: 16 }, (_, i) => `product-${i}`), 'style-board']
+    await expect(
+      service.retry({
+        ...task,
+        category: { workflow: 'amazon-aplus', styleReferenceImageId: 'style-board' },
+        imageEditContext: undefined,
+        maskTargetImageId: null,
+        maskImageId: null,
+        inputImageIds,
+      }),
+    ).resolves.toMatchObject({ status: 'submitted' })
+    expect(putTask).toHaveBeenCalledWith(expect.objectContaining({ inputImageIds }))
+  })
+
+  it('rejects an ordinary retry with too many references for the current model before persistence', async () => {
+    const { service, task, state, putTask, executeTask } = retryFixture()
+    const qwen = createDefaultOpenAIProfile({
+      id: 'qwen-current',
+      name: 'Qwen current',
+      apiKey: 'qwen-test-key',
+      baseUrl: 'https://dashscope.aliyuncs.com/api/v1',
+      model: 'qwen-image-edit-plus',
+    })
+    state.settings.profiles.push(qwen)
+    state.settings.activeProfileId = qwen.id
+    const galleryTask: TaskRecord = {
+      ...task,
+      category: { workflow: 'gallery' },
+      imageEditContext: undefined,
+      maskImageId: null,
+      maskTargetImageId: null,
+    }
+    await expect(
+      service.retry({ ...galleryTask, inputImageIds: [...galleryTask.inputImageIds, 'ref-4'] }),
+    ).resolves.toEqual({
+      status: 'cancelled',
+    })
+    expect(state.showToast).toHaveBeenCalledWith(expect.stringContaining('最多支持 3 张参考图，此任务有 4 张'), 'error')
+    expect(putTask).not.toHaveBeenCalled()
+    expect(executeTask).not.toHaveBeenCalled()
+    expect(state.setTasks).not.toHaveBeenCalled()
+
+    await expect(service.retry(galleryTask)).resolves.toEqual({ status: 'submitted', taskId: 'retry' })
+    expect(putTask).toHaveBeenCalledOnce()
+    expect(putTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiProfileId: qwen.id,
+        apiModel: qwen.model,
+        inputImageIds: galleryTask.inputImageIds,
+      }),
+    )
+    expect(state.showToast).toHaveBeenCalledWith(`重试将使用配置「${qwen.name}」的当前模型「${qwen.model}」。`, 'info')
+    expect(executeTask).toHaveBeenCalledWith('retry')
+  })
+
   it('also pins home-engine editor retries to the original profile', async () => {
     const { service, task, state, putTask, seedream } = retryFixture()
     const original = state.settings.profiles[0]

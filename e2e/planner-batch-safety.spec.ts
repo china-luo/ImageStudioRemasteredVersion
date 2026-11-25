@@ -181,6 +181,41 @@ async function restoreB(page: Page) {
   await expect.poll(async () => (await workspace(page)).listingText).toBe('商品乙资料')
 }
 
+test('changing product facts prevents single and batch from using a stale plan', async ({ page }) => {
+  await seed(page)
+  const listing = page.getByRole('textbox', { name: '标题 / 五点描述', exact: true })
+  await listing.fill('商品乙的新资料')
+  await stage(page, '图片制作')
+  await expect(page.getByRole('button', { name: '提交生成', exact: true })).toBeDisabled()
+  await expect(page.getByRole('complementary', { name: '生成操作与设置' })).toContainText('商品资料或参考图顺序已变化。')
+  await page.getByRole('button', { name: '全选', exact: true }).click()
+  await expect(page.getByRole('button', { name: /^批量生成/ })).toBeDisabled()
+  expect(await rows(page, 'tasks')).toHaveLength(0)
+  await stage(page, '商品资料')
+  await listing.fill('商品甲资料')
+  await stage(page, '图片制作')
+  await expect(page.getByRole('button', { name: '提交生成', exact: true })).toBeEnabled()
+})
+
+test('request preview includes the edited prompt, actual pixel target, and final attachments', async ({ page }) => {
+  await seed(page)
+  await stage(page, '图片制作')
+  await page.getByRole('button', { name: '提示词', exact: true }).click()
+  await page.locator('textarea[spellcheck="false"]:visible').fill('Show the stainless steel lid.')
+  await page.getByRole('button', { name: '保存提示词', exact: true }).click()
+  await page.getByText('生图请求预览（含提示词与参考图顺序）', { exact: true }).click()
+  const preview = page.locator('details[open]').filter({ hasText: '生图请求预览' })
+  await expect(preview).toContainText('Mandatory Amazon MAIN image rules')
+  await expect(preview).toContainText('Show the stainless steel lid.')
+  await expect(preview).toContainText('expected image resolution 2048x2048 px')
+  await expect(preview).toContainText('附件：无')
+  const wire = page.waitForRequest((request) => API.test(request.url()) && request.method() === 'POST')
+  await page.getByRole('button', { name: '提交生成', exact: true }).click()
+  const body = (await wire).postDataJSON()
+  expect(body.prompt).toBe(await preview.locator('pre').textContent())
+  expect(body.size).toBe('2048x2048')
+})
+
 test('选失败为空及手动清空都不回退全选，显式全选仍可提交', async ({ page }) => {
   await seed(page)
   await stage(page, '图片制作')

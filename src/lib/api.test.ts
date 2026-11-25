@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PARAMS, type CustomProviderDefinition } from '../types'
+import { DEFAULT_PARAMS, type CustomProviderDefinition, type CustomProviderSubmitMapping } from '../types'
 import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
 import { callOpenAICompatibleImageApi, getCustomQueuedImageResult } from './openaiCompatibleImageApi'
@@ -850,6 +850,143 @@ describe('callImageApi', () => {
       images: ['data:image/jpeg;base64,aW1hZ2U='],
     })
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it.each<[string, CustomProviderSubmitMapping | undefined, boolean?]>([
+    ['a shared submit mapping without a mask', undefined],
+    ['JSON without a mask', { path: 'edit', body: { images: '$inputImages.dataUrls' } }],
+    ['GET with a body mapping', { path: 'edit', method: 'GET', body: { mask: '$mask.dataUrl' } }],
+    ['JSON with multipart-only mask files', { path: 'edit', files: [{ field: 'mask', source: 'mask' }] }],
+    [
+      'JSON with a mask overwritten by response_format',
+      { path: 'edit', body: { response_format: '$mask.dataUrl' } },
+      true,
+    ],
+    [
+      'multipart with a nested object that becomes [object Object]',
+      { path: 'edit', contentType: 'multipart', body: { image: { mask: '$mask.dataUrl' } } },
+    ],
+    [
+      'multipart without a mask file',
+      { path: 'edit', contentType: 'multipart', files: [{ field: 'image', source: 'inputImages' }] },
+    ],
+  ])('rejects a masked custom edit before fetch for %s', async (_name, editSubmit, responseFormatB64Json) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ b64_json: 'aW1hZ2U=' }))
+    const dataUrl = 'data:image/png;base64,YQ=='
+    await expect(
+      callOpenAICompatibleImageApi(
+        {
+          settings: DEFAULT_SETTINGS,
+          prompt: 'edit',
+          params: DEFAULT_PARAMS,
+          inputImageDataUrls: [dataUrl],
+          maskDataUrl: dataUrl,
+        },
+        createDefaultOpenAIProfile({ responseFormatB64Json }),
+        {
+          ...CUSTOM_ASYNC_PROVIDER,
+          submit: { path: 'submit', body: editSubmit ? { mask: '$mask.dataUrl' } : { prompt: '$prompt' } },
+          editSubmit: editSubmit && { ...editSubmit, result: { b64JsonPaths: ['b64_json'] } },
+        },
+      ),
+    ).rejects.toThrow('请求映射没有发送遮罩')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('continues to accept an explicit mask query mapping for a custom GET', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ b64_json: 'aW1hZ2U=' }))
+    const mask = 'data:image/png;base64,Yg=='
+    await callOpenAICompatibleImageApi(
+      {
+        settings: DEFAULT_SETTINGS,
+        prompt: 'edit',
+        params: DEFAULT_PARAMS,
+        inputImageDataUrls: ['data:image/png;base64,YQ=='],
+        maskDataUrl: mask,
+      },
+      createDefaultOpenAIProfile({ baseUrl: 'https://api.example.com/v1' }),
+      {
+        ...CUSTOM_ASYNC_PROVIDER,
+        submit: {
+          path: 'edit',
+          method: 'GET',
+          query: { region: '$mask.dataUrl' },
+          result: { b64JsonPaths: ['b64_json'] },
+        },
+      },
+    )
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('region')).toBe(mask)
+  })
+
+  it.each(['json', 'multipart'] as const)(
+    'allows a shared %s submit mapping that sends the mask',
+    async (contentType) => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ b64_json: 'aW1hZ2U=' }))
+      const image = 'data:image/png;base64,YQ=='
+      const mask = 'data:image/png;base64,Yg=='
+      const result = await callOpenAICompatibleImageApi(
+        {
+          settings: DEFAULT_SETTINGS,
+          prompt: 'edit',
+          params: DEFAULT_PARAMS,
+          inputImageDataUrls: [image],
+          maskDataUrl: mask,
+        },
+        createDefaultOpenAIProfile({ baseUrl: 'https://api.example.com/v1' }),
+        {
+          ...CUSTOM_ASYNC_PROVIDER,
+          submit: {
+            path: 'submit',
+            contentType,
+            body: {
+              image: '$inputImages.dataUrls.0',
+              region: contentType === 'json' ? { data: ['$mask.dataUrl'] } : ['$mask.dataUrl'],
+            },
+            result: { b64JsonPaths: ['b64_json'] },
+          },
+        },
+      )
+      expect(fetchMock).toHaveBeenCalledOnce()
+      const body = fetchMock.mock.calls[0][1]?.body
+      if (contentType === 'json') expect(JSON.parse(String(body))).toEqual({ image, region: { data: [mask] } })
+      else expect(Object.fromEntries(body as FormData)).toEqual({ image, region: mask })
+      expect(result.images).toEqual(['data:image/jpeg;base64,aW1hZ2U='])
+    },
+  )
+
+  it('sends the actual mask file with a custom multipart mapping', async () => {
+    const mask = 'data:image/png;base64,Yg=='
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url) =>
+        url === mask ? new Response(new Blob(['b'], { type: 'image/png' })) : jsonResponse({ b64_json: 'aW1hZ2U=' }),
+      )
+    await callOpenAICompatibleImageApi(
+      {
+        settings: DEFAULT_SETTINGS,
+        prompt: 'edit',
+        params: DEFAULT_PARAMS,
+        inputImageDataUrls: ['data:image/png;base64,YQ=='],
+        maskDataUrl: mask,
+      },
+      createDefaultOpenAIProfile({ baseUrl: 'https://api.example.com/v1' }),
+      {
+        ...CUSTOM_ASYNC_PROVIDER,
+        editSubmit: {
+          path: 'edit',
+          contentType: 'multipart',
+          body: { image: '$inputImages.dataUrls.0' },
+          files: [{ field: 'region', source: 'mask' }],
+          result: { b64JsonPaths: ['b64_json'] },
+        },
+      },
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.example.com/v1/edit')
+    const body = fetchMock.mock.calls[1][1]?.body as FormData
+    const file = body.get('region') as File
+    expect(file.name).toBe('mask.png')
+    expect(await file.text()).toBe('b')
   })
 
   it.each(['enabled', 'locked', 'local', 'configured', 'disabled', 'unavailable'] as const)(

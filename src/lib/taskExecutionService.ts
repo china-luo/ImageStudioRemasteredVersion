@@ -5,7 +5,7 @@ import {
   getCustomProviderDefinition,
   normalizeSettings,
 } from './apiProfiles'
-import { IMAGE_FETCH_CORS_HINT } from './imageApiShared'
+import { IMAGE_FETCH_CORS_HINT, matchesSubmittedPrompt } from './imageApiShared'
 import { replaceImageMentionsForApi } from './promptImageMentions'
 import { prepareReferenceImageAndMaskPayload } from './referenceImagePayload'
 import {
@@ -116,7 +116,12 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
       }
 
       const activeProfile = taskProfile ?? getActiveApiProfile(initialState.settings)
-      const requestSettings = createSettingsForApiProfile(initialState.settings, activeProfile)
+      const requestProfile = {
+        ...activeProfile,
+        model: task.apiModel?.trim() ? task.apiModel : activeProfile.model,
+        apiMode: task.apiMode ?? activeProfile.apiMode,
+      }
+      const requestSettings = createSettingsForApiProfile(initialState.settings, requestProfile)
       const taskProvider = task.apiProvider ?? activeProfile.provider
       const controller = new AbortController()
       executions.set(taskId, controller)
@@ -226,11 +231,12 @@ export function createTaskExecutionService(dependencies: TaskExecutionDependenci
               return values
             }, {})
           : undefined
-        const promptWasRevised =
-          shouldStoreRevisedPrompts &&
-          result.revisedPrompts?.some((value) => value?.trim() && value.trim() !== task.prompt.trim())
-        const hasRevisedPrompt = shouldStoreRevisedPrompts && result.revisedPrompts?.some((value) => value?.trim())
-        if (taskProvider === 'openai' && activeProfile.apiMode === 'responses' && !activeProfile.codexCli) {
+        if (taskProvider === 'openai' && requestProfile.apiMode === 'responses' && !requestProfile.codexCli) {
+          const hasRevisedPrompt = result.revisedPrompts?.some((value) => value?.trim())
+          const submittedPrompt = result.submittedPrompt
+          const promptWasRevised =
+            submittedPrompt !== undefined &&
+            result.revisedPrompts?.some((value) => value?.trim() && !matchesSubmittedPrompt(value, submittedPrompt))
           if (promptWasRevised) dependencies.showCodexCliPrompt()
           else if (!hasRevisedPrompt) dependencies.showCodexCliPrompt(false, '接口没有返回官方 API 会返回的部分信息')
         }

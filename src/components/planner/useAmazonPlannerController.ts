@@ -77,7 +77,11 @@ export async function generatePlannerStyleImages(options: {
       candidateIndex,
       ...(await requestPlannerStyleImage({
         settings: options.settings,
-        prompt: buildAmazonStyleCandidatePrompt(candidate, options.seriesStyleGuide),
+        prompt: buildAmazonStyleCandidatePrompt(
+          candidate,
+          options.seriesStyleGuide,
+          referencePayload.dataUrls.length > 0,
+        ),
         params: options.params,
         inputImageDataUrls: referencePayload.dataUrls,
         signal: options.signal,
@@ -106,7 +110,11 @@ export async function retryPlannerStyleImage(options: {
   })
   const result = await requestPlannerStyleImage({
     settings: options.settings,
-    prompt: buildAmazonStyleCandidatePrompt(options.candidate, options.seriesStyleGuide),
+    prompt: buildAmazonStyleCandidatePrompt(
+      options.candidate,
+      options.seriesStyleGuide,
+      referencePayload.dataUrls.length > 0,
+    ),
     params: options.params,
     inputImageDataUrls: referencePayload.dataUrls,
     signal: options.signal,
@@ -147,6 +155,7 @@ export type PlannerControllerSnapshot = {
   styleImages: StyleImageState[]
   selectedStyleIndex: number | null
   styleDensityMode: AmazonStyleDensityMode
+  promptOverrides?: Record<string, string>
   imagePlans: AmazonImagePlan[]
   aPlusPlans: AmazonAPlusPlan[]
   selectedPlanIndex: number | null
@@ -162,17 +171,16 @@ export function useAmazonPlannerController(
   latestSnapshotRef.current = snapshot
   const deletedSessionIdsRef = useRef(new Set<string>())
   const pendingSavesRef = useRef(new Map<string, Promise<unknown>>())
-  const getSnapshot = useCallback(
-    (overrides: Partial<AmazonPlannerSession> = {}) =>
-      createPlannerSessionSnapshot(
-        {
-          ...snapshot,
-          existingSession: snapshot.plannerSessions.find((session) => session.id === snapshot.currentPlannerSessionId),
-        },
-        overrides,
-      ),
-    [snapshot],
-  )
+  const getSnapshot = useCallback((overrides: Partial<AmazonPlannerSession> = {}) => {
+    const current = latestSnapshotRef.current
+    return createPlannerSessionSnapshot(
+      {
+        ...current,
+        existingSession: current.plannerSessions.find((session) => session.id === current.currentPlannerSessionId),
+      },
+      overrides,
+    )
+  }, [])
 
   const savePlannerSession = useCallback(
     async (overrides: Partial<AmazonPlannerSession> = {}) => {

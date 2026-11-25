@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_SETTINGS } from './apiProfiles'
+import { callImageApi as requestImage } from './api'
+import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
+import { getSelectedImageMentionLabel } from './promptImageMentions'
 import { createTaskExecutionService, type TaskExecutionDependencies } from './taskExecutionService'
 import { DEFAULT_PARAMS, type TaskParams, type TaskRecord } from '../types'
 import { canResumeTaskRecovery } from './taskRecovery'
@@ -21,14 +23,18 @@ function createTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   }
 }
 
-function createHarness(task: TaskRecord, overrides: Partial<TaskExecutionDependencies> = {}) {
+function createHarness(
+  task: TaskRecord,
+  overrides: Partial<TaskExecutionDependencies> = {},
+  settings = DEFAULT_SETTINGS,
+) {
   let tasks = [task]
   const showToast = vi.fn()
   const setDetailTaskId = vi.fn()
   const scheduleFalRecovery = vi.fn()
   const clearWatchdog = vi.fn()
   const state = () => ({
-    settings: DEFAULT_SETTINGS,
+    settings,
     tasks,
     maskDraft: null,
     showToast,
@@ -85,7 +91,10 @@ function createHarness(task: TaskRecord, overrides: Partial<TaskExecutionDepende
 }
 
 describe('createTaskExecutionService', () => {
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
   it('stores generated images and completes a running task', async () => {
     const harness = createHarness(createTask())
     await harness.service.execute('task-1')
@@ -98,6 +107,90 @@ describe('createTaskExecutionService', () => {
       customRecoverable: false,
     })
     expect(harness.showToast).toHaveBeenCalledWith('生成完成，共 1 张图片', 'success')
+  })
+
+  it.each(['queued-model', undefined, ' '])(
+    'uses the saved model %s when present, with the original account',
+    async (apiModel) => {
+      const original = createDefaultOpenAIProfile({
+        id: 'original',
+        model: 'current-model',
+        apiMode: 'responses',
+        apiKey: 'original-test-key',
+      })
+      const active = createDefaultOpenAIProfile({ id: 'active', model: 'other-model', apiKey: 'other-test-key' })
+      const settings = { ...DEFAULT_SETTINGS, profiles: [original, active], activeProfileId: active.id }
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: 'AA==' }] })))
+      const harness = createHarness(
+        createTask({ apiProfileId: original.id, apiModel, apiMode: 'images' }),
+        { callImageApi: requestImage },
+        settings,
+      )
+      await harness.service.execute('task-1')
+      expect(fetchMock).toHaveBeenCalledOnce()
+      const init = fetchMock.mock.calls[0][1]
+      expect(JSON.parse(String(init?.body)).model).toBe(apiModel?.trim() ? apiModel : original.model)
+      expect(init?.headers).toMatchObject({ Authorization: `Bearer ${original.apiKey}` })
+      expect(harness.getTask()).toMatchObject({ status: 'done', apiModel, apiProfileId: original.id })
+      expect(settings.profiles[0].model).toBe('current-model')
+    },
+  )
+
+  it.each([
+    ['echo', 1],
+    ['echo', 2],
+    ['whitespace', 1],
+    ['unwrapped', 1],
+    ['rewrite', 1],
+    ['mixed', 2],
+    ['missing', 1],
+  ] as const)('classifies Responses %s with %i request(s) against the exact sent text', async (kind, n) => {
+    const profile = createDefaultOpenAIProfile({ id: 'responses', apiMode: 'responses', apiKey: 'test-key' })
+    const settings = { ...DEFAULT_SETTINGS, profiles: [profile], activeProfileId: profile.id }
+    const showCodexCliPrompt = vi.fn()
+    const reference = 'data:image/png;base64,YQ=='
+    const expectedText =
+      'Use the following text as the complete prompt. Do not rewrite it:\nKeep [image 1] unchanged.\n\nTechnical output requirement (not visible text): expected image resolution 1024x1024 px.'
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body))
+      expect(body.input[0].content[0]).toEqual({ type: 'input_text', text: expectedText })
+      const rewrite = kind === 'rewrite' || (kind === 'mixed' && fetchMock.mock.calls.length === 2)
+      const revised =
+        kind === 'missing'
+          ? undefined
+          : rewrite
+            ? 'changed text'
+            : kind === 'unwrapped'
+              ? expectedText.slice(expectedText.indexOf('\n') + 1)
+              : kind === 'whitespace'
+                ? `\n${expectedText}  `
+                : body.input[0].content[0].text
+      return new Response(
+        JSON.stringify({ output: [{ type: 'image_generation_call', result: 'AA==', revised_prompt: revised }] }),
+      )
+    })
+    const task = createTask({
+      apiProfileId: profile.id,
+      apiMode: profile.apiMode,
+      prompt: `Keep ${getSelectedImageMentionLabel(0)} unchanged.`,
+      params: { ...DEFAULT_PARAMS, n, size: '1024x1024' },
+      inputImageIds: ['ref'],
+    })
+    const harness = createHarness(
+      task,
+      { callImageApi: requestImage, showCodexCliPrompt, ensureImageCached: async () => reference },
+      settings,
+    )
+    await harness.service.execute(task.id)
+    expect(fetchMock).toHaveBeenCalledTimes(n)
+    expect(harness.getTask()).toMatchObject({ status: 'done', prompt: task.prompt })
+    expect(harness.getTask()).not.toHaveProperty('submittedPrompt')
+    if (kind === 'rewrite' || kind === 'mixed') expect(showCodexCliPrompt).toHaveBeenCalledExactlyOnceWith()
+    else if (kind === 'missing')
+      expect(showCodexCliPrompt).toHaveBeenCalledExactlyOnceWith(false, '接口没有返回官方 API 会返回的部分信息')
+    else expect(showCodexCliPrompt).not.toHaveBeenCalled()
   })
 
   it('does not start the watchdog until image preparation finishes', async () => {
