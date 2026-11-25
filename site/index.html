@@ -1,0 +1,1770 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c0d10" media="(prefers-color-scheme: dark)" />
+    <title>跨境Image工作台 — 面向 Amazon 与 TikTok Shop 的本地优先 AI 商品图片工作台</title>
+    <meta
+      name="description"
+      content="从商品标题五点、AI 逐图策划和动态风格板，到批量生成、局部重绘、选片定稿与 ZIP 交付，统一在一条可恢复的本地优先工作流中完成。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="跨境Image工作台 — 本地优先 AI 电商视觉工作流" />
+    <meta
+      property="og:description"
+      content="覆盖 Amazon Listing、Amazon A+ 与 TikTok Shop。先策划再生产，支持 OpenAI 兼容动态模型目录、画布局部重绘、拆图反推、VOC 评论分析与 XMP 合规打标。"
+    />
+    <meta property="og:image" content="./assets/workbench-overview.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="./assets/pwa-icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="./assets/pwa-icon.png" />
+    <script>
+      ;(function () {
+        // Forward legacy workbench deep-links or URL-imported API configs straight to ./app/
+        try {
+          var search = window.location.search || ''
+          var hash = window.location.hash || ''
+          var params = new URLSearchParams(search)
+          var settingKeys = ['settings', 'apiUrl', 'apiKey', 'codexCli', 'apiMode', 'model']
+          var hasAppQuery = settingKeys.some(function (k) {
+            return params.has(k)
+          })
+          var normalizedHash = hash.replace(/\/+$/, '')
+          var isAppHash =
+            normalizedHash === '#/' ||
+            normalizedHash === '#/editor' ||
+            normalizedHash === '#/sop' ||
+            normalizedHash === '#/voc' ||
+            normalizedHash === '#/tagger'
+          if (hasAppQuery || isAppHash) {
+            window.location.replace('./app/' + search + hash)
+            return
+          }
+        } catch (e) {}
+
+        // Sync light/dark theme with the workbench app before first paint
+        try {
+          var saved = localStorage.getItem('image-studio-theme')
+          if (saved === 'dark' || saved === 'light') {
+            document.documentElement.classList.add(saved)
+          }
+        } catch (e) {}
+
+        // Unregister any legacy root-scoped Service Worker from older single-directory deployments
+        try {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+              var pageDir = new URL('./', window.location.href).href
+              regs.forEach(function (reg) {
+                if (reg.scope === pageDir) {
+                  reg.unregister()
+                }
+              })
+            })
+          }
+        } catch (e) {}
+      })()
+    </script>
+    <style>
+      /* ==========================================================================
+         Atelier Studio (Light) & Obsidian Darkroom (Dark)
+         Shared architectural language with 跨境Image工作台
+         ========================================================================== */
+      :root {
+        --bg: #f4f5f7;
+        --bg-elevated: #ffffff;
+        --bg-inset: #eef0f4;
+        --bg-subtle: rgba(255, 255, 255, 0.72);
+        --chrome: rgba(248, 249, 251, 0.84);
+        --line: rgba(15, 23, 42, 0.08);
+        --line-strong: rgba(15, 23, 42, 0.14);
+        --grid-line: rgba(15, 23, 42, 0.035);
+
+        --text-1: #111318;
+        --text-2: #4e5461;
+        --text-3: #7d8494;
+
+        --cta-bg: #141519;
+        --cta-bg-hover: #272930;
+        --cta-fg: #ffffff;
+
+        --accent: #2563eb;
+        --accent-strong: #1d4ed8;
+        --accent-soft: rgba(37, 99, 235, 0.085);
+        --accent-border: rgba(37, 99, 235, 0.22);
+
+        --emerald: #059669;
+        --emerald-soft: rgba(5, 150, 105, 0.1);
+        --amber: #b45309;
+        --amber-soft: rgba(180, 83, 9, 0.1);
+
+        --ambient: radial-gradient(72rem 36rem at 50% -6%, rgba(37, 99, 235, 0.09), transparent 68%);
+        --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+        --shadow-panel: 0 0 0 1px var(--line), 0 2px 6px rgba(15, 23, 42, 0.03), 0 12px 28px -14px rgba(15, 23, 42, 0.08);
+        --shadow-window: 0 0 0 1px var(--line-strong), 0 28px 70px -18px rgba(15, 23, 42, 0.2), 0 6px 18px rgba(15, 23, 42, 0.06);
+
+        --radius-xl: 20px;
+        --radius-lg: 14px;
+        --radius-md: 10px;
+        --radius-sm: 8px;
+
+        --font-sans: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei',
+          'Segoe UI', sans-serif;
+        --font-mono: 'Maple Mono', 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+        --container: 1160px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root:not(.light) {
+          --bg: #0b0c10;
+          --bg-elevated: #13151b;
+          --bg-inset: #191c24;
+          --bg-subtle: rgba(22, 25, 33, 0.72);
+          --chrome: rgba(13, 15, 20, 0.82);
+          --line: rgba(255, 255, 255, 0.08);
+          --line-strong: rgba(255, 255, 255, 0.15);
+          --grid-line: rgba(255, 255, 255, 0.028);
+
+          --text-1: #f4f5f8;
+          --text-2: #a0a7b6;
+          --text-3: #6c7383;
+
+          --cta-bg: #f4f5f8;
+          --cta-bg-hover: #ffffff;
+          --cta-fg: #0b0c10;
+
+          --accent: #60a5fa;
+          --accent-strong: #93c5fd;
+          --accent-soft: rgba(59, 130, 246, 0.14);
+          --accent-border: rgba(96, 165, 250, 0.28);
+
+          --emerald: #34d399;
+          --emerald-soft: rgba(52, 211, 153, 0.13);
+          --amber: #fbbf24;
+          --amber-soft: rgba(251, 191, 36, 0.13);
+
+          --ambient: radial-gradient(72rem 38rem at 50% -8%, rgba(59, 130, 246, 0.15), transparent 68%);
+          --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+          --shadow-panel: 0 0 0 1px var(--line), 0 8px 26px -12px rgba(0, 0, 0, 0.65);
+          --shadow-window: 0 0 0 1px var(--line-strong), 0 34px 90px -18px rgba(0, 0, 0, 0.85), 0 8px 24px rgba(0, 0, 0, 0.5);
+        }
+      }
+
+      :root.dark {
+        --bg: #0b0c10;
+        --bg-elevated: #13151b;
+        --bg-inset: #191c24;
+        --bg-subtle: rgba(22, 25, 33, 0.72);
+        --chrome: rgba(13, 15, 20, 0.82);
+        --line: rgba(255, 255, 255, 0.08);
+        --line-strong: rgba(255, 255, 255, 0.15);
+        --grid-line: rgba(255, 255, 255, 0.028);
+
+        --text-1: #f4f5f8;
+        --text-2: #a0a7b6;
+        --text-3: #6c7383;
+
+        --cta-bg: #f4f5f8;
+        --cta-bg-hover: #ffffff;
+        --cta-fg: #0b0c10;
+
+        --accent: #60a5fa;
+        --accent-strong: #93c5fd;
+        --accent-soft: rgba(59, 130, 246, 0.14);
+        --accent-border: rgba(96, 165, 250, 0.28);
+
+        --emerald: #34d399;
+        --emerald-soft: rgba(52, 211, 153, 0.13);
+        --amber: #fbbf24;
+        --amber-soft: rgba(251, 191, 36, 0.13);
+
+        --ambient: radial-gradient(72rem 38rem at 50% -8%, rgba(59, 130, 246, 0.15), transparent 68%);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-panel: 0 0 0 1px var(--line), 0 8px 26px -12px rgba(0, 0, 0, 0.65);
+        --shadow-window: 0 0 0 1px var(--line-strong), 0 34px 90px -18px rgba(0, 0, 0, 0.85), 0 8px 24px rgba(0, 0, 0, 0.5);
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-sans);
+        background-color: var(--bg);
+        background-image: var(--ambient),
+          linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+          linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+        background-size: 100% 900px, 48px 48px, 48px 48px;
+        background-repeat: no-repeat, repeat, repeat;
+        color: var(--text-1);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      img {
+        max-width: 100%;
+        display: block;
+      }
+
+      .container {
+        width: 100%;
+        max-width: var(--container);
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      .mono {
+        font-family: var(--font-mono);
+      }
+
+      /* ==========================================================================
+         Sticky Top Navigation
+         ========================================================================== */
+      .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        background: var(--chrome);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .header-inner {
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 16px;
+        letter-spacing: -0.01em;
+      }
+
+      .brand-mark {
+        width: 32px;
+        height: 32px;
+        border-radius: 9px;
+        background: #14161d;
+        color: #60a5fa;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.18);
+        flex-shrink: 0;
+      }
+
+      .brand-accent {
+        color: var(--accent);
+        margin: 0 1px;
+      }
+
+      .version-chip {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--bg-inset);
+        color: var(--text-2);
+        border: 1px solid var(--line);
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .nav-link {
+        font-size: 13.5px;
+        font-weight: 500;
+        color: var(--text-2);
+        padding: 6px 12px;
+        border-radius: var(--radius-sm);
+        transition: color 0.16s ease, background 0.16s ease;
+      }
+
+      .nav-link:hover {
+        color: var(--text-1);
+        background: var(--bg-inset);
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .icon-btn {
+        height: 34px;
+        padding: 0 10px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--line);
+        background: var(--bg-elevated);
+        color: var(--text-2);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12.5px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+      }
+
+      .icon-btn:hover {
+        color: var(--text-1);
+        border-color: var(--line-strong);
+      }
+
+      .btn-sm-primary {
+        height: 34px;
+        padding: 0 14px;
+        border-radius: var(--radius-sm);
+        background: var(--cta-bg);
+        color: var(--cta-fg);
+        font-size: 13px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.16s ease, transform 0.16s ease;
+      }
+
+      .btn-sm-primary:hover {
+        background: var(--cta-bg-hover);
+        transform: translateY(-1px);
+      }
+
+      /* ==========================================================================
+         Hero Section
+         ========================================================================== */
+      .hero {
+        padding: 72px 0 56px;
+        text-align: center;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 14px 5px 10px;
+        border-radius: 999px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--line-strong);
+        box-shadow: var(--shadow-sm);
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--text-2);
+        margin-bottom: 24px;
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--emerald);
+        box-shadow: 0 0 0 3px var(--emerald-soft);
+      }
+
+      .hero h1 {
+        margin: 0 auto 20px;
+        max-width: 860px;
+        font-size: clamp(32px, 5vw, 56px);
+        line-height: 1.14;
+        letter-spacing: -0.03em;
+        font-weight: 800;
+      }
+
+      .hero h1 .highlight {
+        background: linear-gradient(135deg, var(--accent) 0%, #6366f1 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .hero-desc {
+        margin: 0 auto 34px;
+        max-width: 690px;
+        font-size: clamp(15.5px, 2vw, 18px);
+        color: var(--text-2);
+        line-height: 1.7;
+      }
+
+      .hero-ctas {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .btn-primary {
+        height: 48px;
+        padding: 0 24px;
+        border-radius: var(--radius-md);
+        background: var(--cta-bg);
+        color: var(--cta-fg);
+        font-size: 15px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow: 0 8px 22px -8px rgba(15, 23, 42, 0.35);
+        transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
+      }
+
+      .btn-primary:hover {
+        background: var(--cta-bg-hover);
+        transform: translateY(-1.5px);
+      }
+
+      .btn-secondary {
+        height: 48px;
+        padding: 0 22px;
+        border-radius: var(--radius-md);
+        background: var(--bg-elevated);
+        color: var(--text-1);
+        border: 1px solid var(--line-strong);
+        box-shadow: var(--shadow-sm);
+        font-size: 15px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.18s ease, background 0.18s ease;
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        transform: translateY(-1.5px);
+      }
+
+      .hero-meta {
+        font-size: 12.5px;
+        color: var(--text-3);
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px 18px;
+        margin-bottom: 44px;
+      }
+
+      .hero-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      /* ==========================================================================
+         Studio Product Showcase Window
+         ========================================================================== */
+      .studio-frame-wrap {
+        position: relative;
+        margin: 0 auto;
+        max-width: 1080px;
+      }
+
+      .studio-window {
+        border-radius: var(--radius-xl);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-window);
+        overflow: hidden;
+        text-align: left;
+      }
+
+      .window-bar {
+        height: 42px;
+        padding: 0 16px;
+        background: var(--bg-inset);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .window-dots {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .window-dots i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        background: var(--line-strong);
+      }
+
+      .window-dots i:nth-child(1) {
+        background: #f87171;
+      }
+      .window-dots i:nth-child(2) {
+        background: #fbbf24;
+      }
+      .window-dots i:nth-child(3) {
+        background: #34d399;
+      }
+
+      .window-address {
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        color: var(--text-3);
+        padding: 3px 12px;
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--line);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .window-status {
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--emerald);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .window-body {
+        background: #eef0f4;
+        position: relative;
+      }
+
+      .window-body img {
+        width: 100%;
+        height: auto;
+      }
+
+      /* Interactive Stage Switcher Bar */
+      .stage-bar {
+        margin-top: 16px;
+        padding: 14px;
+        border-radius: var(--radius-lg);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-panel);
+        text-align: left;
+      }
+
+      .stage-tabs {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .stage-tab {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text-2);
+        border-radius: var(--radius-sm);
+        padding: 10px 12px;
+        text-align: left;
+        cursor: pointer;
+        font-family: inherit;
+        transition: all 0.16s ease;
+      }
+
+      .stage-tab:hover {
+        border-color: var(--line-strong);
+        color: var(--text-1);
+      }
+
+      .stage-tab.active {
+        background: var(--accent-soft);
+        border-color: var(--accent-border);
+        color: var(--text-1);
+      }
+
+      .stage-tab-num {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--accent);
+        display: block;
+        margin-bottom: 2px;
+      }
+
+      .stage-tab-title {
+        font-size: 13.5px;
+        font-weight: 600;
+        display: block;
+      }
+
+      .stage-detail {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 10px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-inset);
+        font-size: 13.5px;
+        color: var(--text-2);
+      }
+
+      .stage-detail strong {
+        color: var(--text-1);
+      }
+
+      .stage-badge {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--line);
+        color: var(--text-1);
+      }
+
+      /* ==========================================================================
+         Metrics Strip
+         ========================================================================== */
+      .metrics-strip {
+        padding: 28px 0 44px;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        border-radius: var(--radius-lg);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-panel);
+        overflow: hidden;
+      }
+
+      .metric-item {
+        padding: 22px 24px;
+        border-right: 1px solid var(--line);
+      }
+
+      .metric-item:last-child {
+        border-right: none;
+      }
+
+      .metric-val {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        margin-bottom: 4px;
+      }
+
+      .metric-label {
+        font-size: 13px;
+        color: var(--text-2);
+      }
+
+      /* ==========================================================================
+         Generic Section Headings
+         ========================================================================== */
+      .section {
+        padding: 64px 0;
+      }
+
+      .section-head {
+        max-width: 680px;
+        margin-bottom: 36px;
+      }
+
+      .section-kicker {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin-bottom: 8px;
+      }
+
+      .section-title {
+        margin: 0 0 12px;
+        font-size: clamp(24px, 3.4vw, 34px);
+        line-height: 1.22;
+        letter-spacing: -0.02em;
+        font-weight: 800;
+      }
+
+      .section-sub {
+        margin: 0;
+        font-size: 15.5px;
+        color: var(--text-2);
+      }
+
+      /* ==========================================================================
+         Workflow Architecture Cards ("先策划，再生产")
+         ========================================================================== */
+      .workflow-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      .wf-card {
+        padding: 24px;
+        border-radius: var(--radius-lg);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-panel);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .wf-tag {
+        align-self: flex-start;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        font-weight: 600;
+        padding: 3px 9px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .wf-card h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .wf-card p {
+        margin: 0;
+        font-size: 14px;
+        color: var(--text-2);
+        flex: 1;
+      }
+
+      .wf-list {
+        list-style: none;
+        padding: 12px 0 0;
+        margin: 4px 0 0;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--text-2);
+      }
+
+      .wf-list li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .wf-list li::before {
+        content: '';
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+      }
+
+      /* ==========================================================================
+         Bento Feature Matrix
+         ========================================================================== */
+      .bento-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      .bento-card {
+        padding: 24px;
+        border-radius: var(--radius-lg);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-panel);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 16px;
+        transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
+      }
+
+      .bento-card:hover {
+        transform: translateY(-2px);
+      }
+
+      .bento-card.wide {
+        grid-column: span 2;
+      }
+
+      .bento-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        background: var(--bg-inset);
+        border: 1px solid var(--line);
+        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 14px;
+      }
+
+      .bento-card h3 {
+        margin: 0 0 8px;
+        font-size: 17.5px;
+        font-weight: 700;
+      }
+
+      .bento-card p {
+        margin: 0;
+        font-size: 14px;
+        color: var(--text-2);
+      }
+
+      .bento-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent);
+      }
+
+      .bento-link:hover {
+        text-decoration: underline;
+      }
+
+      /* ==========================================================================
+         Editions Comparison (Desktop vs Online)
+         ========================================================================== */
+      .editions-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+      }
+
+      .edition-card {
+        padding: 30px;
+        border-radius: var(--radius-xl);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-panel);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 22px;
+      }
+
+      .edition-card.recommended {
+        box-shadow: 0 0 0 1.5px var(--accent-border), 0 18px 44px -18px rgba(37, 99, 235, 0.22);
+      }
+
+      .edition-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--emerald-soft);
+        color: var(--emerald);
+        margin-bottom: 12px;
+      }
+
+      .edition-badge.neutral {
+        background: var(--bg-inset);
+        color: var(--text-2);
+      }
+
+      .edition-card h3 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .edition-card > div > p {
+        margin: 0 0 18px;
+        font-size: 14.5px;
+        color: var(--text-2);
+      }
+
+      .check-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        font-size: 14px;
+        color: var(--text-1);
+      }
+
+      .check-list li {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .check-icon {
+        color: var(--emerald);
+        flex-shrink: 0;
+        margin-top: 3px;
+      }
+
+      .warn-note {
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        background: var(--amber-soft);
+        color: var(--amber);
+        font-size: 12.5px;
+        line-height: 1.55;
+        margin-top: 14px;
+      }
+
+      /* ==========================================================================
+         FAQ Accordion
+         ========================================================================== */
+      .faq-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      details.faq-item {
+        border-radius: var(--radius-lg);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-panel);
+        padding: 0 22px;
+      }
+
+      details.faq-item summary {
+        list-style: none;
+        padding: 18px 0;
+        font-size: 15.5px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      details.faq-item summary::-webkit-details-marker {
+        display: none;
+      }
+
+      details.faq-item summary::after {
+        content: '+';
+        font-family: var(--font-mono);
+        font-size: 18px;
+        color: var(--text-3);
+        transition: transform 0.18s ease;
+      }
+
+      details.faq-item[open] summary::after {
+        transform: rotate(45deg);
+        color: var(--accent);
+      }
+
+      .faq-body {
+        padding: 0 0 18px;
+        font-size: 14px;
+        color: var(--text-2);
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+      }
+
+      .faq-body code {
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+        padding: 2px 6px;
+        border-radius: 5px;
+        background: var(--bg-inset);
+        color: var(--text-1);
+      }
+
+      /* ==========================================================================
+         Bottom CTA & Footer
+         ========================================================================== */
+      .bottom-cta {
+        margin: 28px 0 64px;
+        padding: 48px 32px;
+        border-radius: var(--radius-xl);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-window);
+        text-align: center;
+      }
+
+      .bottom-cta h2 {
+        margin: 0 0 10px;
+        font-size: clamp(24px, 3vw, 32px);
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .bottom-cta p {
+        margin: 0 auto 26px;
+        max-width: 560px;
+        color: var(--text-2);
+        font-size: 15px;
+      }
+
+      .site-footer {
+        border-top: 1px solid var(--line);
+        padding: 32px 0 44px;
+        color: var(--text-3);
+        font-size: 13px;
+      }
+
+      .footer-inner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+      }
+
+      .footer-links a:hover {
+        color: var(--text-1);
+      }
+
+      /* ==========================================================================
+         Responsive Breakpoints
+         ========================================================================== */
+      @media (max-width: 920px) {
+        .nav-links {
+          display: none;
+        }
+        .stage-tabs,
+        .metrics-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .metric-item:nth-child(2) {
+          border-right: none;
+        }
+        .metric-item:nth-child(1),
+        .metric-item:nth-child(2) {
+          border-bottom: 1px solid var(--line);
+        }
+        .workflow-grid,
+        .bento-grid,
+        .editions-grid {
+          grid-template-columns: 1fr;
+        }
+        .bento-card.wide {
+          grid-column: span 1;
+        }
+      }
+
+      @media (max-width: 600px) {
+        .hero {
+          padding: 48px 0 36px;
+        }
+        .stage-tabs,
+        .metrics-grid {
+          grid-template-columns: 1fr;
+        }
+        .metric-item {
+          border-right: none !important;
+          border-bottom: 1px solid var(--line);
+        }
+        .metric-item:last-child {
+          border-bottom: none;
+        }
+        .stage-detail {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .window-address {
+          display: none;
+        }
+        .btn-primary,
+        .btn-secondary {
+          width: 100%;
+          justify-content: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Top Sticky Bar -->
+    <header class="site-header">
+      <div class="container header-inner">
+        <a href="#" class="brand" aria-label="跨境Image工作台 首页">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"
+              />
+            </svg>
+          </span>
+          <span>跨境<span class="brand-accent">Image</span>工作台</span>
+          <span class="version-chip" data-release-tag>v2.0.4</span>
+        </a>
+
+        <nav class="nav-links" aria-label="页面导航">
+          <a class="nav-link" href="#workflow">核心工作流</a>
+          <a class="nav-link" href="#features">模块矩阵</a>
+          <a class="nav-link" href="#editions">桌面版 vs 在线版</a>
+          <a class="nav-link" href="#faq">常见问题</a>
+        </nav>
+
+        <div class="header-actions">
+          <button type="button" class="icon-btn" id="theme-toggle" title="切换外观主题">
+            <span id="theme-icon" aria-hidden="true">◐</span>
+            <span id="theme-label">自动</span>
+          </button>
+          <a
+            class="icon-btn"
+            href="https://github.com/china-luo/ImageStudioRemasteredVersion"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub 仓库"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                clip-rule="evenodd"
+                d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+              />
+            </svg>
+            <span>GitHub</span>
+          </a>
+          <a class="btn-sm-primary" href="./app/">
+            <span>打开在线版</span>
+            <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- Hero -->
+      <section class="hero">
+        <div class="container">
+          <div class="eyebrow">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span><strong data-release-tag>v2.0.4</strong> 正式发布 · MIT 开源 · 本地优先 AI 商品视觉工作流</span>
+          </div>
+
+          <h1>
+            把商品资料与参考图，<br />
+            变成<span class="highlight">符合平台规范</span>的可交付套图
+          </h1>
+
+          <p class="hero-desc">
+            面向 <strong>Amazon Listing、Amazon A+ 与 TikTok Shop</strong> 打造的图片生产工作台。不止是 Prompt 输入框——从逐图位策划、动态风格板，到生图请求核对、画布重绘与选片导出，全程本地保存、随时断点恢复。
+          </p>
+
+          <div class="hero-ctas">
+            <a
+              class="btn-primary"
+              data-download-win
+              href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M3 5.3L10.4 4.3V11.4H3V5.3ZM11.6 4.1L21 2.8V11.4H11.6V4.1ZM3 12.6H10.4V19.7L3 18.7V12.6ZM11.6 12.6H21V21.2L11.6 19.9V12.6Z" />
+              </svg>
+              <span data-download-label>下载 Windows 桌面版</span>
+            </a>
+
+            <a class="btn-secondary" href="./app/">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                />
+              </svg>
+              <span>立即打开在线工作台</span>
+            </a>
+          </div>
+
+          <div class="hero-meta">
+            <span>✓ Windows 10 / 11 (x64) 安装包</span>
+            <span>✓ 桌面端绕过浏览器 CORS 跨域限制</span>
+            <span>✓ 支持任意 OpenAI-compatible / Seedream 模型接口</span>
+          </div>
+
+          <!-- Studio Window Showcase -->
+          <div class="studio-frame-wrap">
+            <div class="studio-window">
+              <div class="window-bar">
+                <div class="window-dots" aria-hidden="true">
+                  <i></i><i></i><i></i>
+                </div>
+                <div class="window-address">
+                  <span>Amazon设计工作台 · MAIN + PT01-PT06</span>
+                  <span>|</span>
+                  <span>Ctrl + K 快捷命令</span>
+                </div>
+                <div class="window-status">● 本地已自动保存</div>
+              </div>
+              <div class="window-body">
+                <img
+                  src="./assets/workbench-overview.png"
+                  onerror="this.onerror=null;this.src='../docs/images/workbench-overview.png';"
+                  alt="跨境Image工作台 实机界面预览：按商品资料、策划与风格、图片制作、筛选与导出四步推进"
+                  width="1920"
+                  height="1280"
+                />
+              </div>
+            </div>
+
+            <!-- Interactive 4-Stage Inspector -->
+            <div class="stage-bar" role="region" aria-label="四步工作流预览说明">
+              <div class="stage-tabs" role="tablist">
+                <button
+                  type="button"
+                  class="stage-tab active"
+                  role="tab"
+                  aria-selected="true"
+                  data-stage="0"
+                >
+                  <span class="stage-tab-num">STEP 01</span>
+                  <span class="stage-tab-title">商品资料与参考图</span>
+                </button>
+                <button
+                  type="button"
+                  class="stage-tab"
+                  role="tab"
+                  aria-selected="false"
+                  data-stage="1"
+                >
+                  <span class="stage-tab-num">STEP 02</span>
+                  <span class="stage-tab-title">AI 策划与动态风格板</span>
+                </button>
+                <button
+                  type="button"
+                  class="stage-tab"
+                  role="tab"
+                  aria-selected="false"
+                  data-stage="2"
+                >
+                  <span class="stage-tab-num">STEP 03</span>
+                  <span class="stage-tab-title">请求核对与批量生图</span>
+                </button>
+                <button
+                  type="button"
+                  class="stage-tab"
+                  role="tab"
+                  aria-selected="false"
+                  data-stage="3"
+                >
+                  <span class="stage-tab-num">STEP 04</span>
+                  <span class="stage-tab-title">版本对比与 ZIP 交付</span>
+                </button>
+              </div>
+              <div class="stage-detail" id="stage-detail-box">
+                <span id="stage-detail-text">
+                  <strong>以项目为单位管理素材：</strong>录入商品标题、五点描述并上传实拍参考图，支持 <code>@图1</code> 精准引用；资料变更时自动拦截过期策划，避免错图漏图。
+                </span>
+                <span class="stage-badge" id="stage-detail-badge">IndexedDB 本地持久化</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Key Metrics Strip -->
+      <section class="metrics-strip" aria-label="核心规格指标">
+        <div class="container">
+          <div class="metrics-grid">
+            <div class="metric-item">
+              <div class="metric-val">Amazon 6 大站点</div>
+              <div class="metric-label">覆盖 US / JP / DE / FR / IT / ES 站点语言与白底主图规范</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-val">3 套电商工作流</div>
+              <div class="metric-label">Amazon Listing 主附图、普通/高级 A+ 模块与 TikTok Shop</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-val">动态模型目录</div>
+              <div class="metric-label">自动拉取上游 <span class="mono">/models</span> 列表，支持自由添加与手输模型 ID</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-val">断点可恢复架构</div>
+              <div class="metric-label">刷新或重启后已提交远端 ID 的任务仅续查状态，绝不重复扣费</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Workflow Section -->
+      <section class="section" id="workflow">
+        <div class="container">
+          <div class="section-head">
+            <div class="section-kicker">Workflow First</div>
+            <h2 class="section-title">先策划，再生产：告别盲盒式抽卡</h2>
+            <p class="section-sub">
+              针对跨境电商美工与运营的真实出图痛点设计，让同一套 Listing 的主图、卖点附图与 A+ 模块保持统一的视觉语言与合规标准。
+            </p>
+          </div>
+
+          <div class="workflow-grid">
+            <article class="wf-card">
+              <span class="wf-tag">01 · 平台规则内建</span>
+              <h3>主图白底约束 &amp; 站点语种跟随</h3>
+              <p>
+                单张与批量生成共用同一套严谨规则：Amazon <span class="mono">MAIN</span> 主图优先执行纯白底、无营销叠字约束，不误附独立风格板；附图与 A+ 画面文案自动跟随目标站点语言。
+              </p>
+              <ul class="wf-list">
+                <li>Amazon Listing <span class="mono">MAIN + PT01~PT06</span> 逐位规划</li>
+                <li>标准 / 高级 / 移动端 A+ 模块尺寸预设</li>
+                <li>TikTok Shop 美区主图与竖版详情图约束</li>
+              </ul>
+            </article>
+
+            <article class="wf-card">
+              <span class="wf-tag">02 · 提交前透明可控</span>
+              <h3>生图请求预览 &amp; 过期策划拦截</h3>
+              <p>
+                正式提交 API 前可展开「生图请求预览」，完整核对模型、输出尺寸、最终拼接提示词与参考图顺序，并支持一键复制完整 Prompt。
+              </p>
+              <ul class="wf-list">
+                <li>参考图顺序变化自动预警拦截</li>
+                <li>恢复历史策划版本时保留人工微调提示词</li>
+                <li>支持单张精调与勾选失败项一键批量重试</li>
+              </ul>
+            </article>
+
+            <article class="wf-card">
+              <span class="wf-tag">03 · 项目级资产沉淀</span>
+              <h3>多版本选片定稿 &amp; 跨标签页防冲突</h3>
+              <p>
+                每个图片位支持多次生成与重绘对比，选定满意版本标记为「项目定稿」后即可按规范命名打包导出 ZIP，随时备份或迁移工程数据。
+              </p>
+              <ul class="wf-list">
+                <li>缺少参考图时仍可安全切换保存，补导同 ID 图即恢复</li>
+                <li>内置跨浏览器标签页写入冲突保护</li>
+                <li>全局 <span class="mono">Ctrl+K</span> / <span class="mono">⌘K</span> 命令面板直达任意操作</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bento Features Matrix -->
+      <section class="section" id="features">
+        <div class="container">
+          <div class="section-head">
+            <div class="section-kicker">All-in-One Studio</div>
+            <h2 class="section-title">五大核心工作模块，一套工具闭环</h2>
+            <p class="section-sub">
+              点击任一模块卡片，即可直接在浏览器中跳转到在线工作台对应视图体验。
+            </p>
+          </div>
+
+          <div class="bento-grid">
+            <article class="bento-card wide">
+              <div>
+                <div class="bento-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                    />
+                  </svg>
+                </div>
+                <h3>AI 策划与批量图片制作工作台</h3>
+                <p>
+                  输入商品标题与五点描述，自动提炼核心卖点摘要、逐图视觉方案与多套动态候选风格板。支持 <span class="mono">@图</span> 引用多张实拍参考图，统一控制分辨率（2K / 4K）、画幅比例、输出格式与压缩率。
+                </p>
+              </div>
+              <a class="bento-link" href="./app/#/">进入图片生成工作台 →</a>
+            </article>
+
+            <article class="bento-card">
+              <div>
+                <div class="bento-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </div>
+                <h3>画布局部标注与连续重绘</h3>
+                <p>
+                  支持画布无极缩放、平移、涂抹蒙版区域标注与撤销/重做，针对成图瑕疵或文案细节多轮连续精修，兼容 OpenAI 编辑接口与 Seedream Pro。
+                </p>
+              </div>
+              <a class="bento-link" href="./app/#/editor">打开图片编辑器 →</a>
+            </article>
+
+            <article class="bento-card">
+              <div>
+                <div class="bento-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M9 12h6" />
+                  </svg>
+                </div>
+                <h3>竞品拆图反推 (SOP)</h3>
+                <p>
+                  上传优秀竞品视觉图并结合自家商品资料，一键输出中文构图光影拆解、品类迁移建议以及可直接复用的英文正反向生图提示词。
+                </p>
+              </div>
+              <a class="bento-link" href="./app/#/sop">体验拆图反推 →</a>
+            </article>
+
+            <article class="bento-card">
+              <div>
+                <div class="bento-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <h3>Amazon VOC 评论分析</h3>
+                <p>
+                  上传 CSV / XLSX 或直接粘贴评论表格，纯本地统计星级分布与买家高频关注主题，提炼真实痛点反哺图片策划，支持导出独立 HTML 报告。
+                </p>
+              </div>
+              <a class="bento-link" href="./app/#/voc">打开 VOC 分析 →</a>
+            </article>
+
+            <article class="bento-card">
+              <div>
+                <div class="bento-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                  </svg>
+                </div>
+                <h3>AI 人物合规 XMP 打标</h3>
+                <p>
+                  为已确认需要披露的数字合成人物图片或视频写入符合 Amazon 规范的 XMP 元数据标记，支持单文件与 ZIP 批量处理，全程浏览器/本地完成。
+                </p>
+              </div>
+              <a class="bento-link" href="./app/#/tagger">打开 AI 人物打标 →</a>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Desktop vs Online Edition -->
+      <section class="section" id="editions">
+        <div class="container">
+          <div class="section-head">
+            <div class="section-kicker">Choose Your Runtime</div>
+            <h2 class="section-title">Windows 桌面版与在线版，按场景自由选择</h2>
+            <p class="section-sub">
+              两套环境共享完全一致的界面与工作流能力；日常高频生产强烈推荐使用 Windows 桌面版。
+            </p>
+          </div>
+
+          <div class="editions-grid">
+            <div class="edition-card recommended">
+              <div>
+                <span class="edition-badge">★ 日常生产主力推荐</span>
+                <h3>Windows 桌面版</h3>
+                <p>基于 Electron 打包的原生桌面工作台，专为稳定连接各类 API 网关与大批量本地文件交付打造。</p>
+                <ul class="check-list">
+                  <li>
+                    <span class="check-icon">✓</span>
+                    <span><strong>无惧 CORS 跨域拦截：</strong>通过主进程受控网络通道发起请求，支持各类不支持浏览器直连的上游中转与私有网关。</span>
+                  </li>
+                  <li>
+                    <span class="check-icon">✓</span>
+                    <span><strong>系统级安全凭据存储：</strong>API Key 采用 Windows 系统加密（<span class="mono">safeStorage</span>）持久化保存，关闭重启无需重填。</span>
+                  </li>
+                  <li>
+                    <span class="check-icon">✓</span>
+                    <span><strong>本地目录直接落盘：</strong>支持直接选择电脑目标文件夹批量写出高清成图并自动防重名覆盖。</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <a
+                  class="btn-primary"
+                  style="width: 100%; justify-content: center"
+                  data-download-win
+                  href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span data-download-label>前往 GitHub Releases 下载 Windows 版</span>
+                </a>
+              </div>
+            </div>
+
+            <div class="edition-card">
+              <div>
+                <span class="edition-badge neutral">零安装 · 即开即用</span>
+                <h3>Web 在线体验版</h3>
+                <p>托管于 GitHub Pages 的纯静态渐进式 Web 应用（PWA），任何电脑或平板打开链接即可体验完整交互。</p>
+                <ul class="check-list">
+                  <li>
+                    <span class="check-icon">✓</span>
+                    <span><strong>零后端纯静态架构：</strong>不经过任何第三方中转服务器，浏览器直接请求你所配置的上游 API 地址。</span>
+                  </li>
+                  <li>
+                    <span class="check-icon">✓</span>
+                    <span><strong>会话级密钥保护：</strong>在线版 API Key 仅暂存于当前标签页 <span class="mono">sessionStorage</span>，关闭标签页自动销毁。</span>
+                  </li>
+                  <li>
+                    <span class="check-icon">✓</span>
+                    <span><strong>支持离线缓存与安装：</strong>可一键添加至桌面应用图标，项目历史与图片缓存保存在本地浏览器。</span>
+                  </li>
+                </ul>
+                <div class="warn-note">
+                  提示：受浏览器安全沙箱机制限制，在线版要求你配置的上游 API 接口开启 CORS 允许跨域；若遇到 <code>Failed to fetch</code>，请改用左侧 Windows 桌面版。
+                </div>
+              </div>
+              <div>
+                <a class="btn-secondary" style="width: 100%; justify-content: center" href="./app/">
+                  <span>在浏览器中打开在线工作台 →</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="section" id="faq">
+        <div class="container">
+          <div class="section-head">
+            <div class="section-kicker">FAQ</div>
+            <h2 class="section-title">常见问题解答</h2>
+          </div>
+
+          <div class="faq-list">
+            <details class="faq-item" open>
+              <summary>软件自带免费的生图额度吗？需要准备什么才能开始使用？</summary>
+              <div class="faq-body">
+                跨境Image工作台是一款<strong>完全开源免费（MIT 协议）的客户端工作流工具</strong>，本身不捆绑售卖算力。你只需在右上角「设置」中填入自己的 OpenAI 官方接口、任意 OpenAI-compatible 兼容服务商（如各类聚合网关）、fal.ai 或 Seedream 接口的 <code>Base URL</code> 与 <code>API Key</code> 即可使用。
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary>我的商品未公开新品图、五点文案和 API Key 会上传到你们的服务器吗？</summary>
+              <div class="faq-body">
+                <strong>绝对不会。</strong>本项目采用纯粹的本地优先（Local-First）无后端架构：所有项目草稿、参考图与历史记录均存储在你本机的浏览器 IndexedDB 中；生图与策划请求仅由你的设备直连你自行配置的 API 服务商。
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary>为什么在 Web 在线版点击测试连接或生图提示 Failed to fetch？</summary>
+              <div class="faq-body">
+                部分 API 服务商未在响应头开放浏览器跨域（CORS）权限，浏览器会拦截网页直接发起的请求。遇到这种情况，只需下载安装 <strong>Windows 桌面版</strong>（或本地克隆仓库运行 <code>npm run dev</code> 使用内置受控开发代理）即可完美解决。
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary>我可以把这套工作台私有化部署到团队内网、Cloudflare 或 Docker 吗？</summary>
+              <div class="faq-body">
+                完全支持。仓库已内置 <code>wrangler.jsonc</code>（一键 <code>npm run deploy:cf</code> 部署至 Cloudflare）、<code>deploy/Dockerfile</code> + Nginx 配置以及完整的 GitHub Actions 工作流，团队可在数分钟内完成私有部署。
+              </div>
+            </details>
+          </div>
+
+          <!-- Bottom CTA -->
+          <div class="bottom-cta">
+            <h2>准备好升级你的跨境商品视觉生产流了吗？</h2>
+            <p>免费开源、本地优先、专为电商多图位规范设计。立即下载桌面客户端或在浏览器中直接体验。</p>
+            <div class="hero-ctas" style="margin-bottom: 0">
+              <a
+                class="btn-primary"
+                data-download-win
+                href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span data-download-label>下载 Windows 桌面版</span>
+              </a>
+              <a class="btn-secondary" href="./app/">
+                <span>打开在线工作台 →</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div>
+          <strong>跨境Image工作台</strong> · Released under the MIT License · Crafted by JackLuo
+        </div>
+        <div class="footer-links">
+          <a href="./app/">在线工作台</a>
+          <a href="https://github.com/china-luo/ImageStudioRemasteredVersion" target="_blank" rel="noopener noreferrer">GitHub 源码</a>
+          <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases" target="_blank" rel="noopener noreferrer">版本下载 (Releases)</a>
+          <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">更新日志</a>
+          <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/issues" target="_blank" rel="noopener noreferrer">问题反馈</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      ;(function () {
+        // 1. Theme Switcher (synced with workbench localStorage key 'image-studio-theme')
+        var THEME_KEY = 'image-studio-theme'
+        var toggleBtn = document.getElementById('theme-toggle')
+        var themeIcon = document.getElementById('theme-icon')
+        var themeLabel = document.getElementById('theme-label')
+
+        function getPref() {
+          try {
+            var v = localStorage.getItem(THEME_KEY)
+            if (v === 'light' || v === 'dark') return v
+          } catch (e) {}
+          return 'system'
+        }
+
+        function applyPref(pref) {
+          var root = document.documentElement
+          root.classList.remove('light', 'dark')
+          if (pref === 'light' || pref === 'dark') {
+            root.classList.add(pref)
+          }
+          if (themeIcon && themeLabel) {
+            if (pref === 'light') {
+              themeIcon.textContent = '☀'
+              themeLabel.textContent = '浅色'
+            } else if (pref === 'dark') {
+              themeIcon.textContent = '☾'
+              themeLabel.textContent = '深色'
+            } else {
+              themeIcon.textContent = '◐'
+              themeLabel.textContent = '自动'
+            }
+          }
+        }
+
+        applyPref(getPref())
+
+        if (toggleBtn) {
+          toggleBtn.addEventListener('click', function () {
+            var current = getPref()
+            var next = current === 'system' ? 'light' : current === 'light' ? 'dark' : 'system'
+            try {
+              if (next === 'system') {
+                localStorage.removeItem(THEME_KEY)
+              } else {
+                localStorage.setItem(THEME_KEY, next)
+              }
+            } catch (e) {}
+            applyPref(next)
+          })
+        }
+
+        // 2. Interactive 4-Stage Workflow Tabs
+        var stages = [
+          {
+            html: '<strong>以项目为单位管理素材：</strong>录入商品标题、五点描述并上传实拍参考图，支持 <code>@图1</code> 精准引用；资料变更时自动拦截过期策划，避免错图漏图。',
+            badge: 'IndexedDB 本地持久化',
+          },
+          {
+            html: '<strong>AI 逐图策划与动态风格板：</strong>自动生成商品信息摘要、<code>MAIN + PT01~PT06</code> 或 A+ 模块逐图方案与候选风格板，恢复历史策划时保留手改提示词。',
+            badge: 'Amazon / TikTok 规范内建',
+          },
+          {
+            html: '<strong>提交前完整核对生图请求：</strong>展开「生图请求预览」即可检查模型、尺寸、最终拼接提示词与参考图顺序；已获取远端 ID 的任务刷新后自动续查不重发。',
+            badge: '防重复扣费 · 批量生成',
+          },
+          {
+            html: '<strong>画布精修、多版本选片与导出：</strong>在画布中涂抹局部区域连续重绘，对比同一图片位多个历史版本，选定最终定稿后一键打包导出 ZIP。',
+            badge: '选片定稿 · ZIP 批量交付',
+          },
+        ]
+
+        var tabButtons = document.querySelectorAll('.stage-tab')
+        var detailText = document.getElementById('stage-detail-text')
+        var detailBadge = document.getElementById('stage-detail-badge')
+
+        tabButtons.forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var idx = Number(btn.getAttribute('data-stage') || '0')
+            var item = stages[idx] || stages[0]
+            tabButtons.forEach(function (b) {
+              var active = b === btn
+              b.classList.toggle('active', active)
+              b.setAttribute('aria-selected', active ? 'true' : 'false')
+            })
+            if (detailText) detailText.innerHTML = item.html
+            if (detailBadge) detailBadge.textContent = item.badge
+          })
+        })
+
+        // 3. Progressive Enhancement: Fetch latest GitHub Release tag & direct .exe installer asset
+        try {
+          var CACHE_KEY = 'image-studio-latest-release-v1'
+          var cached = sessionStorage.getItem(CACHE_KEY)
+
+          function updateReleaseDom(data) {
+            if (!data || !data.tag) return
+            document.querySelectorAll('[data-release-tag]').forEach(function (el) {
+              el.textContent = data.tag
+            })
+            if (data.exeUrl) {
+              document.querySelectorAll('[data-download-win]').forEach(function (a) {
+                a.setAttribute('href', data.exeUrl)
+              })
+              document.querySelectorAll('[data-download-label]').forEach(function (span, idx) {
+                if (idx === 0) span.textContent = '下载 Windows 桌面版 (' + data.tag + ')'
+              })
+            }
+          }
+
+          if (cached) {
+            updateReleaseDom(JSON.parse(cached))
+          } else {
+            fetch('https://api.github.com/repos/china-luo/ImageStudioRemasteredVersion/releases/latest', {
+              headers: { Accept: 'application/vnd.github+json' },
+            })
+              .then(function (res) {
+                return res.ok ? res.json() : null
+              })
+              .then(function (json) {
+                if (!json || !json.tag_name) return
+                var assets = Array.isArray(json.assets) ? json.assets : []
+                var exe = assets.find(function (item) {
+                  return item && typeof item.browser_download_url === 'string' && /\.exe$/i.test(item.name || '')
+                })
+                var payload = {
+                  tag: json.tag_name,
+                  exeUrl: exe ? exe.browser_download_url : json.html_url || '',
+                }
+                sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload))
+                updateReleaseDom(payload)
+              })
+              .catch(function () {})
+          }
+        } catch (e) {}
+      })()
+    </script>
+  </body>
+</html>

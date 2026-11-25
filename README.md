@@ -15,7 +15,9 @@
 </p>
 
 <p align="center">
-  <a href="https://china-luo.github.io/ImageStudioRemasteredVersion/">在线体验</a>
+  <a href="https://china-luo.github.io/ImageStudioRemasteredVersion/">项目官网</a>
+  ·
+  <a href="https://china-luo.github.io/ImageStudioRemasteredVersion/app/">在线体验</a>
   ·
   <a href="https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest">下载 Windows 版</a>
   ·
@@ -108,7 +110,7 @@
 
 ### 在线体验
 
-打开 [GitHub Pages 在线版](https://china-luo.github.io/ImageStudioRemasteredVersion/)。
+打开 [项目官网](https://china-luo.github.io/ImageStudioRemasteredVersion/) 了解完整工作流与版本说明，或直接进入 [GitHub Pages 在线工作台](https://china-luo.github.io/ImageStudioRemasteredVersion/app/)。
 
 在线版是静态 Web 应用，浏览器会直接请求你配置的上游 API。上游接口需要允许 CORS；如果出现 `Failed to fetch`、跨域或网关限制，建议使用 Windows 桌面版或本地开发代理。
 

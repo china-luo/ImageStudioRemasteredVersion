@@ -27,7 +27,10 @@ npm run deploy:cf
 
 ## GitHub Pages
 
-README 中的在线地址同样是静态托管，策略与上相同。
+`npm run build:pages` 会生成 `dist-pages/` 目录并由 `.github/workflows/deploy-pages.yml` 自动发布：
+
+- 根路径 `/`：独立单页产品官网（`site/index.html`），提供功能概览、桌面版安装包引导与旧深链自动跳转。
+- 子路径 `/app/`：静态 Web 工作台（复用 `dist/` 构建产物），API 请求策略与 Cloudflare / Vercel 相同。
 
 ## Docker
 

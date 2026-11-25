@@ -135,3 +135,15 @@ it('keeps the documented Node baseline aligned with CI, Docker and the Windows g
   expect(read('README.md')).toContain('Node.js 24 LTS 或更高版本')
   expect(read('docs/packaging.md')).toContain('Node.js 24 LTS 或更高版本')
 })
+
+it('publishes the standalone landing page at root and the web workbench under /app/ on GitHub Pages', () => {
+  const pagesWorkflow = read('.github/workflows/deploy-pages.yml')
+  const landingHtml = read('site/index.html')
+  const pkg = JSON.parse(read('package.json')) as { scripts?: Record<string, string> }
+
+  expect(pkg.scripts?.['build:pages']).toBe('npm run build && node scripts/build-pages-site.mjs')
+  expect(pagesWorkflow).toContain('run: npm run build:pages')
+  expect(pagesWorkflow).toContain('path: dist-pages')
+  expect(landingHtml).toContain('href="./app/"')
+  expect(landingHtml).toContain("window.location.replace('./app/' + search + hash)")
+})

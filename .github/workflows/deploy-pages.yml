@@ -34,19 +34,16 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build
-        run: npm run build
+      - name: Build GitHub Pages site (landing + /app workbench)
+        run: npm run build:pages
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Disable Jekyll processing
-        run: touch dist/.nojekyll
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: dist
+          path: dist-pages
 
   deploy:
     environment:
