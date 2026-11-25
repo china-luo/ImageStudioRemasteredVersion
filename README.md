@@ -35,6 +35,12 @@
 
 ![跨境Image工作台：图片制作界面](./docs/images/workbench-overview.png)
 
+## v2.0.4 更新亮点
+
+- **提交前核对生图请求**：在「图片制作」展开「生图请求预览」，可查看模型、尺寸、实际发送的提示词与参考图顺序，并复制同一份提示词。
+- **单张和批量使用同一套规则**：Amazon 附图和 A+ 的可见文案跟随目标站点语言；MAIN 主图优先执行白底、无营销叠字规则，不附加独立风格板。成图仍需人工检查。
+- **拦截过期策划和缺图**：资料或参考图顺序变化后，先重新策划或还原原资料再生成；恢复策划历史时保留手改提示词。
+
 ## v2.0.3 更新
 
 修复「习惯配置」里默认背景预览与工作台实际背景不一致的问题。默认预览会跟随主题变化，已有自定义图片仍可继续使用。
@@ -95,7 +101,7 @@
 1. 创建或选择一个项目，填写商品标题、五点描述并上传产品参考图。
 2. 选择 Amazon Listing、Amazon A+ 或 TikTok Shop 工作流，执行 AI 策划。
 3. 查看商品摘要、图片位方案和动态风格候选，选择需要保留的风格方向。
-4. 对单张图片位微调提示词，或批量选择图片位生成。
+4. 微调图片位的创意提示词，在「生图请求预览」核对模型、尺寸、最终提示词和参考图顺序，再提交单张或批量生成。
 5. 在项目结果中比较生成版本，选择最终定稿并导出。
 
 ## 在线版与桌面版
@@ -110,7 +116,7 @@
 
 从 [GitHub Releases](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/latest) 下载最新 x64 安装包。桌面版通过 Electron 主进程使用受控网络通道，更适合日常生产、跨域受限接口和本地文件交付。
 
-本次版本：[**v2.0.3**](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v2.0.3)
+本次版本：[**v2.0.4**](https://github.com/china-luo/ImageStudioRemasteredVersion/releases/tag/v2.0.4)
 
 ### 静态部署
 
