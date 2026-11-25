@@ -12,6 +12,7 @@ import { getInputImageLimitForSettings } from './paramCompatibility'
 import { validateMaskMatchesImage } from './canvasImage'
 import { orderInputImagesForMask } from './mask'
 import { isAmazonListingMainSlot } from './listingPlanner'
+import { getPlannerReferenceOrder } from './plannerImageRequest'
 
 export type PendingTaskCategory =
   | { mode: 'prompt-match'; prompt: string; apiPrompt?: string; category: NonNullable<TaskRecord['category']> }
@@ -100,12 +101,18 @@ export async function submitGalleryTask(
   const isCurrent = deps.isCurrent ?? (() => true)
   if (!isCurrent()) return false
   const state = deps.getState()
+  const trimmedPrompt = state.prompt.trim()
+  const pending = state.pendingTaskCategory
+  const category = resolvePendingTaskCategory(pending, trimmedPrompt)
+  const isPlannerSubmission =
+    pending?.mode === 'prompt-match' && pending.prompt === '' && Boolean(pending.apiPrompt && category.projectSlotId)
   const normalizedSettings = normalizeSettings(state.settings)
   const currentProfile = getActiveApiProfile(state.settings)
   let activeProfile = getImageGenerationProfile(state.settings) ?? currentProfile
   let requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
 
   if (
+    !isPlannerSubmission &&
     normalizedSettings.reuseTaskApiProfileTemporarily &&
     (state.reusedTaskApiProfileId || state.reusedTaskApiProfileMissing)
   ) {
@@ -154,13 +161,11 @@ export async function submitGalleryTask(
     return false
   }
 
-  const trimmedPrompt = state.prompt.trim()
-  const taskPrompt = resolvePendingTaskPrompt(state.pendingTaskCategory, trimmedPrompt)
+  const taskPrompt = resolvePendingTaskPrompt(pending, trimmedPrompt)
   if (!taskPrompt.trim()) {
     deps.showToast('请输入提示词', 'error')
     return false
   }
-  const category = resolvePendingTaskCategory(state.pendingTaskCategory, trimmedPrompt)
   let orderedInputImages = state.inputImages
   const inputImageLimit = getInputImageLimitForSettings(requestSettings)
   if (orderedInputImages.length > inputImageLimit) {
@@ -169,8 +174,9 @@ export async function submitGalleryTask(
   }
 
   const styleReferenceImageId = category.styleReferenceImageId?.trim()
-  const needsStyleReference = Boolean(
-    styleReferenceImageId && !orderedInputImages.some((image) => image.id === styleReferenceImageId),
+  const { appendStyle: needsStyleReference } = getPlannerReferenceOrder(
+    orderedInputImages.map(({ id }) => id),
+    styleReferenceImageId,
   )
   // 16 张是通用上传上限；Qwen 的 3 张是上游请求的总图数上限。
   if (needsStyleReference && isAliyunQwenImageProfile(activeProfile) && orderedInputImages.length >= inputImageLimit) {
@@ -180,7 +186,7 @@ export async function submitGalleryTask(
 
   let maskImageId: string | null = null
   let maskTargetImageId: string | null = null
-  if (state.maskDraft) {
+  if (!isPlannerSubmission && state.maskDraft) {
     try {
       orderedInputImages = orderInputImagesForMask(state.inputImages, state.maskDraft.targetImageId)
       const coverage = await validateMaskMatchesImage(state.maskDraft.maskDataUrl, orderedInputImages[0].dataUrl)

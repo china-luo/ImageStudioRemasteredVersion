@@ -30,6 +30,8 @@ export interface CallApiResult {
   actualParamsList?: Array<Partial<TaskParams> | undefined>
   /** 每张图片对应的 API 改写提示词 */
   revisedPrompts?: Array<string | undefined>
+  /** Responses 实际发送的输入文本，仅供本次执行比对，不保存到任务记录。 */
+  submittedPrompt?: string
   /** API 返回的原始图片 HTTP URL（非 base64 时记录） */
   rawImageUrls?: string[]
 }
@@ -66,6 +68,20 @@ export function appendOutputResolutionToPrompt(prompt: string, size: string): st
   if (!trimmedPrompt || trimmedPrompt.includes(requirement)) return trimmedPrompt || requirement
 
   return `${trimmedPrompt}\n\n${requirement}`
+}
+
+const PROMPT_REWRITE_GUARD = 'Use the following text as the complete prompt. Do not rewrite it:\n'
+
+export function addPromptRewriteGuard(prompt: string): string {
+  return PROMPT_REWRITE_GUARD + prompt
+}
+
+export function matchesSubmittedPrompt(value: string, submitted: string): boolean {
+  const comparable = value.trim()
+  return (
+    comparable === submitted.trim() ||
+    (submitted.startsWith(PROMPT_REWRITE_GUARD) && comparable === submitted.slice(PROMPT_REWRITE_GUARD.length).trim())
+  )
 }
 
 export function createLinkedAbortController(

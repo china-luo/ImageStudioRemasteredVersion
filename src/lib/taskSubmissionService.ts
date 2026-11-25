@@ -5,6 +5,7 @@ import {
   getActiveApiProfile,
   getImageGenerationProfile,
   getHomeApiProfile,
+  isAliyunQwenImageProfile,
   isVolcengineSeedreamProModel,
   normalizeSettings,
   validateApiProfile,
@@ -200,11 +201,26 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
         return { status: 'original-profile-error', message: `原编辑配置「${profile.name}」不完整：${profileError}` }
     } else if (!canApiProfileGenerateImages(profile)) return { status: 'unsupported-profile', profile }
 
+    const requestSettings = createSettingsForApiProfile(settings, profile)
+    const styleImageId = task.category?.styleReferenceImageId?.trim()
+    const extraStyle =
+      !isAliyunQwenImageProfile(profile) && styleImageId && task.inputImageIds.includes(styleImageId) ? 1 : 0
+    const inputImageLimit = getInputImageLimitForSettings(requestSettings) + extraStyle
+    if (task.inputImageIds.length > inputImageLimit) {
+      if (isCurrent()) {
+        state.showToast(
+          `无法重试：配置「${profile.name}」的当前模型「${profile.model}」最多支持 ${inputImageLimit} 张参考图，此任务有 ${task.inputImageIds.length} 张。请减少参考图后重新提交。`,
+          'error',
+        )
+      }
+      return { status: 'cancelled' }
+    }
+
     const taskId = deps.createId()
     const retryTask: TaskRecord = {
       id: taskId,
       prompt: task.prompt,
-      params: normalizeParamsForSettings(task.params, createSettingsForApiProfile(settings, profile), {
+      params: normalizeParamsForSettings(task.params, requestSettings, {
         hasInputImages: task.inputImageIds.length > 0,
       }),
       apiProvider: profile.provider,
@@ -227,6 +243,9 @@ export function createTaskSubmissionService(deps: TaskSubmissionServiceDependenc
         : undefined,
     }
     if (!(await persistTask(retryTask)) || !isCurrent()) return { status: 'cancelled' }
+    if (task.apiProfileId !== profile.id || task.apiModel !== profile.model) {
+      state.showToast(`重试将使用配置「${profile.name}」的当前模型「${profile.model}」。`, 'info')
+    }
     deps.executeTask(taskId)
     return { status: 'submitted', taskId }
   }

@@ -2626,6 +2626,26 @@ export async function reuseConfig(task: TaskRecord) {
       ? createSettingsForApiProfile(normalizedSettings, matchedProfile)
       : normalizedSettings
 
+  // Resolve all inputs before replacing the current draft. Partial restoration would
+  // silently change ordinal image references in the original prompt.
+  const imgs: InputImage[] = []
+  const styleImageId = task.category?.styleReferenceImageId?.trim()
+  for (const imgId of task.inputImageIds) {
+    const dataUrl = await ensureImageCached(imgId)
+    if (!dataUrl) {
+      showToast('原任务有参考图缺失，无法按原顺序复用；请先恢复缺失图片。', 'error')
+      return
+    }
+    // Keep an existing non-final style image in place so its prompt index remains valid.
+    if (imgId !== styleImageId || task.inputImageIds.at(-1) !== styleImageId) imgs.push({ id: imgId, dataUrl })
+  }
+  const maskTargetImageId = task.maskTargetImageId ?? (task.maskImageId ? task.inputImageIds[0] : null)
+  const maskDataUrl = task.maskImageId ? await ensureImageCached(task.maskImageId) : null
+  if (task.maskImageId && (!maskDataUrl || !imgs.some(({ id }) => id === maskTargetImageId))) {
+    showToast('原任务的遮罩或目标图片缺失，无法复用编辑配置。', 'error')
+    return
+  }
+
   setParams(normalizeParamsForSettings(task.params, paramsSettings, { hasInputImages: task.inputImageIds.length > 0 }))
   setReusedTaskApiProfile(
     shouldTemporarilyReuseProfile && matchedProfile ? matchedProfile.id : null,
@@ -2633,37 +2653,14 @@ export async function reuseConfig(task: TaskRecord) {
     taskProfileName,
   )
   clearMaskDraft()
-
-  // 恢复输入图片
-  const imgs: InputImage[] = []
-  const hiddenStyleReferenceImageId = task.category?.styleReferenceImageId?.trim()
-  for (const imgId of task.inputImageIds) {
-    if (hiddenStyleReferenceImageId && imgId === hiddenStyleReferenceImageId) continue
-    const dataUrl = await ensureImageCached(imgId)
-    if (dataUrl) {
-      imgs.push({ id: imgId, dataUrl })
-    }
-  }
   setInputImages(imgs)
   setPrompt(task.prompt)
   setPendingTaskCategory({
     mode: 'next-submit',
     category: createNextSubmitTaskCategory(task),
   })
-  const maskTargetImageId = task.maskTargetImageId ?? (task.maskImageId ? task.inputImageIds[0] : null)
-  if (maskTargetImageId && task.maskImageId && imgs.some((img) => img.id === maskTargetImageId)) {
-    const maskDataUrl = await ensureImageCached(task.maskImageId)
-    if (maskDataUrl) {
-      setMaskDraft({
-        targetImageId: maskTargetImageId,
-        maskDataUrl,
-        updatedAt: Date.now(),
-      })
-    } else {
-      clearMaskDraft()
-    }
-  } else {
-    clearMaskDraft()
+  if (maskDataUrl && maskTargetImageId) {
+    setMaskDraft({ targetImageId: maskTargetImageId, maskDataUrl, updatedAt: Date.now() })
   }
   if (missingReusedProfile) {
     setConfirmDialog({

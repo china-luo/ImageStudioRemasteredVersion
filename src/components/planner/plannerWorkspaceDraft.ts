@@ -2,12 +2,14 @@ import { DEFAULT_AMAZON_PROMPT_DRAFT } from '../../lib/amazonPrompt'
 import { DEFAULT_AMAZON_MARKETPLACE_ID } from '../../lib/amazonMarketplaces'
 import type { PlannerControllerSnapshot } from './useAmazonPlannerController'
 import type { PlannerActionProgressMap, PromptEditorState } from './plannerHelpers'
+import type { PlannerSource } from '../../lib/plannerImageRequest'
 
 export const PLANNER_WORKSPACE_KEY = 'amazon-image-studio:planner-workspace:v1'
 
 // Input images already belong to the persisted gallery draft. Keep this tab's
 // planner separate from history, including work that has never been submitted.
 export type PlannerWorkspaceDraft = Omit<PlannerControllerSnapshot, 'plannerSessions' | 'referenceImageIds'> & {
+  plannedSource?: PlannerSource | null
   actionProgress: PlannerActionProgressMap
   promptOverrides: Record<string, string>
   promptEditor: PromptEditorState | null

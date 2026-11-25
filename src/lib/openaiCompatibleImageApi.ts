@@ -12,6 +12,7 @@ import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob } from './ca
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy, shouldUseCustomProviderApiProxy } from './devProxy'
 import { isOpenRouterImageGenerationProfile } from './apiProfiles'
 import {
+  addPromptRewriteGuard,
   assertImageInputPayloadSize,
   assertMaskEditFileSize,
   createLinkedAbortController,
@@ -36,7 +37,7 @@ import {
   createPollingTimeoutError,
 } from './taskRecovery'
 
-const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+const CUSTOM_MASK_DATA_URL = Symbol('custom mask data URL')
 const OPENROUTER_MODALITY_RETRY_RE = /modalit|unsupported.*text|text.*unsupported/i
 const OPENROUTER_1K_PIXEL_BUDGET = 1_572_864
 const OPENROUTER_2K_PIXEL_BUDGET = 4_194_304
@@ -159,8 +160,7 @@ function createResponsesImageTool(
   return tool
 }
 
-function createResponsesInput(prompt: string, inputImageDataUrls: string[]): unknown {
-  const text = `${PROMPT_REWRITE_GUARD_PREFIX}\n${prompt}`
+function createResponsesInput(text: string, inputImageDataUrls: string[]): unknown {
   if (!inputImageDataUrls.length) return text
 
   return [
@@ -599,7 +599,7 @@ async function callImagesApiSingle(
   customProvider?: CustomProviderDefinition | null,
 ): Promise<CallApiResult> {
   const { prompt: originalPrompt, params, inputImageDataUrls } = opts
-  const prompt = profile.codexCli ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${originalPrompt}` : originalPrompt
+  const prompt = profile.codexCli ? addPromptRewriteGuard(originalPrompt) : originalPrompt
   const isEdit = inputImageDataUrls.length > 0
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
@@ -796,26 +796,58 @@ function renderQuery(
   return entries.length ? Object.fromEntries(entries) : undefined
 }
 
+function assertCustomMaskMapped(maskDataUrl: string | undefined, maskIncluded: boolean) {
+  if (maskDataUrl && !maskIncluded) {
+    throw new Error(
+      '当前自定义服务商的请求映射没有发送遮罩。请按服务商要求映射 $mask.dataUrl（GET 使用查询参数），或在 multipart 文件映射中添加 mask。',
+    )
+  }
+}
+
 async function createCustomMultipartBody(
   mapping: CustomProviderSubmitMapping,
   opts: CallApiOptions,
-  context: Record<string, unknown>,
+  body: unknown,
+  maskInQuery: boolean,
+  responseFormatB64Json: boolean,
 ): Promise<FormData> {
   const formData = new FormData()
-  const body = resolveTemplateValue(mapping.body ?? {}, context)
+  let maskTextIncluded = false
+  const resolveTextValue = (value: unknown): unknown => {
+    if (value === CUSTOM_MASK_DATA_URL) {
+      maskTextIncluded = true
+      return opts.maskDataUrl
+    }
+    return Array.isArray(value) ? value.map(resolveTextValue) : value
+  }
+  const appendText = (key: string, value: unknown) => {
+    if (responseFormatB64Json && key === 'response_format') {
+      if (value === CUSTOM_MASK_DATA_URL) throw new Error('遮罩字段不能与自动追加的 response_format 字段同名。')
+      return
+    }
+    formData.append(key, String(resolveTextValue(value)))
+  }
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
       if (value === undefined || value === null) continue
       if (Array.isArray(value)) {
-        for (const item of value) formData.append(key, String(item))
+        for (const item of value) appendText(key, item)
       } else {
-        formData.append(key, String(value))
+        appendText(key, value)
       }
     }
   }
 
   const needsInputImages = mapping.files?.some((file) => file.source === 'inputImages')
-  const needsMask = mapping.files?.some((file) => file.source === 'mask')
+  const needsMask = mapping.files?.some((file) => file.source === 'mask' && file.field.trim())
+  if (
+    responseFormatB64Json &&
+    mapping.files?.some((file) => file.source === 'mask' && file.field === 'response_format') &&
+    opts.maskDataUrl
+  ) {
+    throw new Error('遮罩文件字段不能与自动追加的 response_format 字段同名。')
+  }
+  assertCustomMaskMapped(opts.maskDataUrl, maskInQuery || maskTextIncluded || Boolean(needsMask))
   const imageBlobs: Blob[] = []
   if (needsInputImages) {
     for (let i = 0; i < opts.inputImageDataUrls.length; i++) {
@@ -825,6 +857,7 @@ async function createCustomMultipartBody(
     }
   }
   const maskBlob = needsMask && opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
+  assertCustomMaskMapped(opts.maskDataUrl, maskInQuery || maskTextIncluded || Boolean(maskBlob?.size))
   if (opts.maskDataUrl && (needsInputImages || needsMask)) {
     assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
     assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
@@ -838,7 +871,7 @@ async function createCustomMultipartBody(
         const ext = blob.type.split('/')[1] || 'png'
         formData.append(file.field, blob, `input-${i + 1}.${ext}`)
       }
-    } else if (file.source === 'mask' && maskBlob) {
+    } else if (file.source === 'mask' && maskBlob && file.field.trim()) {
       formData.append(file.field, maskBlob, 'mask.png')
     }
   }
@@ -895,15 +928,34 @@ async function submitCustomRequest(
   const context = createCustomProviderContext(opts, profile)
   const method = mapping.method ?? 'POST'
   const contentType = mapping.contentType ?? 'json'
-  const path = appendQuery(mapping.path, renderQuery(mapping.query, context))
   const headers: Record<string, string> = { ...requestHeaders }
   let body: BodyInit | undefined
+  const query = renderQuery(mapping.query, context)
+  const maskInQuery = Boolean(
+    opts.maskDataUrl &&
+    Object.entries(mapping.query ?? {}).some(
+      ([key, expression]) => expression === '$mask.dataUrl' && query?.[key] === opts.maskDataUrl,
+    ),
+  )
 
-  if (method !== 'GET') {
+  if (method === 'GET') {
+    assertCustomMaskMapped(opts.maskDataUrl, maskInQuery)
+  } else {
+    // Track the mask variable through rendering so an unrelated field with the same value cannot satisfy the check.
+    const resolved = resolveTemplateValue(
+      mapping.body ?? {},
+      opts.maskDataUrl ? { ...context, mask: { dataUrl: CUSTOM_MASK_DATA_URL } } : context,
+    )
     if (contentType === 'multipart') {
-      const formData = await createCustomMultipartBody(mapping, opts, context)
+      const formData = await createCustomMultipartBody(
+        mapping,
+        opts,
+        resolved,
+        maskInQuery,
+        Boolean(profile.responseFormatB64Json),
+      )
       if (profile.responseFormatB64Json) {
-        formData.append('response_format', 'b64_json')
+        formData.set('response_format', 'b64_json')
       }
       body = formData
     } else {
@@ -912,14 +964,22 @@ async function submitCustomRequest(
           (opts.maskDataUrl ? getDataUrlEncodedByteSize(opts.maskDataUrl) : 0),
       )
       headers['Content-Type'] = 'application/json'
-      const resolved = resolveTemplateValue(mapping.body ?? {}, context)
       if (profile.responseFormatB64Json && resolved && typeof resolved === 'object' && !Array.isArray(resolved)) {
         ;(resolved as Record<string, unknown>).response_format = 'b64_json'
       }
-      body = JSON.stringify(resolved)
+      let maskIncluded = false
+      body = opts.maskDataUrl
+        ? JSON.stringify(resolved, (_key, value: unknown) => {
+            if (value !== CUSTOM_MASK_DATA_URL) return value
+            maskIncluded = true
+            return opts.maskDataUrl
+          })
+        : JSON.stringify(resolved)
+      assertCustomMaskMapped(opts.maskDataUrl, maskInQuery || maskIncluded)
     }
   }
 
+  const path = appendQuery(mapping.path, query)
   const response = await fetch(buildApiUrl(profile.baseUrl, path, proxyConfig, useApiProxy), {
     method,
     headers,
@@ -1086,12 +1146,13 @@ async function callCustomHttpImageApi(
 }
 
 async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
+  const submittedPrompt = addPromptRewriteGuard(opts.prompt)
   const n = opts.params.n > 0 ? opts.params.n : 1
   if (n === 1) {
-    return callResponsesImageApiSingle(opts, profile)
+    return { ...(await callResponsesImageApiSingle(opts, profile, submittedPrompt)), submittedPrompt }
   }
 
-  const promises = Array.from({ length: n }).map(() => callResponsesImageApiSingle(opts, profile))
+  const promises = Array.from({ length: n }).map(() => callResponsesImageApiSingle(opts, profile, submittedPrompt))
   const results = await Promise.allSettled(promises)
 
   const successfulResults = results
@@ -1117,11 +1178,22 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
     images.length === opts.params.n ? { n: opts.params.n } : { n: images.length },
   )
 
-  return { images, actualParams, actualParamsList, revisedPrompts, ...(rawImageUrls.length ? { rawImageUrls } : {}) }
+  return {
+    images,
+    actualParams,
+    actualParamsList,
+    revisedPrompts,
+    submittedPrompt,
+    ...(rawImageUrls.length ? { rawImageUrls } : {}),
+  }
 }
 
-async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
-  const { prompt, params, inputImageDataUrls } = opts
+async function callResponsesImageApiSingle(
+  opts: CallApiOptions,
+  profile: ApiProfile,
+  submittedPrompt: string,
+): Promise<CallApiResult> {
+  const { params, inputImageDataUrls } = opts
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig, profile.baseUrl)
@@ -1141,7 +1213,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
 
     const body: Record<string, unknown> = {
       model: profile.model,
-      input: createResponsesInput(prompt, inputImageDataUrls),
+      input: createResponsesInput(submittedPrompt, inputImageDataUrls),
       tools: [createResponsesImageTool(params, inputImageDataUrls.length > 0, profile, opts.maskDataUrl)],
       tool_choice: 'required',
     }

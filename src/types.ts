@@ -351,6 +351,7 @@ export interface AmazonPlannerSession {
   styleImages: AmazonPlannerSessionStyleImage[]
   selectedStyleIndex: number | null
   styleDensityMode?: AmazonStyleDensityMode
+  promptOverrides?: Record<string, string>
   imagePlans: AmazonPlannerSessionImagePlan[]
   aPlusPlans: AmazonPlannerSessionAPlusPlan[]
   selectedPlanIndex: number | null
