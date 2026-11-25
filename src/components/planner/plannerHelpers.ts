@@ -154,6 +154,7 @@ export interface PlannerSessionSnapshotInput {
   styleImages: StyleImageState[]
   selectedStyleIndex: number | null
   styleDensityMode: AmazonStyleDensityMode
+  promptOverrides?: Record<string, string>
   imagePlans: AmazonPlannerSession['imagePlans']
   aPlusPlans: AmazonPlannerSession['aPlusPlans']
   selectedPlanIndex: number | null
@@ -188,6 +189,7 @@ export function createPlannerSessionSnapshot(
     styleImages: overrides.styleImages ?? getSessionStyleImages(input.styleImages),
     selectedStyleIndex: overrides.selectedStyleIndex ?? input.selectedStyleIndex,
     styleDensityMode: overrides.styleDensityMode ?? input.styleDensityMode,
+    promptOverrides: overrides.promptOverrides ?? input.promptOverrides ?? existing?.promptOverrides,
     imagePlans: overrides.imagePlans ?? input.imagePlans,
     aPlusPlans: overrides.aPlusPlans ?? input.aPlusPlans,
     selectedPlanIndex: overrides.selectedPlanIndex ?? input.selectedPlanIndex,

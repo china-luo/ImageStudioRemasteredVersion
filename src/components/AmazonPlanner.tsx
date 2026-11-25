@@ -28,9 +28,6 @@ import {
 } from '../lib/apiProfiles'
 import { type AmazonPromptDraft } from '../lib/amazonPrompt'
 import {
-  buildAmazonAPlusPlanPrompt,
-  buildAmazonPlanPrompt,
-  buildTiktokPlanPrompt,
   areAPlusModuleSpecsEquivalent,
   formatAPlusModuleText,
   getAPlusContentTypeLabel,
@@ -63,10 +60,19 @@ import type { PlannerApiResult } from '../lib/listingPlannerApi'
 import { DEFAULT_AMAZON_MARKETPLACE_ID, type AmazonMarketplaceId } from '../lib/amazonMarketplaces'
 import { getAllAmazonPlannerSessions } from '../lib/db'
 import { isPlannerTaskFailed, isPlannerTaskPending } from './planner/plannerTaskSafety'
-import { normalizeParamsForSettings } from '../lib/paramCompatibility'
+import { getInputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
+import { addPromptRewriteGuard, appendOutputResolutionToPrompt } from '../lib/imageApiShared'
+import { replaceImageMentionsForApi } from '../lib/promptImageMentions'
+import {
+  buildPlannerImageRequest,
+  getPlannerCreativeOverride,
+  getPlannerSourceIssue,
+  plannerUsesStyleReference,
+  type PlannerSource,
+} from '../lib/plannerImageRequest'
 import { resolvePlannerStyleReference } from '../lib/plannerActionPolicy'
 import { DEFAULT_PARAMS } from '../types'
-import type { AmazonPlannerSession, GenerationProject, TaskRecord, TaskWorkflow } from '../types'
+import type { AmazonPlannerSession, GenerationProject, TaskWorkflow } from '../types'
 import {
   PROJECT_DATA_IMPORTED_EVENT,
   PROJECT_DATA_RESET_EVENT,
@@ -236,7 +242,7 @@ export default function AmazonPlanner({
     },
     [project.id],
   )
-  const styleSectionRef = useRef<HTMLDivElement | null>(null)
+  const requestPreviewRef = useRef<HTMLDetailsElement | null>(null)
   const [workspaceDraft] = useState(() => project.workspace)
   const workspaceSaveErrorRef = useRef(false)
   const [draft, setDraft] = useState<AmazonPromptDraft>(workspaceDraft.draft)
@@ -250,6 +256,13 @@ export default function AmazonPlanner({
     workspaceDraft.aPlusModuleSpecsByType,
   )
   const [listingText, setListingText] = useState(workspaceDraft.listingText)
+  const [plannedSource, setPlannedSource] = useState<PlannerSource | null>(
+    () =>
+      workspaceDraft.plannedSource ??
+      (workspaceDraft.imagePlans.length || workspaceDraft.aPlusPlans.length
+        ? { listingText: workspaceDraft.listingText, referenceImageIds: project.referenceImageIds }
+        : null),
+  )
   const [imagePlans, setImagePlans] = useState<AmazonImagePlan[]>(workspaceDraft.imagePlans)
   const [aPlusPlans, setAPlusPlans] = useState<AmazonAPlusPlan[]>(workspaceDraft.aPlusPlans)
   const [seriesStyleGuides, setSeriesStyleGuides] = useState<{
@@ -317,6 +330,7 @@ export default function AmazonPlanner({
         aPlusType,
         aPlusModuleSpecsByType,
         listingText,
+        plannedSource,
         imagePlans,
         aPlusPlans,
         seriesStyleGuides,
@@ -356,6 +370,7 @@ export default function AmazonPlanner({
     aPlusType,
     aPlusModuleSpecsByType,
     listingText,
+    plannedSource,
     imagePlans,
     aPlusPlans,
     seriesStyleGuides,
@@ -451,7 +466,7 @@ export default function AmazonPlanner({
     [styleImages],
   )
   const isMainListingPlan = plannerMode === 'listing' && isCommerceMainSlot(plannerPlatform, selectedPlan?.slot)
-  const styleReferenceAppliesToPlan = plannerPlatform === 'tiktok' ? true : !isMainListingPlan
+  const styleReferenceAppliesToPlan = plannerUsesStyleReference(plannerPlatform, plannerMode, selectedPlan?.slot)
   const hasStyleReference = Boolean(selectedStyleImage?.imageId)
   const plannerStyleReference = resolvePlannerStyleReference({
     requiredForSubmit: styleReferenceAppliesToPlan,
@@ -461,46 +476,36 @@ export default function AmazonPlanner({
   })
   const usesStyleReferenceForActivePlan = plannerStyleReference.attach
   const uploadedReferenceLimitExceeded = plannerStyleReference.issue === 'uploaded-limit'
-  const activePrompt =
-    plannerMode === 'aplus'
-      ? selectedAPlusPlan
-        ? buildAmazonAPlusPlanPrompt({
-            ...selectedAPlusPlan,
-            seriesStyleGuide: activeSeriesStyleGuide,
-            styleReferenceAttached: usesStyleReferenceForActivePlan,
-            styleDensityMode,
-            marketplaceId,
-          })
-        : ''
-      : selectedPlan
-        ? (plannerPlatform === 'tiktok' ? buildTiktokPlanPrompt : buildAmazonPlanPrompt)({
-            ...selectedPlan,
-            seriesStyleGuide: isMainListingPlan ? null : activeSeriesStyleGuide,
-            styleReferenceAttached: usesStyleReferenceForActivePlan,
-            styleDensityMode,
-            marketplaceId,
-          })
-        : ''
-  const activeVisiblePrompt =
-    plannerMode === 'aplus'
-      ? selectedAPlusPlan
-        ? buildAmazonAPlusPlanPrompt({
-            ...selectedAPlusPlan,
-            seriesStyleGuide: activeSeriesStyleGuide,
-            styleReferenceAttached: false,
-            styleDensityMode,
-            marketplaceId,
-          })
-        : ''
-      : selectedPlan
-        ? (plannerPlatform === 'tiktok' ? buildTiktokPlanPrompt : buildAmazonPlanPrompt)({
-            ...selectedPlan,
-            seriesStyleGuide: isMainListingPlan ? null : activeSeriesStyleGuide,
-            styleReferenceAttached: false,
-            styleDensityMode,
-            marketplaceId,
-          })
-        : ''
+  const assembleImageRequest = (
+    plan: AmazonImagePlan | AmazonAPlusPlan,
+    actionKey: string,
+    images: typeof inputImages = inputImages,
+  ) =>
+    buildPlannerImageRequest({
+      platform: plannerPlatform,
+      mode: plannerMode,
+      plan,
+      override: promptOverrides[actionKey],
+      marketplaceId,
+      styleDensityMode,
+      seriesStyleGuide: activeSeriesStyleGuide,
+      styleImageId: selectedStyleImage?.imageId,
+      inputImages: images,
+    })
+  const activePlan = plannerMode === 'aplus' ? selectedAPlusPlan : selectedPlan
+  const activeCreativePrompt = activePlan
+    ? [
+        activePlan.prompt,
+        activePlan.negativePrompt?.trim() ? `Negative prompt:\n${activePlan.negativePrompt.trim()}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    : ''
+  const sourceIssue = getPlannerSourceIssue(
+    plannedSource,
+    listingText,
+    inputImages.map(({ id }) => id),
+  )
   const plannerProfile = getAmazonPlannerProfile(settings)
   const plannerProfileValidation = plannerProfile
     ? validateApiProfile(plannerProfile)
@@ -540,12 +545,44 @@ export default function AmazonPlanner({
   const actionSlot = plannerMode === 'aplus' ? selectedAPlusPlan?.slot : selectedPlan?.slot
   const actionLabel = plannerMode === 'aplus' ? selectedAPlusPlan?.label : selectedPlan?.label
   const showStickyActions = plannerMode === 'aplus' ? aPlusPlansWithSizes.length > 0 : imagePlans.length > 0
-  const actionDisabled = plannerMode === 'aplus' ? !selectedAPlusPlan : !activePrompt.trim()
+  const currentActionKey = getPlannerActionKey(plannerMode, visiblePlanIndex, actionSlot)
+  const activeRequest = activePlan ? assembleImageRequest(activePlan, currentActionKey) : null
+  const getGenerationParams = (size: string) => ({ ...DEFAULT_PARAMS, size, moderation: params.moderation, n: 1 })
+  const imageRequestSettings = imageGenerationProfile
+    ? createSettingsForApiProfile(settings, imageGenerationProfile)
+    : settings
+  const activeGenerationParams = normalizeParamsForSettings(getGenerationParams(targetSize), imageRequestSettings, {
+    hasInputImages: Boolean(activeRequest?.ids.length),
+  })
+  const limit = getInputImageLimitForSettings(imageRequestSettings)
+  const getReferenceLimitIssue = (request: NonNullable<typeof activeRequest>, referenceCount: number) =>
+    referenceCount > limit || (limit < API_MAX_IMAGES && request.ids.length > limit)
+      ? `当前生图配置最多接收 ${limit} 张图片${request.styleImageId ? '（含风格板），请减少商品参考图后重新策划。' : '，请减少参考图后重新策划。'}`
+      : ''
+  const referenceLimitIssue = activeRequest ? getReferenceLimitIssue(activeRequest, inputImages.length) : ''
+  const activeRequestPrompt = activeRequest
+    ? appendOutputResolutionToPrompt(
+        replaceImageMentionsForApi(activeRequest.prompt, activeRequest.ids.length),
+        activeGenerationParams.size,
+      )
+    : ''
+  const activeWirePrompt =
+    imageGenerationProfile?.provider === 'openai' &&
+    imageGenerationProfile.apiMode === 'images' &&
+    imageGenerationProfile.codexCli
+      ? addPromptRewriteGuard(activeRequestPrompt)
+      : activeRequestPrompt
+  const actionDisabled = !activePlan?.prompt.trim()
   const currentSlotRunning = Boolean(
     actionSlot && projectTasks(tasks, project.id, getProjectSlotId(actionSlot)).some(isPlannerTaskPending),
   )
   const submitDisabled =
-    actionDisabled || isSubmitting || isBatchSubmitting || isLoadingProjectImages || currentSlotRunning
+    actionDisabled ||
+    Boolean(sourceIssue || referenceLimitIssue) ||
+    isSubmitting ||
+    isBatchSubmitting ||
+    isLoadingProjectImages ||
+    currentSlotRunning
   const hasPendingSlotTask = (slot: string) =>
     projectTasks(useStore.getState().tasks, project.id, getProjectSlotId(slot)).some(isPlannerTaskPending)
   const hasPlanOptions = visiblePlanCount > 0
@@ -558,29 +595,32 @@ export default function AmazonPlanner({
       : plannerMode === 'aplus'
         ? `${aPlusSpecs.length} 个待策划模块`
         : '未选择'
-  const currentActionKey = getPlannerActionKey(plannerMode, visiblePlanIndex, actionSlot)
   const currentActionProgress = currentActionKey ? (actionProgress[currentActionKey] ?? null) : null
   const currentActionFilled = currentActionProgress === 'filled' || currentActionProgress === 'submitted'
   const currentActionSubmitted = currentActionProgress === 'submitted'
   const actionKindLabel = plannerMode === 'aplus' ? '模块' : isMainListingPlan ? '主图' : '图片'
-  const actionGuidance = !hasSelectedPlan
-    ? plannerMode === 'aplus'
-      ? '先选择一个 A+ 模块'
-      : '先选择一个图片位'
-    : currentActionSubmitted
-      ? `已提交 ${actionSlot ?? '当前'} ${actionKindLabel}，${canGoNext ? '点击下一张继续' : '已是最后一张'}`
-      : plannerStyleReference.issue === 'missing'
-        ? `当前 ${actionSlot ?? ''} ${actionKindLabel}提交前必须先选择风格板`
-        : plannerStyleReference.issue === 'uploaded-limit'
-          ? `上传参考图超过 ${API_MAX_IMAGES} 张上限，请先删除多余参考图`
-          : currentActionFilled
-            ? '已准备好隐藏生图提示词，下一步提交生成'
-            : `先准备当前 ${actionSlot ?? '当前'} ${actionKindLabel}生图提示词`
-  const mainStyleGuidance = isMainListingPlan
-    ? hasStyleReference
-      ? 'MAIN 主图不附加风格板；附图和 A+ 会使用已选风格。'
-      : 'MAIN 主图不附加风格板；附图和 A+ 可先生成并选择风格板。'
-    : ''
+  const actionGuidance =
+    sourceIssue ||
+    referenceLimitIssue ||
+    (!hasSelectedPlan
+      ? plannerMode === 'aplus'
+        ? '先选择一个 A+ 模块'
+        : '先选择一个图片位'
+      : currentActionSubmitted
+        ? `已提交 ${actionSlot ?? '当前'} ${actionKindLabel}，${canGoNext ? '点击下一张继续' : '已是最后一张'}`
+        : plannerStyleReference.issue === 'missing'
+          ? `当前 ${actionSlot ?? ''} ${actionKindLabel}提交前必须先选择风格板`
+          : plannerStyleReference.issue === 'uploaded-limit'
+            ? `上传参考图超过 ${API_MAX_IMAGES} 张上限，请先删除多余参考图`
+            : currentActionFilled
+              ? '已准备好隐藏生图提示词，下一步提交生成'
+              : `先准备当前 ${actionSlot ?? '当前'} ${actionKindLabel}生图提示词`)
+  const mainStyleGuidance =
+    isMainListingPlan && !styleReferenceAppliesToPlan
+      ? hasStyleReference
+        ? 'MAIN 主图不附加风格板；附图和 A+ 会使用已选风格。'
+        : 'MAIN 主图不附加风格板；附图和 A+ 可先生成并选择风格板。'
+      : ''
   const actionProgressSteps = [
     {
       label: '1 准备',
@@ -687,7 +727,7 @@ export default function AmazonPlanner({
       currentPlannerSessionId,
       plannerSessions,
       draft,
-      listingText,
+      listingText: plannedSource?.listingText ?? listingText,
       plannerPlatform,
       marketplaceId,
       tiktokDesignType,
@@ -695,12 +735,13 @@ export default function AmazonPlanner({
       aPlusType,
       aPlusModuleSpecsByType,
       resolution,
-      referenceImageIds: inputImages.map((image) => image.id),
+      referenceImageIds: plannedSource?.referenceImageIds ?? inputImages.map((image) => image.id),
       seriesStyleGuides,
       styleCandidates,
       styleImages,
       selectedStyleIndex,
       styleDensityMode,
+      promptOverrides,
       imagePlans,
       aPlusPlans: aPlusPlansWithSizes,
       selectedPlanIndex,
@@ -781,104 +822,92 @@ export default function AmazonPlanner({
     }))
   }
 
-  const getCurrentEditedPrompt = () => (currentActionKey ? (promptOverrides[currentActionKey]?.trim() ?? '') : '')
-
-  const getCurrentSubmitPrompt = () => getCurrentEditedPrompt() || activePrompt.trim()
-
   const openPromptEditor = () => {
-    if (!activePrompt.trim()) {
+    if (actionDisabled) {
       showToast(plannerMode === 'aplus' ? '请先 AI 策划并选择一个 A+ 模块' : '请先 AI 策划并选择一个图片位', 'error')
       return
     }
     setPromptEditor({
       actionKey: currentActionKey,
       title: `${plannerMode === 'aplus' ? 'A+ 模块' : '图片位'}提示词${actionSlot ? ` · ${actionSlot}` : ''}`,
-      value: currentActionKey ? (promptOverrides[currentActionKey] ?? activePrompt) : activePrompt,
+      value: getPlannerCreativeOverride(promptOverrides[currentActionKey]) || activeCreativePrompt,
     })
   }
 
   const savePromptEditor = () => {
     if (!promptEditor) return
-    const value = promptEditor.value.trim()
+    const value = getPlannerCreativeOverride(promptEditor.value)
     if (!value) {
       showToast('提示词不能为空', 'error')
       return
     }
-    setPromptOverrides((current) => ({
-      ...current,
-      [promptEditor.actionKey]: value,
-    }))
+    const next = { ...promptOverrides, [promptEditor.actionKey]: value }
+    if (value === activeCreativePrompt.trim() && promptEditor.actionKey === currentActionKey)
+      delete next[promptEditor.actionKey]
+    setPromptOverrides(next)
+    updateCurrentPlannerSession({ promptOverrides: next })
     setPromptEditor(null)
     showToast('当前图片位提示词已保存', 'success')
   }
 
-  const applyPrompt = (options: { requireStyle?: boolean } = {}) => {
-    if (submissionInFlightRef.current || isLoadingProjectImages) return false
-    if (plannerMode === 'aplus' && !selectedAPlusPlan) {
-      showToast('请先 AI 策划并选择一个 A+ 模块', 'error')
+  const preparePlannerSlot = (
+    plan: AmazonImagePlan | AmazonAPlusPlan,
+    actionKey: string,
+    images: typeof inputImages,
+    requireStyle: boolean,
+  ) => {
+    const request = assembleImageRequest(plan, actionKey, images)
+    const issue =
+      getPlannerSourceIssue(
+        plannedSource,
+        listingText,
+        images.map(({ id }) => id),
+      ) || getReferenceLimitIssue(request, images.length)
+    if (issue) {
+      showToast(issue, 'error')
       return false
     }
-    if (!activePrompt.trim()) {
-      showToast(plannerMode === 'aplus' ? '请先 AI 策划并选择一个 A+ 模块' : '请先 AI 策划并选择一个图片位', 'error')
+    if (!plan.prompt.trim()) return false
+    if (requireStyle && request.needsStyle && !request.styleImageId) {
+      showToast(`「${plan.slot}」需要先生成并选择风格板`, 'error')
+      setStage('style')
       return false
     }
-    if (options.requireStyle && plannerStyleReference.issue === 'missing') {
-      showToast('当前图片必须先生成并选择一张风格板，选择后才能提交生成。', 'error')
-      styleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      return false
-    }
-    if (options.requireStyle && plannerStyleReference.issue === 'uploaded-limit') {
-      showToast(`上传参考图不能超过 ${API_MAX_IMAGES} 张，请删除多余参考图后再提交。`, 'error')
-      styleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      return false
-    }
-    const hiddenSubmitPrompt = getCurrentSubmitPrompt()
     setPrompt('')
     setPendingTaskCategory({
       mode: 'prompt-match',
       prompt: '',
-      apiPrompt: hiddenSubmitPrompt,
+      apiPrompt: request.prompt,
       category: {
         projectId: project.id,
-        projectSlotId: getProjectSlotId((plannerMode === 'aplus' ? selectedAPlusPlan?.slot : selectedPlan?.slot) ?? ''),
+        projectSlotId: getProjectSlotId(plan.slot),
         productTitle: draft.productTitle.trim(),
-        workflow:
-          plannerPlatform === 'tiktok'
-            ? `tiktok-${tiktokDesignType}`
-            : plannerMode === 'aplus'
-              ? 'amazon-aplus'
-              : 'amazon-listing',
-        amazonSlot: plannerMode === 'aplus' ? selectedAPlusPlan?.slot : selectedPlan?.slot,
+        workflow: activeWorkflow,
+        amazonSlot: plan.slot,
         ...(plannerPlatform === 'amazon' ? { marketplaceId } : {}),
         ...(plannerPlatform === 'tiktok' ? { platform: 'tiktok', tiktokDesignType } : {}),
         ...(plannerMode === 'aplus' ? { aPlusType } : {}),
-        ...(usesStyleReferenceForActivePlan && selectedStyleImage?.imageId
-          ? { styleReferenceImageId: selectedStyleImage.imageId }
-          : {}),
+        ...(request.styleImageId ? { styleReferenceImageId: request.styleImageId } : {}),
       },
     })
-    setParams({
-      size: targetSize,
-      quality: DEFAULT_PARAMS.quality,
-      output_format: DEFAULT_PARAMS.output_format,
-      output_compression: DEFAULT_PARAMS.output_compression,
-      n: 1,
-    })
-    markActionProgress(currentActionKey, 'filled')
-    showToast(
-      plannerPlatform === 'tiktok'
-        ? '已准备 TikTok 商品图隐藏提示词'
-        : plannerMode === 'aplus'
-          ? '已准备 A+ 图片隐藏提示词'
-          : '已准备亚马逊图片隐藏提示词',
-      'success',
-    )
+    setParams(getGenerationParams('generationSize' in plan ? plan.generationSize : targetSize))
     return true
   }
 
+  const previewActiveRequest = () => {
+    if (!activeRequest) return
+    if (requestPreviewRef.current) {
+      requestPreviewRef.current.open = true
+      requestPreviewRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+    if (!(sourceIssue || referenceLimitIssue || (activeRequest.needsStyle && !activeRequest.styleImageId))) {
+      markActionProgress(currentActionKey, 'filled')
+    }
+  }
+
   const applyAndSubmit = async () => {
-    if (submissionInFlightRef.current || submitDisabled || !actionSlot || hasPendingSlotTask(actionSlot)) return
-    if (!applyPrompt({ requireStyle: true })) return
+    if (submissionInFlightRef.current || submitDisabled || !activePlan || hasPendingSlotTask(activePlan.slot)) return
+    if (!preparePlannerSlot(activePlan, currentActionKey, useStore.getState().inputImages, true)) return
     submissionInFlightRef.current = true
     const contextVersion = contextVersionRef.current
     const submittedActionKey = currentActionKey
@@ -938,52 +967,9 @@ export default function AmazonPlanner({
         if (contextVersionRef.current !== contextVersion) break
         const plan = plannerMode === 'aplus' ? aPlusPlansWithSizes[index] : imagePlans[index]
         if (!plan || hasPendingSlotTask(plan.slot)) continue
-        const isMain = plannerMode === 'listing' && isCommerceMainSlot(plannerPlatform, plan.slot)
-        const needsStyle = plannerPlatform === 'tiktok' || plannerMode === 'aplus' || !isMain
-        if (needsStyle && !selectedStyleImage?.imageId) {
-          showToast(`「${plan.slot}」需要先选择风格板`, 'error')
-          continue
-        }
         const actionKey = getPlannerActionKey(plannerMode, index, plan.slot)
-        const prompt =
-          promptOverrides[actionKey]?.trim() ||
-          (plannerMode === 'aplus'
-            ? buildAmazonAPlusPlanPrompt({
-                ...plan,
-                seriesStyleGuide: activeSeriesStyleGuide,
-                styleReferenceAttached: needsStyle,
-                styleDensityMode,
-                marketplaceId,
-              })
-            : (plannerPlatform === 'tiktok' ? buildTiktokPlanPrompt : buildAmazonPlanPrompt)({
-                ...plan,
-                seriesStyleGuide: isMain ? null : activeSeriesStyleGuide,
-                styleReferenceAttached: needsStyle,
-                styleDensityMode,
-                marketplaceId,
-              }))
-        const category: NonNullable<TaskRecord['category']> = {
-          projectId: project.id,
-          projectSlotId: getProjectSlotId(plan.slot),
-          productTitle: draft.productTitle.trim(),
-          workflow: activeWorkflow,
-          amazonSlot: plan.slot,
-          ...(plannerPlatform === 'amazon' ? { marketplaceId } : {}),
-          ...(plannerPlatform === 'tiktok' ? { platform: 'tiktok' as const, tiktokDesignType } : {}),
-          ...(plannerMode === 'aplus' ? { aPlusType } : {}),
-          ...(needsStyle && selectedStyleImage?.imageId ? { styleReferenceImageId: selectedStyleImage.imageId } : {}),
-        }
-        const state = useStore.getState()
-        useStore.setState({
-          prompt: '',
-          inputImages: originalInputImages,
-          params: {
-            ...state.params,
-            size: plannerMode === 'aplus' ? (plan as AmazonAPlusPlan).generationSize : targetSize,
-            n: 1,
-          },
-          pendingTaskCategory: { mode: 'prompt-match', prompt: '', apiPrompt: prompt, category },
-        })
+        useStore.getState().setInputImages(originalInputImages)
+        if (!preparePlannerSlot(plan, actionKey, originalInputImages, true)) continue
         if ((await submitTask()) && contextVersionRef.current === contextVersion) {
           markActionProgress(actionKey, 'submitted')
           submitted += 1
@@ -1007,13 +993,13 @@ export default function AmazonPlanner({
       showToast('请先 AI 策划并选择一个 A+ 模块', 'error')
       return
     }
-    if (!activePrompt.trim()) {
+    if (!activeRequestPrompt) {
       showToast(plannerMode === 'aplus' ? '请先 AI 策划并选择一个 A+ 模块' : '请先 AI 策划并选择一个图片位', 'error')
       return
     }
 
     try {
-      await navigator.clipboard.writeText(getCurrentEditedPrompt() || activeVisiblePrompt.trim() || activePrompt)
+      await navigator.clipboard.writeText(activeWirePrompt)
       showToast('提示词已复制', 'success')
     } catch {
       showToast('复制失败，请手动选择提示词', 'error')
@@ -1386,6 +1372,8 @@ export default function AmazonPlanner({
     }
     setSeriesStyleGuides(nextSeriesStyleGuides)
     setStyleCandidates(result.styleCandidates)
+    const nextSource = { listingText, referenceImageIds: inputImages.map(({ id }) => id) }
+    setPlannedSource(nextSource)
     setPromptOverrides({})
     setPromptEditor(null)
     clearStyleBoardImages(false)
@@ -1399,6 +1387,8 @@ export default function AmazonPlanner({
       marketplaceId,
       tiktokDesignType,
       mode: result.mode,
+      ...nextSource,
+      promptOverrides: {},
       draft: toSessionDraft(nextDraft),
       seriesStyleGuides: nextSeriesStyleGuides,
       styleCandidates: result.styleCandidates,
@@ -1664,6 +1654,7 @@ export default function AmazonPlanner({
     historyRestoreRef.current?.cancel()
     setImagePlans([])
     setAPlusPlans([])
+    setPlannedSource(null)
     setStyleCandidates([])
     styleImagesRef.current = []
     setStyleImages([])
@@ -1783,6 +1774,7 @@ export default function AmazonPlanner({
     setAPlusModuleSpecsByType(getSessionAPlusModuleSpecsByType(session))
     setResolution(session.resolution)
     setListingText(session.listingText)
+    setPlannedSource({ listingText: session.listingText, referenceImageIds: session.referenceImageIds })
     setInputImages(restoredReferences)
     setDraft(fromSessionDraft(session.draft))
     setSeriesStyleGuides({
@@ -1818,9 +1810,13 @@ export default function AmazonPlanner({
     setCurrentPlannerSessionId(session.id)
     setShowPlannerHistory(false)
     setActionProgress({})
-    setPromptOverrides({})
+    setPromptOverrides(session.id === currentPlannerSessionId ? promptOverrides : (session.promptOverrides ?? {}))
     setPromptEditor(null)
-    showToast('策划历史已恢复', 'success')
+    const missingCount = session.referenceImageIds.length - restoredReferences.length
+    showToast(
+      missingCount ? `策划已恢复，但 ${missingCount} 张商品参考图缺失；补回或重新策划后才能生成。` : '策划历史已恢复',
+      missingCount ? 'error' : 'success',
+    )
   }
 
   const restorePlannerSession = (session: AmazonPlannerSession) => {
@@ -1886,9 +1882,6 @@ export default function AmazonPlanner({
       }
 
       const added = useStore.getState().inputImages.length - currentCount
-      updateCurrentPlannerSession({
-        referenceImageIds: useStore.getState().inputImages.map((image) => image.id),
-      })
       if (discarded > 0) {
         showToast(
           added > 0
@@ -2225,10 +2218,7 @@ export default function AmazonPlanner({
                 {inputImages.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => {
-                      clearInputImages()
-                      updateCurrentPlannerSession({ referenceImageIds: [] })
-                    }}
+                    onClick={clearInputImages}
                     disabled={isPlannerRequestBusy}
                     className="ui-btn ui-btn-danger-soft h-9"
                   >
@@ -2251,13 +2241,7 @@ export default function AmazonPlanner({
               <PlannerReferenceImageGrid
                 images={inputImages}
                 disabled={isPlannerRequestBusy}
-                onRemove={(index) => {
-                  const nextReferenceImageIds = inputImages
-                    .filter((_, imageIndex) => imageIndex !== index)
-                    .map((item) => item.id)
-                  removeInputImage(index)
-                  updateCurrentPlannerSession({ referenceImageIds: nextReferenceImageIds })
-                }}
+                onRemove={removeInputImage}
               />
             ) : (
               <button
@@ -2312,10 +2296,7 @@ export default function AmazonPlanner({
       </div>
       <div data-no-drag-select hidden={stage !== 'style'} className="planner-style-section">
         {hasPlanOptions && (
-          <div
-            ref={styleSectionRef}
-            className={`mb-4 rounded-2xl border p-4 transition ${getGuidePanelClass(styleGuideActive, 'muted')}`}
-          >
+          <div className={`mb-4 rounded-2xl border p-4 transition ${getGuidePanelClass(styleGuideActive, 'muted')}`}>
             {styleGuideActive && <div className={GUIDE_HINT_CLASS}>{guideState.message}</div>}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -2494,9 +2475,9 @@ export default function AmazonPlanner({
             )}
             {selectedStyleCandidate && selectedStyleImage?.imageId && (
               <div className="ui-callout ui-callout-accent mt-3 py-2 text-xs leading-relaxed">
-                {isMainListingPlan
-                  ? `已选择「${selectedStyleCandidate.label}」，但当前 MAIN 主图不会附加这张风格板；切换到附图或 A+ 时才会作为隐藏参考。`
-                  : `已选择「${selectedStyleCandidate.label}」。正式生成时会隐藏附加这张风格参考板作为最后一张参考图，用于统一字体感觉、色板、光影、材质和标注样式，不复制其中占位文字、固定版式或产品摆放；风格板不占上传参考图数量。`}
+                {isMainListingPlan && !styleReferenceAppliesToPlan
+                  ? `已选择「${selectedStyleCandidate.label}」，但 Amazon MAIN 主图不会附加这张风格板。`
+                  : `已选择「${selectedStyleCandidate.label}」。正式生成会附加它，用于统一字体感觉、色板、光影、材质和标注样式；不复制占位文字、版式或商品。${limit < API_MAX_IMAGES ? ` 当前配置的 ${limit} 张输入图片上限包含风格板。` : ' 风格板不占普通上传名额。'}`}
               </div>
             )}
             {uploadedReferenceLimitExceeded && (
@@ -2557,7 +2538,11 @@ export default function AmazonPlanner({
                     type="button"
                     onClick={() => void submitBatchPlans()}
                     disabled={
-                      isBatchSubmitting || isSubmitting || isLoadingProjectImages || batchSelectedIndexes.length === 0
+                      Boolean(sourceIssue) ||
+                      isBatchSubmitting ||
+                      isSubmitting ||
+                      isLoadingProjectImages ||
+                      batchSelectedIndexes.length === 0
                     }
                     className="ui-btn ui-btn-primary ui-btn-sm h-7 px-2.5 text-xs"
                   >
@@ -2665,7 +2650,11 @@ export default function AmazonPlanner({
                     type="button"
                     onClick={() => void submitBatchPlans()}
                     disabled={
-                      isBatchSubmitting || isSubmitting || isLoadingProjectImages || batchSelectedIndexes.length === 0
+                      Boolean(sourceIssue) ||
+                      isBatchSubmitting ||
+                      isSubmitting ||
+                      isLoadingProjectImages ||
+                      batchSelectedIndexes.length === 0
                     }
                     className="ui-btn ui-btn-primary ui-btn-sm h-7 px-2.5 text-xs"
                   >
@@ -2830,10 +2819,31 @@ export default function AmazonPlanner({
                   </div>
                 </div>
               )}
-              <details className="planner-disclosure mt-4">
-                <summary>原始英文提示词与负面词</summary>
-                <div data-selectable-text className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed">
-                  {activeVisiblePrompt}
+              <details ref={requestPreviewRef} className="planner-disclosure mt-4">
+                <summary>生图请求预览（含提示词与参考图顺序）</summary>
+                <div className="space-y-2 p-4 text-xs leading-relaxed">
+                  <p>
+                    生图模型：{imageGenerationProfile?.model || '未配置'} · 请求目标尺寸：{activeGenerationParams.size}
+                  </p>
+                  <p>
+                    附件：
+                    {activeRequest?.ids
+                      .map(
+                        (_id, index) => `${index + 1}. ${index === activeRequest.styleIndex ? '风格板' : '商品参考图'}`,
+                      )
+                      .join(' · ') || '无'}
+                  </p>
+                  <p className="text-[var(--text-3)]">部分服务商使用尺寸档位或比例，最终成图以服务商返回为准。</p>
+                  {(sourceIssue ||
+                    referenceLimitIssue ||
+                    (activeRequest?.needsStyle && !activeRequest.styleImageId)) && (
+                    <p role="status" className="text-[var(--danger)]">
+                      {sourceIssue || referenceLimitIssue || '尚未选择风格板，以下不是可直接提交的请求。'}
+                    </p>
+                  )}
+                  <pre data-selectable-text className="whitespace-pre-wrap break-words">
+                    {activeWirePrompt}
+                  </pre>
                 </div>
               </details>
               {actionSlot && (
@@ -2885,7 +2895,8 @@ export default function AmazonPlanner({
                           </span>
                         </div>
                         <div className="mt-1 text-[11px] text-[var(--text-3)]">
-                          {targetSize} / {generationParamLabel}
+                          {activeGenerationParams.size} / {activeGenerationParams.output_format.toUpperCase()} /{' '}
+                          {activeGenerationParams.quality}
                           {plannerMode === 'aplus' && selectedAPlusPlan
                             ? ` · 上传建议 ${selectedAPlusPlan.uploadSize}`
                             : ''}
@@ -2961,7 +2972,7 @@ export default function AmazonPlanner({
                       </button>
                       <button
                         type="button"
-                        onClick={() => applyPrompt()}
+                        onClick={previewActiveRequest}
                         disabled={actionDisabled}
                         className={`ui-btn ui-btn-sm h-9 px-2 ${
                           currentActionFilled
@@ -3042,7 +3053,7 @@ export default function AmazonPlanner({
               <div className="min-w-0">
                 <div className="truncate text-base font-bold text-[var(--text-1)]">{promptEditor.title}</div>
                 <div className="mt-0.5 text-xs text-[var(--text-3)]">
-                  保存后，“准备”和“提交生成”会优先使用这里的提示词。
+                  这里只编辑画面创意和可选负面词。站点、平台和风格板规则在提交时按当前设置生成。
                 </div>
               </div>
               <button
@@ -3067,7 +3078,9 @@ export default function AmazonPlanner({
             <div className="flex flex-wrap justify-end gap-2.5 border-t border-[var(--line)] bg-[var(--surface-inset)] px-5 py-3.5">
               <button
                 type="button"
-                onClick={() => setPromptEditor((current) => (current ? { ...current, value: activePrompt } : current))}
+                onClick={() =>
+                  setPromptEditor((current) => (current ? { ...current, value: activeCreativePrompt } : current))
+                }
                 className="ui-btn h-10"
               >
                 恢复 AI 提示词

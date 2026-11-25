@@ -24,6 +24,8 @@ import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { downloadImageIds } from '../lib/downloadImages'
 import { summarizeGenerationError } from '../lib/generationError'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
+import { addPromptRewriteGuard, appendOutputResolutionToPrompt, matchesSubmittedPrompt } from '../lib/imageApiShared'
+import { replaceImageMentionsForApi } from '../lib/promptImageMentions'
 import { canResumeTaskRecovery, isTaskReconnecting } from '../lib/taskRecovery'
 import { getAspectLabel, getTaskHistoryCategory, getWorkflowLabel } from '../lib/taskHistory'
 import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, LinkIcon, TrashIcon } from './icons'
@@ -198,11 +200,25 @@ export default function DetailModal() {
   const currentImageSize = currentOutputImageId ? imageSizes[currentOutputImageId] : ''
   const currentActualParams = currentOutputImageId ? task.actualParamsByImage?.[currentOutputImageId] : undefined
   const currentRevisedPrompt = currentOutputImageId ? task.revisedPromptByImage?.[currentOutputImageId]?.trim() : ''
-  const showRevisedPrompt = Boolean(currentRevisedPrompt && currentRevisedPrompt !== task.prompt.trim())
-  const codexCliPromptKey = getCodexCliPromptKey(settings)
-  const hasHandledPromptWarning = settings.codexCli || dismissedCodexCliPrompts.includes(codexCliPromptKey)
   const taskProvider = task.apiProvider
   const isOpenAiTask = (taskProvider ?? 'openai') === 'openai'
+  const originalPrompt = task.prompt.trim()
+  const sentPrompt =
+    isOpenAiTask && task.apiMode === 'responses'
+      ? addPromptRewriteGuard(
+          appendOutputResolutionToPrompt(
+            replaceImageMentionsForApi(task.prompt, task.inputImageIds.length),
+            task.params.size,
+          ),
+        ).trim()
+      : originalPrompt
+  const showRevisedPrompt = Boolean(
+    currentRevisedPrompt &&
+    currentRevisedPrompt !== originalPrompt &&
+    !matchesSubmittedPrompt(currentRevisedPrompt, sentPrompt),
+  )
+  const codexCliPromptKey = getCodexCliPromptKey(settings)
+  const hasHandledPromptWarning = settings.codexCli || dismissedCodexCliPrompts.includes(codexCliPromptKey)
   const showPromptWarning = Boolean(
     isOpenAiTask &&
     task.apiMode === 'responses' &&

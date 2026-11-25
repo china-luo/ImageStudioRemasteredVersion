@@ -220,19 +220,25 @@ const STYLE_REFERENCE_GUARD = [
   '- The last input image is a hidden style reference selected by the user.',
   '- Use it only for color palette, lighting, contrast, material finish, typography feel, and overall visual polish.',
   '- Do not copy any placeholder words, fixed layout, color swatch positions, exact composition, product arrangement, product count, props, scene, or information density from the style reference board.',
-  '- Follow the image task, layout density, and negative prompt sections for the actual content and arrangement.',
+  '- Follow the image task, layout density, and negative prompt sections for the actual content and arrangement, subject to mandatory image rules.',
+].join('\n')
+
+const AMAZON_MAIN_GENERATION_RULES = [
+  'Mandatory Amazon MAIN image rules (override conflicting creative or negative instructions):',
+  '- Use a seamless pure white background (RGB 255,255,255). Show the real sold product fully in frame, at approximately 85% frame coverage, with true color, proportions, quantity, and included accessories.',
+  '- Do not add any overlay text, headlines, logos, badges, watermarks, borders, props, extra items, or duplicate product views. Do not show packaging unless it is a product feature. Preserve real markings already present on the actual product.',
 ].join('\n')
 
 const AMAZON_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string> = {
   rich: [
     'Layout density:',
     '- Use a polished, information-rich Amazon gallery layout when the selected image type benefits from explanation.',
-    '- Build clear hierarchy with mobile-readable US-English copy, multiple well-spaced callouts, detail crops, comparison areas, measurement arrows, or use-case zones as appropriate.',
+    '- Build clear hierarchy with mobile-readable copy in the target marketplace language, multiple well-spaced callouts, detail crops, comparison areas, measurement arrows, or use-case zones as appropriate.',
     '- Keep the composition premium and organized; information-rich should still be readable, balanced, and uncluttered.',
   ].join('\n'),
   minimal: [
     'Layout density:',
-    '- Use a refined minimal Amazon layout with fewer callouts, generous balanced spacing, light icon or line treatment, and restrained US-English copy.',
+    '- Use a refined minimal Amazon layout with fewer callouts, generous balanced spacing, light icon or line treatment, and restrained copy in the target marketplace language.',
     '- Keep the product and one or two strongest messages dominant, with clean hierarchy and no clutter.',
   ].join('\n'),
 }
@@ -241,7 +247,7 @@ function getTiktokMainImageGenerationRules(slot?: string | null) {
   const normalizedSlot = slot?.trim().toUpperCase()
   const isFirstMainImage = normalizedSlot === 'TTM01'
   return [
-    'TikTok Shop US main image generation rules:',
+    'Mandatory TikTok Shop US main image generation rules (override conflicting creative or negative instructions):',
     '- Treat this as a TikTok Shop US main-image candidate, not an Amazon image and not a detail infographic.',
     '- Use square 1:1 commercial product photography with truthful product appearance, accurate color, material, quantity, scale, packaging, and included accessories.',
     isFirstMainImage
@@ -284,11 +290,11 @@ const TIKTOK_DETAIL_STYLE_DENSITY_GUIDES: Record<AmazonStyleDensityMode, string>
 }
 
 const STYLE_REFERENCE_BOARD_REQUIREMENTS = [
-  'Style reference board requirements:',
+  'Mandatory style reference board requirements (override conflicting creative or negative instructions, including bans on the required placeholder text, numbers, or icons):',
   '- Create a 1024x1024 visual style reference board, not a final Amazon product image.',
   '- The board must visibly include typography samples: a large headline, a smaller subheading, numeric callout samples, short label/caption samples, and icon/callout treatment.',
   '- Use generic English placeholder typography only, such as PRODUCT TITLE, KEY BENEFIT, DETAIL CALLOUT, 01, 02, 03. Do not use Chinese characters, real product claims, brand logos, Amazon marks, prices, promotions, QR codes, contact details, or external URLs.',
-  '- The board must visibly include color palette swatches, background/material texture samples, lighting/material samples, and a small product-finish or product-detail style sample derived from the uploaded product references.',
+  '- The board must visibly include color palette swatches, background/material texture samples, lighting/material samples, and a small material or product-detail sample.',
   '- Keep this as a reusable style guide image for later generations, with clear examples of font feeling, color tone, lighting, material finish, icon/callout language, and visual polish.',
 ].join('\n')
 
@@ -317,17 +323,23 @@ function formatPromptBlock(options: {
   seriesStyleGuide?: string | null
   additionalGuidance?: string | null
   styleReferenceAttached?: boolean
+  styleReferencePosition?: number | null
   styleDensityMode?: AmazonStyleDensityMode
   styleDensityGuides?: Record<AmazonStyleDensityMode, string>
+  mandatoryRules?: string
 }) {
   const styleDensityGuides = options.styleDensityGuides ?? AMAZON_STYLE_DENSITY_GUIDES
+  const styleGuard = options.styleReferencePosition
+    ? STYLE_REFERENCE_GUARD.replace('The last input image', `Input image ${options.styleReferencePosition}`)
+    : STYLE_REFERENCE_GUARD
   const sections = [
+    options.mandatoryRules,
     options.prompt.trim(),
     options.seriesStyleGuide?.trim() ? `Series style guide:\n${options.seriesStyleGuide.trim()}` : '',
     options.additionalGuidance?.trim() || '',
     options.styleReferenceAttached ? styleDensityGuides[options.styleDensityMode ?? 'rich'] : '',
     options.negativePrompt?.trim() ? `Negative prompt:\n${options.negativePrompt.trim()}` : '',
-    options.styleReferenceAttached ? STYLE_REFERENCE_GUARD : '',
+    options.styleReferenceAttached ? styleGuard : '',
   ].filter(Boolean)
 
   return sections.join('\n\n')
@@ -345,15 +357,21 @@ function getAmazonMarketplacePromptGuidance(marketplaceId?: AmazonMarketplaceId)
 
 export function buildAmazonPlanPrompt(
   plan: Pick<AmazonImagePlan, 'prompt' | 'negativePrompt'> & {
+    slot?: string | null
     seriesStyleGuide?: string | null
     styleReferenceAttached?: boolean
+    styleReferencePosition?: number | null
     styleDensityMode?: AmazonStyleDensityMode
     marketplaceId?: AmazonMarketplaceId
   },
 ): string {
+  const isMain = isAmazonListingMainSlot(plan.slot)
   return formatPromptBlock({
     ...plan,
-    additionalGuidance: getAmazonMarketplacePromptGuidance(plan.marketplaceId),
+    ...(isMain
+      ? { seriesStyleGuide: null, styleReferenceAttached: false, mandatoryRules: AMAZON_MAIN_GENERATION_RULES }
+      : {}),
+    additionalGuidance: isMain ? null : getAmazonMarketplacePromptGuidance(plan.marketplaceId),
   })
 }
 
@@ -362,21 +380,29 @@ export function buildTiktokPlanPrompt(
     slot?: string | null
     seriesStyleGuide?: string | null
     styleReferenceAttached?: boolean
+    styleReferencePosition?: number | null
     styleDensityMode?: AmazonStyleDensityMode
   },
 ): string {
   const isMainImageSlot = plan.slot?.trim().toUpperCase().startsWith('TTM')
   return formatPromptBlock({
     ...plan,
-    additionalGuidance: isMainImageSlot ? getTiktokMainImageGenerationRules(plan.slot) : null,
+    mandatoryRules: isMainImageSlot ? getTiktokMainImageGenerationRules(plan.slot) : undefined,
     styleDensityGuides: isMainImageSlot ? TIKTOK_MAIN_STYLE_DENSITY_GUIDES : TIKTOK_DETAIL_STYLE_DENSITY_GUIDES,
   })
 }
 
-export function buildAmazonStyleCandidatePrompt(candidate: AmazonStyleCandidate, seriesStyleGuide?: string | null) {
+export function buildAmazonStyleCandidatePrompt(
+  candidate: AmazonStyleCandidate,
+  seriesStyleGuide?: string | null,
+  hasProductReferences = false,
+) {
   return [
-    candidate.prompt.trim(),
     STYLE_REFERENCE_BOARD_REQUIREMENTS,
+    hasProductReferences
+      ? '- Derive the small material or product-detail sample from the uploaded product references.'
+      : '- No product image is attached. Use a generic material sample and do not invent a product detail or claim.',
+    candidate.prompt.trim(),
     seriesStyleGuide?.trim() ? `Series style guide:\n${seriesStyleGuide.trim()}` : '',
     candidate.negativePrompt.trim() ? `Negative prompt:\n${candidate.negativePrompt.trim()}` : '',
   ]
@@ -634,6 +660,7 @@ export function buildAmazonAPlusPlanPrompt(
   plan: Pick<AmazonAPlusPlan, 'prompt' | 'negativePrompt'> & {
     seriesStyleGuide?: string | null
     styleReferenceAttached?: boolean
+    styleReferencePosition?: number | null
     styleDensityMode?: AmazonStyleDensityMode
     marketplaceId?: AmazonMarketplaceId
   },

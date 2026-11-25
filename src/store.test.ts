@@ -954,6 +954,27 @@ describe('mask draft lifecycle in store actions', () => {
     expect(state.pendingTaskCategory).toBeNull()
   })
 
+  it('does not replace the active draft with a partial set of reused references', async () => {
+    useStore.setState({ prompt: 'Current draft', inputImages: [imageA] })
+    await reuseConfig(task({ prompt: 'Old prompt referring to image 1', inputImageIds: ['missing-reuse-image'] }))
+    expect(useStore.getState().prompt).toBe('Current draft')
+    expect(useStore.getState().inputImages).toEqual([imageA])
+    expect(useStore.getState().showToast).toHaveBeenCalledWith(expect.stringContaining('参考图缺失'), 'error')
+  })
+
+  it('keeps a non-final style board in the same position when reusing a task', async () => {
+    await putImage(imageA)
+    await putImage(imageB)
+    await reuseConfig(
+      task({
+        prompt: 'Input image 1 is the style board',
+        inputImageIds: [imageA.id, imageB.id],
+        category: { workflow: 'amazon-listing', amazonSlot: 'PT01', styleReferenceImageId: imageA.id },
+      }),
+    )
+    expect(useStore.getState().inputImages.map(({ id }) => id)).toEqual([imageA.id, imageB.id])
+  })
+
   it('preserves edit-output Listing category on the next submit even after entering a new prompt', async () => {
     const outputImage = { id: 'listing-output-image', dataUrl: 'data:image/png;base64,listing-output' }
     await clearImages()
